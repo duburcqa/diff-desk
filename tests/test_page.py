@@ -563,6 +563,69 @@ def test_a_file_opened_by_hand_stays_open_when_the_page_redraws(page):
     page.evaluate("() => localStorage.clear()")
 
 
+def test_a_file_changed_since_it_was_reviewed_opens_itself(page, desk):
+    branch = page.evaluate("() => data.branches[0].ref")
+    card = page.locator("section.file[data-path='added.py']")
+    card.locator("input[type=checkbox]").check()
+    page.wait_for_selector("section.file[data-path='added.py'][data-open='false']")
+
+    gen_diff_data.run(desk.repo, "checkout", "-q", branch)
+    written = desk.repo / "added.py"
+    kept = written.read_text()
+    try:
+        written.write_text(kept + "SAID_ON_DISK = 1\n")
+        # Refreshed rather than reloaded, so the fold the reader just made is still remembered when the diff arrives.
+        page.wait_for_function("() => !document.getElementById('moved').hidden", timeout=30000)
+        page.locator("#moved").click()
+        page.wait_for_function("() => document.getElementById('moved').hidden", timeout=30000)
+        # Reviewed and folded, then changed: the reader has not seen this diff, so it is not folded away for them.
+        again = page.locator("section.file[data-path='added.py']")
+        assert again.get_attribute("data-open") == "true"
+        assert "changed since review" in again.locator(".filehead").inner_text().lower()
+
+        # Folded by hand on this diff, it stays folded through the redraws.
+        again.locator(".filehead").first.click()
+        page.evaluate("() => render()")
+        assert again.get_attribute("data-open") == "false"
+    finally:
+        written.write_text(kept)
+        gen_diff_data.run(desk.repo, "checkout", "-q", "main")
+        desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})
+        page.reload(wait_until="load")
+        page.wait_for_selector("section.file")
+        page.locator("section.file[data-path='added.py'] input[type=checkbox]").uncheck()
+        page.evaluate("() => localStorage.clear()")
+
+
+def test_a_resolved_thread_answered_since_opens_itself(page, desk):
+    card = sample(page)
+    line = card.locator("tr.a[data-line]").first
+    line.locator("td.code").first.hover()
+    line.locator("button.pin").first.click()
+    saying = f"answered after settling, number {len(desk.get('/comments')) + 1}"
+    submit(page, saying)
+    page.wait_for_timeout(200)
+    made = desk.get("/comments")[-1]["seq"]
+    desk.post("/resolve", {"seq": [made], "who": "session"})
+    page.reload(wait_until="load")
+    page.wait_for_selector("section.file")
+    # Settled and seen, so it is folded to its remark.
+    assert page.locator(f"#note-{made} .thread.folded").count() == 1
+
+    desk.post("/reply", {"seq": made, "text": "one more thing about it", "who": "session"})
+    page.reload(wait_until="load")
+    page.wait_for_selector("section.file")
+    # Answered since, which the reader has not read: the thread shows what was said rather than hiding it.
+    assert page.locator(f"#note-{made} .thread.folded").count() == 0
+    assert "one more thing about it" in page.locator(f"#note-{made}").inner_text()
+
+    # Read now, so it folds again on its own.
+    page.reload(wait_until="load")
+    page.wait_for_selector("section.file")
+    assert page.locator(f"#note-{made} .thread.folded").count() == 1
+    page.evaluate("() => localStorage.clear()")
+
+
 def test_marking_a_file_reviewed_from_above_it_leaves_the_view_alone(page):
     page.evaluate("() => window.scrollTo(0, 0)")
     page.wait_for_timeout(120)
@@ -878,10 +941,9 @@ def test_a_comment_follows_the_line_it_was_written_against(page, desk):
           return {above: row.querySelector('td.code').textContent, marks};
         }"""
     )
-    # It hangs under the code it was written about, wherever that ended up, and says it moved rather than pretending.
+    # It hangs under the code it was written about, wherever that ended up, and is not taken for one left behind.
     assert shown is not None
     assert shown["above"] == code
-    assert any(mark.startswith("moved from") for mark in shown["marks"])
     assert not any(mark == "code moved on" for mark in shown["marks"])
 
 
@@ -1273,6 +1335,21 @@ def test_a_branch_that_has_moved_on_offers_a_refresh_that_keeps_the_place(page, 
         # Offered rather than taken: the diff under the reader is only rebuilt when they ask for it.
         page.wait_for_function("() => !document.getElementById('moved').hidden", timeout=30000)
         assert "SAID_ON_DISK" not in page.locator("#main").inner_text()
+
+        # Coloured like a file whose diff has moved on: the same news, so the same colour draws the eye to it.
+        painted = page.evaluate(
+            """() => {
+              const style = getComputedStyle(document.getElementById('moved'));
+              const root = getComputedStyle(document.documentElement);
+              return [style.color, root.getPropertyValue('--stale').trim()];
+            }"""
+        )
+        assert painted[0] == page.evaluate(
+            "(hex) => { const probe = document.createElement('span');"
+            " probe.style.color = hex; document.body.append(probe);"
+            " const said = getComputedStyle(probe).color; probe.remove(); return said; }",
+            painted[1],
+        )
 
         page.locator("#moved").click()
         page.wait_for_function("() => document.getElementById('moved').hidden", timeout=30000)

@@ -79,6 +79,9 @@ A comment remembers the line it was written against, so when the diff moves unde
 follows that line to wherever it went and says "moved from L<n>" rather than sitting on a line number that now holds
 something else. A comment whose line is no longer in the diff at all is **kept**, marked "code moved on", and shown at
 the end of the file it belonged to. Neither is ever resolved or deleted on your behalf.
+- **What you have not seen does not stay folded.** A file whose diff has changed since you marked it reviewed opens
+  itself, and so does a resolved thread that has been answered since you last read it - folding again once you have.
+  A fold you make by hand is remembered against the diff you made it on, so it holds until that diff moves.
 - **The branch is watched while you read it.** A reload collects the diffs again, and a page left open offers a
   **Refresh** once what it was built from has moved on - a commit, a fixup, work saved on disk. It is offered, never
   taken: rebuilding the diff under you would move the ground you are on, and taking it keeps the branch and commit you

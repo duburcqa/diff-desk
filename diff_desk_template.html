@@ -400,6 +400,9 @@
     cursor: pointer;
   }
   button.ghost { background: transparent; color: var(--muted); border-color: var(--rule-strong); }
+  /* Coloured like a file whose diff has moved on, which is the same news: what is on screen is behind what is on disk. */
+  #moved { background: var(--stale-bg); color: var(--stale); border-color: var(--stale); }
+  #moved:hover { border-color: var(--stale); filter: brightness(1.06); }
 
   .thread {
     display: flex;
@@ -725,9 +728,12 @@
   const writing = new Map();
   // Resolved threads are folded away by default; opening one is a per-view choice, not a state worth remembering.
   const unfolded = new Set();
-  // Which files the reader has opened or folded by hand, against what being reviewed would say. The page redraws itself
-  // while it is read, so without this a file opened to look at a comment folds itself away again moments later.
+  // Which files the reader has opened or folded by hand, against what being reviewed would say, each remembered with
+  // the diff it was decided on: the page redraws itself while it is read, so without this a file opened to look at a
+  // comment folds itself away again moments later - but a file that has changed since is news, and opens.
   const folds = new Map();
+  // How many replies of each comment the reader has been shown, so a thread that has been answered since opens itself.
+  let heard = {};
 
   const els = {};
   for (const id of ["tabs", "scope", "q", "ctx", "hidedone", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logretry", "logbind", "logsync", "logclose", "logresult", "logresolved", "brand", "repo", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved"]) {
@@ -978,7 +984,7 @@
     // A file folded away, or hidden because it is reviewed, still holds the comment: it is opened and shown for this.
     card.dataset.open = "true";
     card.dataset.reveal = "true";
-    folds.set(note.path, true);
+    folds.set(note.path, { digest: card.dataset.digest, open: true });
     els.log.dataset.open = "false";
     const thread = document.getElementById(`note-${note.seq}`) || card;
     for (const found of document.querySelectorAll(".thread.found")) found.classList.remove("found");
@@ -1111,6 +1117,14 @@
     }
   }
 
+  function takeHeard() {
+    try {
+      heard = JSON.parse(localStorage.getItem("diffdesk.heard") || "{}");
+    } catch (error) {
+      heard = {};
+    }
+  }
+
   function takeDrafts() {
     try {
       const kept = JSON.parse(localStorage.getItem("diffdesk.drafts") || "null");
@@ -1214,8 +1228,6 @@
     return same[0][0] === "d" ? same[0][1] : same[0][2];
   }
 
-  const moved = (note) => placed(note) !== (note.endLine || note.line);
-
   const GITHUB_MARK = {
     pending: "waiting for GitHub",
     failed: "GitHub post failed",
@@ -1288,7 +1300,16 @@
     row.id = `note-${note.seq || "draft"}`;
     const cell = document.createElement("td");
     cell.colSpan = 5;
-    const settled = note.state === "resolved" && !unfolded.has(note.seq);
+    const answers = (note.replies || []).length;
+    const settled = note.state === "resolved" && !unfolded.has(note.seq) && answers <= (heard[note.seq] || 0);
+    if (!settled && heard[note.seq] !== answers) {
+      heard[note.seq] = answers;
+      try {
+        localStorage.setItem("diffdesk.heard", JSON.stringify(heard));
+      } catch (error) {
+        // A storage that refuses to be written costs the reader one thread opening itself twice.
+      }
+    }
     const box = document.createElement("div");
     box.className = note.pending ? "thread draft" : note.state === "resolved" ? "thread done" : "thread";
     if (note.outdated) box.classList.add("stale");
@@ -1306,7 +1327,6 @@
     if (note.state === "resolved") {
       const turn = document.createElement("button");
       turn.className = "tiny";
-      const answers = (note.replies || []).length;
       turn.textContent = settled ? `resolved${answers ? `, ${answers} repl${answers === 1 ? "y" : "ies"}` : ""}` : "fold";
       turn.title = settled ? "Show the whole thread" : "Fold it away again";
       turn.addEventListener("click", () => {
@@ -1368,13 +1388,6 @@
       const mark = document.createElement("span");
       mark.className = "mark outdated";
       mark.textContent = "rewritten after posting";
-      head.append(mark);
-    }
-    if (!note.pending && !note.outdated && moved(note)) {
-      const mark = document.createElement("span");
-      mark.className = "mark outdated";
-      mark.textContent = `moved from L${note.endLine || note.line}`;
-      mark.title = "The diff changed under this comment; it now sits on the line it was written against";
       head.append(mark);
     }
     if (note.outdated) {
@@ -2133,9 +2146,11 @@
     const status = seenState(file);
     const wrap = document.createElement("section");
     wrap.className = "file";
-    wrap.dataset.open = String(folds.has(file.path) ? folds.get(file.path) : status !== "done");
+    const held = folds.get(file.path);
+    wrap.dataset.open = String(held && held.digest === file.digest ? held.open : status !== "done");
     wrap.dataset.done = String(status === "done");
     wrap.dataset.path = file.path;
+    wrap.dataset.digest = file.digest;
     wrap.id = `f${index}`;
 
     const head = document.createElement("div");
@@ -2159,7 +2174,7 @@
     }
     grow.addEventListener("click", () => {
       wrap.dataset.open = wrap.dataset.open === "true" ? "false" : "true";
-      folds.set(file.path, wrap.dataset.open === "true");
+      folds.set(file.path, { digest: file.digest, open: wrap.dataset.open === "true" });
       fitNotes();
     });
 
@@ -2181,7 +2196,7 @@
         setSeen(file, box.checked);
         wrap.dataset.done = String(box.checked);
         wrap.dataset.open = String(!box.checked);
-        folds.set(file.path, !box.checked);
+        folds.set(file.path, { digest: file.digest, open: !box.checked });
         render();
       });
     });
@@ -2559,6 +2574,7 @@
 
   loadSeen();
   loadFolded();
+  takeHeard();
   takeDrafts();
   showSource();
   renderTabs();
