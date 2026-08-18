@@ -1706,14 +1706,17 @@ def test_a_sync_that_could_not_happen_says_so_where_the_reader_is(page, desk):
         page.wait_for_selector("#log[data-open='true']")
         page.locator("#logsync").click()
         page.wait_for_selector("#toast[data-open='true']", timeout=30000)
-        said = page.locator("#toastsaid").inner_text()
-        assert "Could not sync" in said
-        assert "401" in said
+        assert page.locator("#toastwhere").inner_text() == "PR #7"
+        assert page.locator("#toastmark").inner_text() == "sync failed"
+        assert "401" in page.locator("#toastsaid").inner_text()
+        # Said on one line, so the whole of the reason is held on the row for a window too narrow to show it.
+        assert "401" in page.locator("#toast").get_attribute("title")
+        assert page.locator("#toast").bounding_box()["height"] < 40
 
         # It stays until dismissed, since a reason worth reading is worth reading at leisure.
         page.locator("#logclose").click()
         assert page.locator("#toast").get_attribute("data-open") == "true"
-        page.locator("#toastclose").click()
+        page.locator("#toast").click()
         assert page.locator("#toast").get_attribute("data-open") == "false"
     finally:
         gen_diff_data.run(desk.repo, "remote", "remove", "origin")

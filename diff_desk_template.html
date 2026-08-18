@@ -509,34 +509,6 @@
   .thread .drop { margin-left: auto; border: 0; background: transparent; color: var(--faint); font: inherit; font-size: 15px; line-height: 1; cursor: pointer; }
   .note .drop { margin-left: auto; border: 0; background: transparent; color: var(--faint); font: inherit; font-size: 15px; line-height: 1; cursor: pointer; }
 
-  /* News from GitHub reaches the reader wherever they are, since the panel it happened in may well be closed. */
-  .toast {
-    position: fixed;
-    left: 50%;
-    bottom: 18px;
-    z-index: 40;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    max-width: min(720px, calc(100vw - 40px));
-    padding: 10px 12px;
-    border: 1px solid var(--del-ink);
-    border-radius: 8px;
-    background: var(--surface);
-    box-shadow: 0 8px 24px rgb(0 0 0 / 22%);
-    color: var(--del-ink);
-    font-size: 12.5px;
-    transform: translate(-50%, 140%);
-    transition: transform 0.22s ease, opacity 0.22s ease;
-    opacity: 0;
-    pointer-events: none;
-  }
-  .toast[data-open="true"] { transform: translate(-50%, 0); opacity: 1; pointer-events: auto; }
-  .toast .said { overflow-wrap: anywhere; }
-  @media (prefers-reduced-motion: reduce) {
-    .toast { transition: none; }
-  }
-
   .log {
     position: fixed;
     right: 20px;
@@ -590,6 +562,27 @@
   .mark.open, .mark.none { color: var(--muted); background: var(--surface); border: 1px solid var(--rule); }
   button.mark { font: inherit; font-size: 10.5px; cursor: pointer; border: 1px solid transparent; }
   button.mark.none { border-color: var(--rule); }
+
+  /* News from GitHub reaches the reader wherever they are, since the panel it happened in may well be closed. Read as
+     one of that panel's rows, so what it adds is only what makes it float, and a press anywhere on it puts it away. */
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: 18px;
+    z-index: 40;
+    max-width: min(720px, calc(100vw - 40px));
+    border-color: var(--del-ink);
+    background: var(--surface);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 22%);
+    transform: translate(-50%, 140%);
+    transition: transform 0.22s ease, opacity 0.22s ease;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .toast[data-open="true"] { transform: translate(-50%, 0); opacity: 1; pointer-events: auto; }
+  @media (prefers-reduced-motion: reduce) {
+    .toast { transition: none; }
+  }
   button.mark:hover { color: var(--accent); border-color: var(--accent); }
 
   .tray {
@@ -729,9 +722,10 @@
     </div>
 </div>
 
-<div class="toast" id="toast" data-open="false" role="status" aria-live="polite">
+<div class="logrow toast" id="toast" data-open="false" role="status" aria-live="polite">
+  <b id="toastwhere"></b>
   <span class="said" id="toastsaid"></span>
-  <button class="ghost" id="toastclose">Dismiss</button>
+  <span class="mark failed" id="toastmark"></span>
 </div>
 
 <div class="log" id="log" data-open="false">
@@ -801,7 +795,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "ctx", "hidedone", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logretry", "logbind", "logsync", "logclose", "logresult", "logresolved", "brand", "repo", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "toast", "toastsaid", "toastclose", "logdot"]) {
+  for (const id of ["tabs", "scope", "q", "ctx", "hidedone", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logretry", "logbind", "logsync", "logclose", "logresult", "logresolved", "brand", "repo", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -1141,10 +1135,14 @@
     return item;
   }
 
-  function announce(said) {
+  function announce(deed, request, reason) {
     // Said where the reader is looking, since what went wrong with GitHub is worth more than a line in a panel they may
-    // have closed. It stays until dismissed: a reason worth reading is worth reading at leisure.
-    els.toastsaid.textContent = said;
+    // have closed. It stays until dismissed: a reason worth reading is worth reading at leisure, and the whole of it is
+    // held on the row for a reader whose window is too narrow for the line.
+    els.toastwhere.textContent = `PR #${request.number}`;
+    els.toastsaid.textContent = reason;
+    els.toastmark.textContent = `${deed} failed`;
+    els.toast.title = reason;
     els.toast.dataset.open = "true";
   }
 
@@ -1159,7 +1157,7 @@
         ? `Sent ${outcome.sent}, brought back ${outcome.brought}, closed ${outcome.closed} here`
         : `Could not sync: ${outcome.error || "GitHub unreachable"}`;
     }
-    if (!outcome.ok) announce(`Could not sync with PR #${request.number}: ${outcome.error || "GitHub unreachable"}`);
+    if (!outcome.ok) announce("sync", request, outcome.error || "GitHub unreachable");
     await loadNotes();
     drawLog();
     render();
@@ -1176,7 +1174,7 @@
         : `Could not resolve there: ${outcome.error || "GitHub unreachable"}`;
     }
     if (!outcome.ok) {
-      announce(`Could not resolve on PR #${request.number}: ${outcome.error || "GitHub unreachable"}`);
+      announce("resolve", request, outcome.error || "GitHub unreachable");
     }
     await loadNotes();
     drawLog();
@@ -1196,7 +1194,7 @@
       ? `Sent ${outcome.sent} to PR #${request.number}`
       : `Still waiting: ${outcome.error || "GitHub unreachable"}`;
     if (!outcome.ok) {
-      announce(`Could not send to PR #${request.number}: ${outcome.error || "GitHub unreachable"}`);
+      announce("send", request, outcome.error || "GitHub unreachable");
     }
     await loadNotes();
     drawLog();
@@ -2641,7 +2639,7 @@
   els.srcdir.addEventListener("change", loadRefs);
   els.srcfilter.addEventListener("input", drawRefs);
   grows(els.traynote);
-  els.toastclose.addEventListener("click", () => {
+  els.toast.addEventListener("click", () => {
     els.toast.dataset.open = "false";
   });
   els.goto.addEventListener("keydown", (event) => {
@@ -2718,7 +2716,10 @@
         render();
       }
     }
-    if (event.key === "Escape") clearSel();
+    if (event.key === "Escape") {
+      els.toast.dataset.open = "false";
+      clearSel();
+    }
   });
 
   // Resolutions are posted by whoever is working through the comments, so an idle page picks them up on its own.
