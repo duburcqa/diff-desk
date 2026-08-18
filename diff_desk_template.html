@@ -1002,6 +1002,20 @@
 
   const withResolved = () => els.logresolved.checked;
 
+  // The newest comment this page knows of, which is what a fold decision is taken against.
+  const latest = () => Math.max(0, ...notes.sent.map((note) => note.seq));
+
+  function markRead(path) {
+    for (const note of mine()) {
+      if (note.path === path) heard[note.seq] = (note.replies || []).length;
+    }
+    try {
+      localStorage.setItem("diffdesk.heard", JSON.stringify(heard));
+    } catch (error) {
+      // A storage that refuses to be written costs the reader one file opening itself once.
+    }
+  }
+
   function drawLog() {
     const keys = present();
     const all = mine();
@@ -1065,7 +1079,7 @@
     // A file folded away, or hidden because it is reviewed, still holds the comment: it is opened and shown for this.
     card.dataset.open = "true";
     card.dataset.reveal = "true";
-    folds.set(note.path, { digest: card.dataset.digest, open: true });
+    folds.set(note.path, { digest: card.dataset.digest, open: true, upTo: latest() });
     els.log.dataset.open = "false";
     const thread = document.getElementById(`note-${note.seq}`) || card;
     for (const found of document.querySelectorAll(".thread.found")) found.classList.remove("found");
@@ -1189,6 +1203,30 @@
     render();
   }
 
+  // Watching the threads on screen, so a reply counts as read when it has been in front of the reader.
+  const noticed = new IntersectionObserver(
+    (entries) => {
+      let learned = false;
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const seq = Number(entry.target.dataset.seq);
+        const answers = Number(entry.target.dataset.answers);
+        if (heard[seq] !== answers) {
+          heard[seq] = answers;
+          learned = true;
+        }
+        noticed.unobserve(entry.target);
+      }
+      if (!learned) return;
+      try {
+        localStorage.setItem("diffdesk.heard", JSON.stringify(heard));
+      } catch (error) {
+        // A storage that refuses to be written costs the reader one thread opening itself twice.
+      }
+    },
+    { threshold: 0.4 },
+  );
+
   function grows(box) {
     // A box the size of what has been written into it: measured after it is in the page, since a box not yet there has
     // nothing to measure, and bounded so a long remark scrolls inside it rather than pushing the diff off screen.
@@ -1265,6 +1303,15 @@
     }
     let recorded = null;
     if (notes.live) recorded = await post("comments", { comments: batch, github: bound });
+    // Written by the reader, so read by the reader: what shows itself later is what somebody else said.
+    if (recorded && recorded.ok) {
+      for (const seq of recorded.seqs) heard[seq] = 0;
+      try {
+        localStorage.setItem("diffdesk.heard", JSON.stringify(heard));
+      } catch (error) {
+        // A storage that refuses to be written costs the reader one file opening itself once.
+      }
+    }
     if (bound && recorded && recorded.ok) {
       els.trayresult.textContent = `Posting ${batch.length} to PR #${branch().pr.number}...`;
       const outcome = await post("publish", { ...where(), summary, seq: recorded.seqs });
@@ -1398,16 +1445,15 @@
     // did, is news, and news is read rather than outlined.
     const read = note.seq in heard && answers <= heard[note.seq];
     const settled = note.state === "resolved" && !unfolded.has(note.seq) && read;
-    if (!settled && heard[note.seq] !== answers) {
-      heard[note.seq] = answers;
-      try {
-        localStorage.setItem("diffdesk.heard", JSON.stringify(heard));
-      } catch (error) {
-        // A storage that refuses to be written costs the reader one thread opening itself twice.
-      }
-    }
     const box = document.createElement("div");
     box.className = note.pending ? "thread draft" : note.state === "resolved" ? "thread done" : "thread";
+    // What the reader has been shown is what has been on their screen: rendering it is not reading it, and a thread
+    // built inside a folded file or below the fold would otherwise count as read without ever being seen.
+    if (!note.pending && !settled) {
+      box.dataset.seq = note.seq;
+      box.dataset.answers = answers;
+      noticed.observe(box);
+    }
     if (note.outdated) box.classList.add("stale");
     if (settled) box.classList.add("folded");
 
@@ -2254,9 +2300,10 @@
     const wrap = document.createElement("section");
     wrap.className = "file";
     const held = folds.get(file.path);
-    // A comment the reader has never been shown outranks both: a file folded by hand, or marked reviewed, would
-    // otherwise hide a remark that arrived after it was read.
-    const unread = mine().some((note) => note.path === file.path && !(note.seq in heard));
+    // A comment that arrived after the reader put the file down outranks the fold: it is news, and news is shown. One
+    // they had already left unread does not, or saying "I am done with this file" would never hold.
+    const since = held ? held.upTo : -1;
+    const unread = mine().some((note) => note.path === file.path && note.seq > since && !(note.seq in heard));
     const shown = held && held.digest === file.digest ? held.open : status !== "done";
     wrap.dataset.open = String(unread || shown);
     wrap.dataset.done = String(status === "done");
@@ -2285,7 +2332,7 @@
     }
     grow.addEventListener("click", () => {
       wrap.dataset.open = wrap.dataset.open === "true" ? "false" : "true";
-      folds.set(file.path, { digest: file.digest, open: wrap.dataset.open === "true" });
+      folds.set(file.path, { digest: file.digest, open: wrap.dataset.open === "true", upTo: latest() });
       fitNotes();
     });
 
@@ -2305,9 +2352,12 @@
       const anchor = box.checked && document.body.classList.contains("hide-done") ? following : file;
       holdPlace(anchor && anchor.path, () => {
         setSeen(file, box.checked);
+        // Marking a file reviewed says its comments have been read as well, which is what keeps it folded through a
+        // reload - and leaves it to whatever is said afterwards to open it again.
+        if (box.checked) markRead(file.path);
         wrap.dataset.done = String(box.checked);
         wrap.dataset.open = String(!box.checked);
-        folds.set(file.path, { digest: file.digest, open: !box.checked });
+        folds.set(file.path, { digest: file.digest, open: !box.checked, upTo: latest() });
         render();
       });
     });

@@ -45,6 +45,9 @@ On the page:
 - **A file can be commented on as a whole**, from its header, for a remark that belongs to no line of it. It is
   recorded, threaded, replied to and resolved like any other, reads as "the file" wherever a line range would be, and
   reaches a pull request as a review comment naming the file with no line beside it.
+- **A session hears about replies, not only comments.** The log carries an event cursor that every write bumps, and
+  `desk.py watch` follows it: an answer written on a comment read long ago wakes the session exactly as a new comment
+  does. Each event says which side made it, so a session never mistakes its own reply for news.
 - **Every comment is a thread.** Either side can reply, and either side can resolve or reopen it. Resolving folds the
   thread to its remark alone and keeps every reply behind one click, so closing a comment discards nothing.
 - **A comment can be deleted**, whole or down to its last reply, from the `x` on the thread and the one on that reply.
@@ -89,7 +92,8 @@ the end of the file it belonged to. Neither is ever resolved or deleted on your 
   state they were left in - and a URL ending in `#58` lands on it the same way.
 - **What you have not seen does not stay folded.** A file whose diff has changed since you marked it reviewed opens
   itself, so does one holding a comment you have never been shown, and so does a resolved thread answered since you
-  last read it - each folding again once you have seen it.
+  last read it. What counts as seen is what has been on your screen: a thread built inside a folded file or below the
+  fold is not read, so it keeps showing itself until you have actually looked at it.
   A fold you make by hand is remembered against the diff you made it on, so it holds until that diff moves.
 - **The branch is watched while you read it.** A reload collects the diffs again, and a page left open offers a
   **Refresh** once what it was built from has moved on - a commit, a fixup, work saved on disk. It is offered, never

@@ -71,6 +71,14 @@ def sample(page):
     return page.locator("section.file").filter(has=page.locator("text=sample.py")).first
 
 
+def read(page, seq):
+    """Bring a thread in front of the reader and redraw, which is what makes its replies count as read."""
+    page.evaluate("(seq) => document.getElementById(`note-${seq}`).scrollIntoView({block: 'center'})", seq)
+    page.wait_for_timeout(400)
+    page.evaluate("() => render()")
+    page.wait_for_timeout(150)
+
+
 def wide(page):
     """The card of the file no test comments on, which is where a drag finds rows with nothing hanging between them."""
     return page.locator("section.file[data-path='wide.py']")
@@ -332,6 +340,11 @@ def test_a_folded_thread_says_what_it_is_about_even_when_it_is_only_code(page, d
     )
     desk.post("/resolve", {"seq": [made["seq"]], "who": "session"})
     page.reload(wait_until="load")
+    # Settled but never seen, so it shows itself first; read once it folds to its remark, which is what is checked.
+    page.wait_for_selector(f"#note-{made['seq']} .thread")
+    page.evaluate("(seq) => document.getElementById(`note-${seq}`).scrollIntoView({block: 'center'})", made["seq"])
+    page.wait_for_timeout(400)
+    page.evaluate("() => render()")
     page.wait_for_selector(f"#note-{made['seq']} .thread.folded")
     said = page.locator(f"#note-{made['seq']} .said").first
     # Folded to one line, and a comment made only of code still says what it is about rather than showing nothing.
@@ -618,7 +631,8 @@ def test_a_resolved_thread_answered_since_opens_itself(page, desk):
     desk.post("/resolve", {"seq": [made], "who": "session"})
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
-    # Settled and seen, so it is folded to its remark.
+    # Settled, and read once it has been in front of the reader: then it folds to its remark.
+    read(page, made)
     assert page.locator(f"#note-{made} .thread.folded").count() == 1
 
     desk.post("/reply", {"seq": made, "text": "one more thing about it", "who": "session"})
@@ -628,9 +642,8 @@ def test_a_resolved_thread_answered_since_opens_itself(page, desk):
     assert page.locator(f"#note-{made} .thread.folded").count() == 0
     assert "one more thing about it" in page.locator(f"#note-{made}").inner_text()
 
-    # Read now, so it folds again on its own.
-    page.reload(wait_until="load")
-    page.wait_for_selector("section.file")
+    # Read now, so it folds again.
+    read(page, made)
     assert page.locator(f"#note-{made} .thread.folded").count() == 1
     page.evaluate("() => localStorage.clear()")
 
@@ -1709,3 +1722,45 @@ def test_a_sync_that_could_not_happen_says_so_where_the_reader_is(page, desk):
         page.reload(wait_until="load")
         page.wait_for_selector("section.file")
         page.evaluate("() => localStorage.clear()")
+
+
+def test_a_reply_below_the_fold_is_not_taken_for_read(page, desk):
+    card = sample(page)
+    line = card.locator("tr.a[data-line]").first
+    line.locator("td.code").first.hover()
+    line.locator("button.pin").first.click()
+    saying = f"answered out of sight, number {len(desk.get('/comments')) + 1}"
+    submit(page, saying)
+    page.wait_for_timeout(200)
+    made = desk.get("/comments")[-1]["seq"]
+    desk.post("/resolve", {"seq": [made], "answer": "settled it", "who": "session"})
+    page.evaluate("() => loadNotes()")
+    page.wait_for_timeout(200)
+
+    # Redrawn twice with the thread out of the reader's view: building it is what used to count as reading it, so the
+    # second redraw is where a thread wrongly marked read folds itself away.
+    away = page.evaluate(
+        """async (seq) => {
+          const seen = [];
+          for (let visit = 0; visit < 2; visit += 1) {
+            window.scrollTo(0, 0);
+            document.getElementById(`note-${seq}`).scrollIntoView({block: 'center'});
+            window.scrollBy(0, window.innerHeight * 3);
+            render();
+            await new Promise((done) => setTimeout(done, 250));
+            seen.push(Boolean(document.querySelector(`#note-${seq} .thread.folded`)));
+          }
+          return seen;
+        }""",
+        made,
+    )
+    assert away == [False, False]
+    assert "settled it" in page.locator(f"#note-{made}").inner_text()
+
+    # Brought in front of the reader, it counts as read and folds away on the next redraw.
+    page.evaluate("(seq) => document.getElementById(`note-${seq}`).scrollIntoView({block: 'center'})", made)
+    page.wait_for_timeout(400)
+    page.evaluate("() => render()")
+    page.wait_for_timeout(150)
+    assert page.locator(f"#note-{made} .thread.folded").count() == 1
+    page.evaluate("() => localStorage.clear()")
