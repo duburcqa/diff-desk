@@ -1344,3 +1344,59 @@ def test_a_reply_being_written_survives_the_page_redrawing_itself(page, desk):
     assert page.locator(f"#note-{made} textarea").first.input_value() == ""
     assert "all of what I mean" in thread.inner_text()
     page.evaluate("() => localStorage.clear()")
+
+
+def test_a_box_takes_the_height_of_what_is_written_into_it(page, desk):
+    card = sample(page)
+    line = card.locator("tr.a[data-line]").first
+    line.locator("td.code").first.hover()
+    line.locator("button.pin").first.click()
+    box = page.locator("tr[data-composer='true'] textarea")
+    page.wait_for_timeout(150)
+    one = box.bounding_box()["height"]
+    box.fill("\n".join(f"line {index} of a long remark" for index in range(8)))
+    page.wait_for_timeout(150)
+    many = box.bounding_box()["height"]
+    # Grown to what it holds, and back down when it holds less.
+    assert many > one
+    box.fill("one line again")
+    page.wait_for_timeout(150)
+    assert abs(box.bounding_box()["height"] - one) < 2
+
+    # Never past what leaves the diff readable, whatever is pasted into it.
+    box.fill("\n".join(f"line {index} of something very long" for index in range(200)))
+    page.wait_for_timeout(150)
+    assert box.bounding_box()["height"] <= page.evaluate("() => window.innerHeight") * 0.45 + 2
+    page.keyboard.press("Escape")
+    page.evaluate("() => localStorage.clear()")
+
+
+def test_a_reply_quoting_a_passage_shows_it_as_a_quote(page, desk):
+    card = sample(page)
+    line = card.locator("tr.a[data-line]").first
+    line.locator("td.code").first.hover()
+    line.locator("button.pin").first.click()
+    saying = f"quoted back at me, number {len(desk.get('/comments')) + 1}"
+    submit(page, saying)
+    page.wait_for_timeout(200)
+    made = desk.get("/comments")[-1]["seq"]
+    desk.post(
+        "/reply",
+        {
+            "seq": made,
+            "text": "> the passage being answered\n> and the rest of it\n\nwhat I make of it, with `code` in it",
+            "who": "session",
+        },
+    )
+    page.reload(wait_until="load")
+    page.wait_for_selector("section.file")
+
+    quoted = page.locator(f"#note-{made} .line.reply blockquote")
+    assert quoted.count() == 1
+    # One passage, not one quote per line, and the marks that made it are gone.
+    assert quoted.inner_text() == "the passage being answered\nand the rest of it"
+    answer = page.locator(f"#note-{made} .line.reply .said").first.inner_text()
+    assert "what I make of it" in answer
+    assert ">" not in answer
+    assert page.locator(f"#note-{made} .line.reply code").first.inner_text() == "code"
+    page.evaluate("() => localStorage.clear()")

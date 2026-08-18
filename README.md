@@ -84,7 +84,9 @@ the end of the file it belonged to. Neither is ever resolved or deleted on your 
   taken: rebuilding the diff under you would move the ground you are on, and taking it keeps the branch and commit you
   were reading, along with every comment and tick. Comments written and not yet sent are kept through both, so a
   refresh, a reload, or a browser closed on them costs nothing, and a reply half written into a thread survives the
-  page redrawing itself under it.
+  page redrawing itself under it. Every box grows with what is written into it, up to the point where a long remark
+  would push the diff off screen and scrolls inside instead. A comment keeps the little markdown that carries meaning:
+  fenced blocks and backticks stay code, and a run of `>` lines reads as the passage it quotes.
 - **The file list is a tree** following the repository's folders, each foldable and remembered across reloads, with a
   count per folder. A chain of single-child directories is one row, so a deep path costs one line and not one per
   level. Walking onto a file inside a folded folder reveals it.

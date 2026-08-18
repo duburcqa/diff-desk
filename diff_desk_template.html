@@ -460,6 +460,14 @@
     cursor: pointer;
   }
   button.tiny:hover { color: var(--accent); border-color: var(--accent); }
+  .thread blockquote, .note blockquote {
+    display: block;
+    margin: 4px 0;
+    padding: 1px 0 1px 9px;
+    border-left: 2px solid var(--rule-strong);
+    color: var(--muted);
+    white-space: pre-wrap;
+  }
   .thread.stale { border-left-style: dotted; background: var(--stale-bg); }
   .thread.found { outline: 2px solid var(--accent); outline-offset: 1px; }
   body.hide-done .file[data-done="true"][data-reveal="true"] { display: block; }
@@ -1082,6 +1090,17 @@
     render();
   }
 
+  function grows(box) {
+    // A box the size of what has been written into it: measured after it is in the page, since a box not yet there has
+    // nothing to measure, and bounded so a long remark scrolls inside it rather than pushing the diff off screen.
+    const fit = () => {
+      box.style.height = "auto";
+      box.style.height = `${Math.min(box.scrollHeight, Math.round(window.innerHeight * 0.45))}px`;
+    };
+    box.addEventListener("input", fit);
+    requestAnimationFrame(fit);
+  }
+
   function keepDrafts() {
     // Written wherever the tray changes: a comment waiting to be sent is work that has been done, and a reload, a
     // refresh, or a browser closed on it must not be what throws it away.
@@ -1211,6 +1230,21 @@
       .replace(/\s+/g, " ")
       .trim();
 
+  function quotes(chunk) {
+    // The chunk in runs of lines, each said to be quoted or not: consecutive quoted lines are one passage, so a
+    // paragraph answered line by line reads as the paragraph it is.
+    const runs = [];
+    for (const line of chunk.split("\n")) {
+      const quoted = /^\s*>\s?/.test(line);
+      const said = quoted ? line.replace(/^\s*>\s?/, "") : line;
+      const last = runs[runs.length - 1];
+      if (last && last[0] === quoted) last[1] += `\n${said}`;
+      else runs.push([quoted, said]);
+    }
+    // The break between a passage and the words around it is the blockquote's own, so it is not kept twice.
+    return runs.map(([quoted, said]) => [quoted, quoted ? said : said.replace(/^\n/, "").replace(/\n$/, "")]);
+  }
+
   function written(host, text) {
     // Comments are typed by hand, so the little markdown that carries meaning is honoured: a fenced block stays code
     // with its indentation, backticks stay code, and line breaks stay where they were put. Assembled as nodes rather
@@ -1229,14 +1263,19 @@
           host.append(block);
           return;
         }
-        for (const piece of chunk.split(/(`[^`\n]+`)/)) {
-          if (!piece) continue;
-          if (piece.length > 2 && piece.startsWith("`") && piece.endsWith("`")) {
-            const code = document.createElement("code");
-            code.textContent = piece.slice(1, -1);
-            host.append(code);
-          } else {
-            host.append(document.createTextNode(piece));
+        // A run of quoted lines is what a reply looks like when it answers a passage: shown as the passage it quotes,
+        // set apart from the words answering it, rather than as the marks that were typed.
+        for (const [quoted, part] of quotes(chunk)) {
+          const into = quoted ? host.appendChild(document.createElement("blockquote")) : host;
+          for (const piece of part.split(/(`[^`\n]+`)/)) {
+            if (!piece) continue;
+            if (piece.length > 2 && piece.startsWith("`") && piece.endsWith("`")) {
+              const code = document.createElement("code");
+              code.textContent = piece.slice(1, -1);
+              into.append(code);
+            } else {
+              into.append(document.createTextNode(piece));
+            }
           }
         }
       });
@@ -1295,6 +1334,7 @@
         const written = document.createElement("textarea");
         written.rows = 2;
         written.value = note.text;
+        grows(written);
         const keep = document.createElement("button");
         keep.className = "solid";
         keep.textContent = "Save";
@@ -1438,6 +1478,7 @@
       say.placeholder = note.state === "resolved" ? "Reopen with a reply" : "Reply";
       say.value = writing.get(note.seq) || "";
       say.addEventListener("input", () => writing.set(note.seq, say.value));
+      grows(say);
       const send = document.createElement("button");
       send.className = "ghost";
       send.textContent = "Reply";
@@ -1628,6 +1669,7 @@
     box.className = "filenote writing";
     const field = document.createElement("textarea");
     field.placeholder = `Comment on ${file.path}, as a whole`;
+    grows(field);
     const controls = document.createElement("div");
     controls.className = "row";
     const now = document.createElement("button");
@@ -1689,6 +1731,7 @@
     box.className = "notebox";
     const field = document.createElement("textarea");
     field.placeholder = `Comment on ${path.split("/").pop()}, ${endLine !== line ? `lines ${line}–${endLine}` : `line ${line}`}`;
+    grows(field);
     const controls = document.createElement("div");
     controls.className = "row";
     const now = document.createElement("button");
@@ -2421,6 +2464,7 @@
   els.srcbase.addEventListener("change", loadRefs);
   els.srcdir.addEventListener("change", loadRefs);
   els.srcfilter.addEventListener("input", drawRefs);
+  grows(els.traynote);
   els.srcscan.addEventListener("click", () => rescan(false));
   els.moved.addEventListener("click", () => rescan(true));
   els.traysend.addEventListener("click", submitReview);
