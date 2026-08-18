@@ -7,6 +7,7 @@ Endpoints, all on 127.0.0.1 so nothing is exposed off the machine:
   GET  /state                 what the served diffs are built from, so a page can tell the branch has moved on
   POST /scan                  {dir, base, refs} - regenerate the payload and return it
   GET  /comments?since=N      every recorded comment past the cursor, each with its seq and batch
+  GET  /comments?event=N      every comment touched past that event, which is how a session hears about replies
   POST /comments              {comments: [...], github: bool} - a batch as submitted, or a bare list of comments
   POST /bind                  {seq: [...], github} - mark comments as bound for the pull request, or keep them local
   POST /edit                  {seq, text} - rewrite a comment, keeping what it said before
@@ -95,6 +96,9 @@ def read_notes():
         row.setdefault("replies", [])
         row.setdefault("edits", [])
         row.setdefault("prResolve", "none")
+        # A row written before the cursor existed is as old as its position says.
+        row.setdefault("event", row["seq"])
+        row.setdefault("eventBy", "you")
     return rows
 
 
@@ -356,6 +360,17 @@ def is_refusal(error):
     return any(code in error for code in ("HTTP 401", "HTTP 403", "HTTP 404", "HTTP 422"))
 
 
+def touched(rows, row, by):
+    """Stamp a row as the latest news, and say which side made it.
+
+    A session follows this rather than the comment numbers: a reply on a comment it has already read is news just as
+    much as a new comment, and numbering alone cannot say so. Its own writes are stamped too, so that what it is waiting
+    for can be told from what it just did.
+    """
+    row["event"] = max((held.get("event", 0) for held in rows), default=0) + 1
+    row["eventBy"] = by
+
+
 def write_notes(rows):
     """Replace the log in one step, so a reader never sees it half-written."""
     spare = NOTES.with_suffix(".writing")
@@ -433,7 +448,12 @@ class Handler(BaseHTTPRequestHandler):
             self._send(204)
         elif path == "/comments":
             since = int(query.get("since", ["0"])[0])
-            self._json([row for row in read_notes() if row.get("seq", 0) > since])
+            event = int(query.get("event", ["0"])[0])
+            rows = read_notes()
+            if event:
+                self._json([row for row in rows if row.get("event", 0) > event])
+            else:
+                self._json([row for row in rows if row.get("seq", 0) > since])
         else:
             self._send(404)
 
@@ -517,6 +537,7 @@ class Handler(BaseHTTPRequestHandler):
                 note["github"] = "pending" if bound else "none"
                 note["replies"] = []
                 rows.append(note)
+                touched(rows, note, "you")
         print(f"BATCH {group}: {len(batch)} comment(s) submitted{', bound for GitHub' if bound else ''}", flush=True)
         for note in batch:
             span = str(note.get("line", "?"))
@@ -542,6 +563,7 @@ class Handler(BaseHTTPRequestHandler):
                     continue
                 row["github"] = "pending" if bound else "none"
                 row.pop("error", None)
+                touched(rows, row, "session")
                 if bound and order.get("repo"):
                     # Which pull request it is now headed for, so no other review's sweep picks it up.
                     row["prRepo"], row["prNumber"] = order["repo"], order.get("pr")
@@ -563,6 +585,7 @@ class Handler(BaseHTTPRequestHandler):
                 found["text"] = text
                 if found.get("github") == "posted":
                     found["editedAfterPost"] = True
+                touched(rows, found, "you")
         if found is None:
             self._json({"ok": False, "error": f"no comment numbered {order.get('seq')}"})
             return
@@ -581,6 +604,7 @@ class Handler(BaseHTTPRequestHandler):
             found = next((row for row in rows if row["seq"] == order.get("seq")), None)
             if found is not None:
                 found["replies"].append({"who": who, "text": text, "at": time.strftime("%H:%M:%S")})
+                touched(rows, found, who)
         if found is None:
             self._json({"ok": False, "error": f"no comment numbered {order.get('seq')}"})
             return
@@ -594,7 +618,7 @@ class Handler(BaseHTTPRequestHandler):
         answer = (order.get("answer") or "").strip()
         closing = bool(order.get("resolved", True))
         who = "you" if order.get("who") == "you" else "session"
-        touched = 0
+        closed = 0
         with changing() as rows:
             for row in rows:
                 if row.get("seq") in wanted:
@@ -604,9 +628,10 @@ class Handler(BaseHTTPRequestHandler):
                         row["prResolve"] = "pending" if closing else "none"
                     if answer:
                         row["replies"].append({"who": who, "text": answer, "at": time.strftime("%H:%M:%S")})
-                    touched += 1
-        print(f"{'RESOLVED' if closing else 'REOPENED'} {touched} comment(s) by {who}", flush=True)
-        self._json({"ok": True, "resolved": touched, "state": "resolved" if closing else "open"})
+                    touched(rows, row, who)
+                    closed += 1
+        print(f"{'RESOLVED' if closing else 'REOPENED'} {closed} comment(s) by {who}", flush=True)
+        self._json({"ok": True, "resolved": closed, "state": "resolved" if closing else "open"})
 
     def _drop(self):
         """Delete a comment, or only its last reply, here and on the pull request when it was posted.
@@ -671,6 +696,7 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     row["state"] = "deleted"
                     row["prResolve"] = "none"
+                touched(fresh, row, "you")
         print(
             f"DROPPED {'the last reply of' if last_only else ''} [{seq}] ({gone} deleted on the pull request)",
             flush=True,
@@ -743,6 +769,7 @@ class Handler(BaseHTTPRequestHandler):
                         row.pop("error", None)
                     else:
                         row["error"] = error
+                    touched(rows, row, "session")
             waiting = [row for row in rows if row.get("github") in ("pending", "failed")]
             still = len([row for row in waiting if under_review(row, order)])
         print(f"{'PUBLISHED ' + url if landed else 'PUBLISH FAILED ' + error} ({still} still owed)", flush=True)
@@ -769,6 +796,7 @@ class Handler(BaseHTTPRequestHandler):
                     if row["seq"] in wanted:
                         row["prResolve"] = "failed"
                         row["prResolveError"] = trouble
+                        touched(fresh, row, "session")
             print(f"CLOSE FAILED {trouble}", flush=True)
             self._json({"ok": False, "error": trouble, "closed": 0, "owed": len(owed)})
             return
@@ -797,6 +825,7 @@ class Handler(BaseHTTPRequestHandler):
                         row["prResolveError"] = trouble
                     else:
                         row.pop("prResolveError", None)
+                    touched(fresh, row, "session")
             still = len([row for row in fresh if owes_resolution(row) and under_review(row, order)])
         print(f"CLOSED {closed} thread(s) on the pull request ({still} still owed)", flush=True)
         self._json({"ok": still == 0, "closed": closed, "owed": still})
@@ -848,6 +877,8 @@ class Handler(BaseHTTPRequestHandler):
                 if step is None:
                     continue
                 settle(row, step.landed, step.incoming, step.settled)
+                # A reply brought back from the pull request is somebody else's word, so it is news for this side.
+                touched(fresh, row, "you" if step.incoming else "session")
                 if step.given:
                     row["prResolve"], trouble = step.given
                     if trouble:

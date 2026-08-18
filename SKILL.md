@@ -41,6 +41,10 @@ one, run in the background - it blocks until a batch lands, prints it, and exits
 
     python3 ~/.claude/skills/diff-desk/desk.py watch
 
+It blocks on anything the reviewer says, not only on new comments: a reply on a comment already read wakes it just the
+same, since it follows the log's event cursor rather than the comment numbers. A session's own replies and resolutions
+bump that cursor too and are told apart, so what it is waiting for is never confused with what it just did.
+
 Each comment prints as `[seq] branch path:line-endLine (side) text`, followed by its state and any replies. Answer in
 the thread, and close what is done - the page shows both without a reload:
 

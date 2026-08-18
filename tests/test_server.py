@@ -937,3 +937,27 @@ def test_loading_the_page_collects_the_diffs_as_they_now_stand(desk):
         gen_diff_data.run(desk.repo, "checkout", "-q", "main")
         desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": ["feature"]})
     assert "SAID_ON_DISK" not in json.dumps(desk.get("/data"))
+
+
+def test_a_reply_is_news_even_on_a_comment_already_read(desk):
+    made = desk.post(
+        "/comments", [{"branch": "feature", "path": "sample.py", "line": 61, "side": "new", "text": "asked a question"}]
+    )["seqs"][0]
+    rows = {row["seq"]: row for row in desk.get("/comments")}
+    read_up_to = rows[made]["event"]
+    assert rows[made]["eventBy"] == "you"
+
+    # The session answers and settles nothing: its own word must not read as news for itself.
+    desk.post("/reply", {"seq": made, "text": "answered it", "who": "session"})
+    after_session = [row for row in desk.get(f"/comments?event={read_up_to}") if row.get("eventBy") == "you"]
+    assert after_session == []
+
+    # The reviewer answers back, on a comment whose number the session has long since passed.
+    desk.post("/reply", {"seq": made, "text": "not convinced", "who": "you"})
+    news = [row for row in desk.get(f"/comments?event={read_up_to}") if row.get("eventBy") == "you"]
+    assert [row["seq"] for row in news] == [made]
+    assert news[0]["replies"][-1]["text"] == "not convinced"
+
+    # Read now, so it is behind the cursor again.
+    caught_up = news[0]["event"]
+    assert not [row for row in desk.get(f"/comments?event={caught_up}") if row.get("eventBy") == "you"]

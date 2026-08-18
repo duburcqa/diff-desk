@@ -1,7 +1,7 @@
 """One entry point for the diff desk: serve a branch for review, then pick up the comments it collects.
 
 desk.py serve --dir <repo> --base <ref> [refs ...]   collect the diffs and serve them (blocks)
-desk.py watch [--since N]                            block until a review batch is submitted, then print it
+desk.py watch [--since N]                            block until the reviewer says something, then print it
 desk.py comments [--all]                             what has been submitted, unresolved unless --all
 desk.py reply 3 "why it happens ..."                 answer a comment without closing it
 desk.py edit 3 "what I actually meant ..."            rewrite a comment, keeping what it said before
@@ -130,30 +130,36 @@ def serve(args):
 
 
 def watch(args):
-    """Block until the page submits a batch, then print it. This is how a session picks up a review."""
+    """Block until the reviewer says something, then print it. This is how a session picks up a review.
+
+    What it follows is the log's event cursor rather than the comment numbers, so a reply on a comment the session has
+    already read wakes it just as a new comment does - and the reviewer's answer to a question is not lost because the
+    comment it hangs on is old news.
+    """
     if ask("/data") is None:
         sys.exit("nothing is serving; start with 'desk.py serve' first")
     sent = ask("/comments") or []
     # Anything still open is unaddressed, whenever it arrived, so watching starts before it rather than after: a cursor
     # set to the end swallows whatever was written while the last batch was being worked on.
-    waiting = [row["seq"] for row in sent if row.get("state") == "open"]
+    waiting = [row.get("event", row["seq"]) for row in sent if row.get("state") == "open"]
     if args.since is not None:
         since = args.since
     elif waiting:
         since = min(waiting) - 1
     else:
-        since = max((row["seq"] for row in sent), default=0)
-    print(f"watching for comments past seq {since}", flush=True)
+        since = max((row.get("event", row["seq"]) for row in sent), default=0)
+    print(f"watching for anything said past event {since}", flush=True)
     deadline = time.monotonic() + args.timeout if args.timeout else None
     while deadline is None or time.monotonic() < deadline:
-        fresh = [row for row in (ask(f"/comments?since={since}") or []) if row.get("state") == "open"]
+        # The session's own writes bump the cursor too, so what it is waiting for is told from what it just did.
+        fresh = [row for row in (ask(f"/comments?event={since}") or []) if row.get("eventBy") == "you"]
         if fresh:
-            print(f"{len(fresh)} comment(s) submitted:", flush=True)
+            print(f"{len(fresh)} comment(s) with news:", flush=True)
             for note in fresh:
                 show(note)
             return
         time.sleep(args.every)
-    print("nothing submitted within the timeout")
+    print("nothing said within the timeout")
 
 
 def comments(args):
@@ -243,7 +249,7 @@ job.add_argument("--base", default="upstream/main", help="the ref to diff agains
 job.set_defaults(run=serve)
 
 job = jobs.add_parser("watch", help="block until a review batch is submitted")
-job.add_argument("--since", type=int, default=None, help="cursor to resume from; the current end by default")
+job.add_argument("--since", type=int, default=None, help="event to resume from; the oldest open comment by default")
 job.add_argument("--every", type=float, default=10.0, help="seconds between polls")
 job.add_argument("--timeout", type=float, default=0.0, help="give up after this many seconds; 0 waits forever")
 job.set_defaults(run=watch)
