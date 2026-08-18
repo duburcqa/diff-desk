@@ -564,15 +564,18 @@
   button.mark.none { border-color: var(--rule); }
 
   /* News from GitHub reaches the reader wherever they are, since the panel it happened in may well be closed. Read as
-     one of that panel's rows, so what it adds is only what makes it float, and a press anywhere on it puts it away. */
+     one of that panel's rows, so what it adds is only what makes it float, what says it went wrong, and a press
+     anywhere on it to put it away. A settled row carries a green tint; something refused carries the red one, dark
+     enough that what is said on it reads in the red ink of the refusal. */
   .toast {
     position: fixed;
     left: 50%;
     bottom: 18px;
     z-index: 40;
     max-width: min(720px, calc(100vw - 40px));
-    border-color: var(--del-ink);
-    background: var(--surface);
+    border-color: color-mix(in srgb, var(--del-ink) 30%, var(--del-bg));
+    background: var(--del-bg);
+    color: var(--del-ink);
     box-shadow: 0 8px 24px rgb(0 0 0 / 22%);
     transform: translate(-50%, 140%);
     transition: transform 0.22s ease, opacity 0.22s ease;
@@ -580,6 +583,14 @@
     pointer-events: none;
   }
   .toast[data-open="true"] { transform: translate(-50%, 0); opacity: 1; pointer-events: auto; }
+  /* The reason is what the reader came for, so it is said in the ink of the tint it stands on rather than dimmed like a
+     row whose text they can go and read. The mark stands on neutral ground, the way a settled row's does. */
+  .toast .said { color: inherit; }
+  /* Filled rather than outlined: a stroked triangle this small lands between pixels and comes out ragged. */
+  .toast .warn { flex: none; align-self: center; width: 14px; height: 14px; fill: currentColor; }
+  .toast .warn .bang { stroke: var(--del-bg); stroke-width: 1.4; stroke-linecap: round; }
+  .toast .mark.failed { color: var(--muted); background: var(--surface); border: 1px solid var(--rule); }
+  .toast:hover { border-color: color-mix(in srgb, var(--del-ink) 50%, var(--del-bg)); }
   @media (prefers-reduced-motion: reduce) {
     .toast { transition: none; }
   }
@@ -723,6 +734,11 @@
 </div>
 
 <div class="logrow toast" id="toast" data-open="false" role="status" aria-live="polite">
+  <svg class="warn" viewBox="0 0 14 14" aria-hidden="true">
+    <path d="M6.13 1.9a1 1 0 0 1 1.74 0l5.05 9.1a1 1 0 0 1-.87 1.5H1.95a1 1 0 0 1-.87-1.5z" />
+    <path class="bang" d="M7 5.2v3.1" />
+    <path class="bang" d="M7 10.2v0.1" />
+  </svg>
   <b id="toastwhere"></b>
   <span class="said" id="toastsaid"></span>
   <span class="mark failed" id="toastmark"></span>
