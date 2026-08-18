@@ -432,7 +432,7 @@ def test_each_recorded_batch_can_be_sent_by_itself(page, desk):
             if row["branch"] == branch and row["github"] != "posted" and row["state"] not in ("resolved", "deleted")
         }
         assert sends.count() == len(pending)
-        assert "PR #7" in sends.last.inner_text()
+        assert sends.last.inner_text() == "Sync in batch with the PR"
 
         # Sending one batch leaves the others exactly as they were.
         landed = {"match": "/reviews", "out": json.dumps({"html_url": "https://github.com/x/y/pull/7#review-9"})}
@@ -488,7 +488,7 @@ def test_a_comment_resolved_here_does_not_claim_the_pull_request_agrees(page, de
     row = page.locator("#logrows .logrow").filter(has_text="a remark of its own").first
     marks = row.locator(".mark").all_inner_texts()
     # Closed here and posted there, but the thread on the pull request is not resolved - and the page must say so.
-    assert "resolved here" in marks
+    assert "resolved" in marks
     assert "on the PR" in marks
     assert [mark for mark in marks if mark.startswith("not resolved there")]
     assert "resolved there" not in marks

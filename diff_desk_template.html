@@ -261,7 +261,7 @@
   .commitnote .subject { font-weight: 600; }
 
   .file { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; scroll-margin-top: calc(var(--head) + 6px); }
-  .file[data-done="true"] { opacity: 0.72; }
+
   body.hide-done .file[data-done="true"] { display: none; }
 
   .filehead {
@@ -716,7 +716,7 @@
   <div class="head">
     <strong>Comments</strong>
     <span class="status" id="logcount"></span>
-    <label class="seen" id="logshow" title="List what is resolved here, and include it when sending to the pull request">
+    <label class="seen" id="logshow" title="List what is resolved, and include it when syncing with the pull request">
       <input type="checkbox" id="logresolved" />
       <span>Show resolved</span>
     </label>
@@ -724,9 +724,9 @@
   </div>
   <div class="rows" id="logrows"></div>
   <div class="actions">
-    <button class="solid" id="logretry">Send what is waiting</button>
+    <button class="solid" id="logretry" title="Post the comments bound for the pull request whose post did not land">Retry sync failures</button>
     <button class="ghost" id="logbind">Send the local ones too</button>
-    <button class="ghost" id="logsync">Sync with the PR</button>
+    <button class="ghost" id="logsync">Sync all with the PR</button>
     <span class="status" id="logresult"></span>
   </div>
 </div>
@@ -1022,7 +1022,7 @@
       if (sendable.length && branch().pr && notes.live) {
         const alone = document.createElement("button");
         alone.className = "tiny";
-        alone.textContent = `Send batch to PR #${branch().pr.number}`;
+        alone.textContent = "Sync in batch with the PR";
         alone.addEventListener("click", () => sendBatch(sendable));
         title.append(alone);
       }
@@ -1091,8 +1091,7 @@
     said.textContent = note.text.split("\n")[0].slice(0, 90);
     item.append(where, said);
     for (const [label, kind] of [
-      // "resolved here" rather than "resolved": what this desk holds and what the pull request holds are two answers.
-      [note.state === "resolved" ? "resolved here" : "open", note.state],
+      [note.state === "resolved" ? "resolved" : "open", note.state],
       [note.github === "none" ? "local only" : GITHUB_MARK[note.github], note.github],
       [closing(note), note.prResolve === "done" ? "posted" : "pending"],
       [isOutdated(note, keys) ? "code moved on" : "", "outdated"],

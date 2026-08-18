@@ -53,13 +53,14 @@ On the page:
   asked for each time, and only the last reply can go, since deleting further up would leave the answers below it
   standing against nothing.
 - **Resolving one that reached the pull request resolves it there too**, by finding the thread its text opened and
-  resolving that. Until GitHub confirms it, the comment reads "resolved here" and "not resolved there yet" rather than
-  claiming agreement it does not have; a resolution that could not be made is retried like a post that did not land.
+  resolving that. Until GitHub confirms it, the comment reads "not resolved there yet" beside its own resolution rather
+  than claiming agreement it does not have; a resolution that could not be made is retried like a post that did not
+  land.
 - **What GitHub refuses is said where you are.** A sync, a send or a resolution that could not happen raises a notice
   from the bottom of the page carrying the reason, and it stays until dismissed - the panel it happened in is often
   closed. Pressing **Refresh** is acknowledged the same way: the button reports that it is collecting and refuses a
   second press until it is done.
-- **Sync with the PR** carries replies both ways: what was written here is posted into the thread it belongs to, what
+- **Sync all with the PR** carries replies both ways: what was written here is posted into the thread it belongs to, what
   was written there is brought back and shown with its author. Resolution travels both ways too - a thread resolved on
   the pull request is closed here, since that is the copy everyone else reads, and one closed here is resolved there.
   Syncing twice sends nothing twice.
