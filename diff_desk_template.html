@@ -712,6 +712,9 @@
   const sel = { path: null, from: null, to: null };
   let seen = {};
   let folded = new Set();
+  // A reply half written, per comment. The page redraws itself while it is read, which builds the thread anew: without
+  // this, words typed into a reply go with the box they were typed into.
+  const writing = new Map();
   // Resolved threads are folded away by default; opening one is a per-view choice, not a state worth remembering.
   const unfolded = new Set();
   // Which files the reader has opened or folded by hand, against what being reviewed would say. The page redraws itself
@@ -1433,13 +1436,15 @@
       const say = document.createElement("textarea");
       say.rows = 1;
       say.placeholder = note.state === "resolved" ? "Reopen with a reply" : "Reply";
+      say.value = writing.get(note.seq) || "";
+      say.addEventListener("input", () => writing.set(note.seq, say.value));
       const send = document.createElement("button");
       send.className = "ghost";
       send.textContent = "Reply";
       send.addEventListener("click", async () => {
         if (!say.value.trim()) return;
         await post("reply", { seq: note.seq, text: say.value.trim(), who: "you" });
-        say.value = "";
+        writing.delete(note.seq);
         await loadNotes();
         render();
       });
@@ -1453,7 +1458,7 @@
           resolved: note.state !== "resolved",
           who: "you",
         });
-        say.value = "";
+        writing.delete(note.seq);
         await loadNotes();
         render();
         // Closing it here owes a resolution on the pull request, taken as soon as it is asked for.
@@ -2488,6 +2493,8 @@
     if (drag.on) return;
     await watchBranch();
     if (!notes.live || document.querySelector("tr[data-composer]") || notes.drafts.length) return;
+    // A box being typed into is rebuilt by a redraw, which takes the focus with it even when the words are kept.
+    if (document.activeElement && document.activeElement.matches("textarea, input:not([type=checkbox])")) return;
     await loadNotes();
     drawLog();
     render();

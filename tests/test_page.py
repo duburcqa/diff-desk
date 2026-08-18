@@ -1313,3 +1313,34 @@ def test_a_comment_waiting_to_be_sent_survives_a_refresh_and_a_reload(page, desk
         if page.locator("#tray").get_attribute("data-open") == "true":
             page.locator("#traydrop").click()
         page.evaluate("() => localStorage.clear()")
+
+
+def test_a_reply_being_written_survives_the_page_redrawing_itself(page, desk):
+    card = sample(page)
+    line = card.locator("tr.a[data-line]").first
+    line.locator("td.code").first.hover()
+    line.locator("button.pin").first.click()
+    saying = f"answered while writing, number {len(desk.get('/comments')) + 1}"
+    submit(page, saying)
+    page.wait_for_timeout(200)
+    made = desk.get("/comments")[-1]["seq"]
+    desk.post("/resolve", {"seq": [made], "who": "session"})
+    page.wait_for_function("(seq) => document.querySelector(`#note-${seq} .thread.done`)", arg=made, timeout=30000)
+
+    # A resolved thread is folded to its remark, and a reply half written into it is words not yet finished.
+    thread = page.locator(f"#note-{made}")
+    thread.locator("button.tiny").first.click()
+    box = thread.locator("textarea").first
+    box.fill("half of what I mean")
+    page.evaluate("() => render()")
+    assert page.locator(f"#note-{made} textarea").first.input_value() == "half of what I mean"
+
+    # Sent, it is said rather than waiting to be, so the box comes back empty.
+    page.locator(f"#note-{made} textarea").first.fill("all of what I mean")
+    page.locator(f"#note-{made} .actions button.ghost").first.click()
+    page.wait_for_function(
+        "(seq) => (document.querySelectorAll(`#note-${seq} .line.reply`).length || 0) >= 1", arg=made
+    )
+    assert page.locator(f"#note-{made} textarea").first.input_value() == ""
+    assert "all of what I mean" in thread.inner_text()
+    page.evaluate("() => localStorage.clear()")
