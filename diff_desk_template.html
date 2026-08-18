@@ -405,6 +405,13 @@
   /* Coloured like a file whose diff has moved on, which is the same news: what is on screen is behind what is on disk. */
   #moved { background: var(--stale-bg); color: var(--stale); border-color: var(--stale); }
   #moved:hover { border-color: var(--stale); filter: brightness(1.06); }
+  #moved[data-busy] { animation: working 0.9s ease-in-out infinite; cursor: progress; }
+  @keyframes working {
+    50% { opacity: 0.45; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #moved[data-busy] { animation: none; opacity: 0.6; }
+  }
 
   .thread {
     display: flex;
@@ -479,6 +486,34 @@
 
   .thread .drop { margin-left: auto; border: 0; background: transparent; color: var(--faint); font: inherit; font-size: 15px; line-height: 1; cursor: pointer; }
   .note .drop { margin-left: auto; border: 0; background: transparent; color: var(--faint); font: inherit; font-size: 15px; line-height: 1; cursor: pointer; }
+
+  /* News from GitHub reaches the reader wherever they are, since the panel it happened in may well be closed. */
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: 18px;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    max-width: min(720px, calc(100vw - 40px));
+    padding: 10px 12px;
+    border: 1px solid var(--del-ink);
+    border-radius: 8px;
+    background: var(--surface);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 22%);
+    color: var(--del-ink);
+    font-size: 12.5px;
+    transform: translate(-50%, 140%);
+    transition: transform 0.22s ease, opacity 0.22s ease;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .toast[data-open="true"] { transform: translate(-50%, 0); opacity: 1; pointer-events: auto; }
+  .toast .said { overflow-wrap: anywhere; }
+  @media (prefers-reduced-motion: reduce) {
+    .toast { transition: none; }
+  }
 
   .log {
     position: fixed;
@@ -672,6 +707,11 @@
     </div>
 </div>
 
+<div class="toast" id="toast" data-open="false" role="status" aria-live="polite">
+  <span class="said" id="toastsaid"></span>
+  <button class="ghost" id="toastclose">Dismiss</button>
+</div>
+
 <div class="log" id="log" data-open="false">
   <div class="head">
     <strong>Comments</strong>
@@ -739,7 +779,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "ctx", "hidedone", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logretry", "logbind", "logsync", "logclose", "logresult", "logresolved", "brand", "repo", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto"]) {
+  for (const id of ["tabs", "scope", "q", "ctx", "hidedone", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logretry", "logbind", "logsync", "logclose", "logresult", "logresolved", "brand", "repo", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "toast", "toastsaid", "toastclose"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -1068,6 +1108,13 @@
     return item;
   }
 
+  function announce(said) {
+    // Said where the reader is looking, since what went wrong with GitHub is worth more than a line in a panel they may
+    // have closed. It stays until dismissed: a reason worth reading is worth reading at leisure.
+    els.toastsaid.textContent = said;
+    els.toast.dataset.open = "true";
+  }
+
   async function syncThere(loud) {
     // Replies both ways, and the pull request's word on what is resolved: it is the copy everyone else reads.
     const request = branch().pr;
@@ -1079,6 +1126,7 @@
         ? `Sent ${outcome.sent}, brought back ${outcome.brought}, closed ${outcome.closed} here`
         : `Could not sync: ${outcome.error || "GitHub unreachable"}`;
     }
+    if (!outcome.ok) announce(`Could not sync with PR #${request.number}: ${outcome.error || "GitHub unreachable"}`);
     await loadNotes();
     drawLog();
     render();
@@ -1093,6 +1141,9 @@
       els.logresult.textContent = outcome.ok
         ? `Resolved ${outcome.closed} thread(s) on PR #${request.number}`
         : `Could not resolve there: ${outcome.error || "GitHub unreachable"}`;
+    }
+    if (!outcome.ok) {
+      announce(`Could not resolve on PR #${request.number}: ${outcome.error || "GitHub unreachable"}`);
     }
     await loadNotes();
     drawLog();
@@ -1111,6 +1162,9 @@
     els.logresult.textContent = outcome.ok
       ? `Sent ${outcome.sent} to PR #${request.number}`
       : `Still waiting: ${outcome.error || "GitHub unreachable"}`;
+    if (!outcome.ok) {
+      announce(`Could not send to PR #${request.number}: ${outcome.error || "GitHub unreachable"}`);
+    }
     await loadNotes();
     drawLog();
     render();
@@ -1321,7 +1375,10 @@
     const cell = document.createElement("td");
     cell.colSpan = 5;
     const answers = (note.replies || []).length;
-    const settled = note.state === "resolved" && !unfolded.has(note.seq) && answers <= (heard[note.seq] || 0);
+    // Folded only once the reader has been shown it: a thread settled before they ever saw it, or answered since they
+    // did, is news, and news is read rather than outlined.
+    const read = note.seq in heard && answers <= heard[note.seq];
+    const settled = note.state === "resolved" && !unfolded.has(note.seq) && read;
     if (!settled && heard[note.seq] !== answers) {
       heard[note.seq] = answers;
       try {
@@ -2016,6 +2073,11 @@
     const reading = keep ? { ...state } : { branch: 0, scope: "all", current: 0 };
     const where = keep ? { dir: data.root, base: data.baseRef } : { dir: els.srcdir.value, base: els.srcbase.value };
     els.srcstatus.textContent = "collecting diffs...";
+    // Collecting the diffs takes a moment, so the button says it heard: it reports what it is doing and refuses a
+    // second press until it is done.
+    els.moved.dataset.busy = "true";
+    els.moved.disabled = true;
+    els.moved.textContent = "Refreshing...";
     try {
       const outcome = await (
         await fetch("scan", {
@@ -2043,6 +2105,11 @@
       els.sourceopen.setAttribute("aria-pressed", "false");
     } catch (error) {
       els.srcstatus.textContent = `scan failed: ${error.message}`;
+    } finally {
+      // Back to being an offer: still there when the branch has moved on and the scan did not land.
+      delete els.moved.dataset.busy;
+      els.moved.disabled = false;
+      els.moved.textContent = "Refresh";
     }
   }
 
@@ -2168,7 +2235,11 @@
     const wrap = document.createElement("section");
     wrap.className = "file";
     const held = folds.get(file.path);
-    wrap.dataset.open = String(held && held.digest === file.digest ? held.open : status !== "done");
+    // A comment the reader has never been shown outranks both: a file folded by hand, or marked reviewed, would
+    // otherwise hide a remark that arrived after it was read.
+    const unread = mine().some((note) => note.path === file.path && !(note.seq in heard));
+    const shown = held && held.digest === file.digest ? held.open : status !== "done";
+    wrap.dataset.open = String(unread || shown);
     wrap.dataset.done = String(status === "done");
     wrap.dataset.path = file.path;
     wrap.dataset.digest = file.digest;
@@ -2501,6 +2572,9 @@
   els.srcdir.addEventListener("change", loadRefs);
   els.srcfilter.addEventListener("input", drawRefs);
   grows(els.traynote);
+  els.toastclose.addEventListener("click", () => {
+    els.toast.dataset.open = "false";
+  });
   els.goto.addEventListener("keydown", (event) => {
     if (event.key === "Enter") goTo(els.goto.value);
     if (event.key === "Escape") els.goto.blur();

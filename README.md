@@ -55,6 +55,10 @@ On the page:
 - **Resolving one that reached the pull request resolves it there too**, by finding the thread its text opened and
   resolving that. Until GitHub confirms it, the comment reads "resolved here" and "not resolved there yet" rather than
   claiming agreement it does not have; a resolution that could not be made is retried like a post that did not land.
+- **What GitHub refuses is said where you are.** A sync, a send or a resolution that could not happen raises a notice
+  from the bottom of the page carrying the reason, and it stays until dismissed - the panel it happened in is often
+  closed. Pressing **Refresh** is acknowledged the same way: the button reports that it is collecting and refuses a
+  second press until it is done.
 - **Sync with the PR** carries replies both ways: what was written here is posted into the thread it belongs to, what
   was written there is brought back and shown with its author. Resolution travels both ways too - a thread resolved on
   the pull request is closed here, since that is the copy everyone else reads, and one closed here is resolved there.
@@ -83,7 +87,8 @@ the end of the file it belonged to. Neither is ever resolved or deleted on your 
   find. Press `#` from anywhere, type the number, and the page goes to it - unfolding the file and the thread whatever
   state they were left in - and a URL ending in `#58` lands on it the same way.
 - **What you have not seen does not stay folded.** A file whose diff has changed since you marked it reviewed opens
-  itself, and so does a resolved thread that has been answered since you last read it - folding again once you have.
+  itself, so does one holding a comment you have never been shown, and so does a resolved thread answered since you
+  last read it - each folding again once you have seen it.
   A fold you make by hand is remembered against the diff you made it on, so it holds until that diff moves.
 - **The branch is watched while you read it.** A reload collects the diffs again, and a page left open offers a
   **Refresh** once what it was built from has moved on - a commit, a fixup, work saved on disk. It is offered, never

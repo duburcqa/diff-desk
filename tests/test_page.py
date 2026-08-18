@@ -1351,8 +1351,21 @@ def test_a_branch_that_has_moved_on_offers_a_refresh_that_keeps_the_place(page, 
             painted[1],
         )
 
-        page.locator("#moved").click()
-        page.wait_for_function("() => document.getElementById('moved').hidden", timeout=30000)
+        # Pressing it is acknowledged while the diffs are collected, and the label goes back if nothing landed.
+        working = page.evaluate(
+            """async () => {
+              const going = rescan(true);
+              const button = document.getElementById('moved');
+              const said = { busy: button.dataset.busy, label: button.textContent, off: button.disabled };
+              await going;
+              return { ...said, after: button.textContent, hidden: button.hidden };
+            }"""
+        )
+        assert working["busy"] == "true"
+        assert working["label"] == "Refreshing..."
+        assert working["off"] is True
+        assert working["after"] == "Refresh"
+        assert working["hidden"] is True
         assert "SAID_ON_DISK" in page.locator("#main").inner_text()
         # The branch being read is still the one being read.
         assert page.evaluate("() => data.branches[state.branch].ref") == branch
@@ -1554,3 +1567,87 @@ def test_a_comment_can_be_reached_by_its_number(page, desk):
     assert page.locator("#goto.lost").count() == 1
     page.locator("section.file[data-path='sample.py'] input[type=checkbox]").uncheck()
     page.evaluate("() => localStorage.clear()")
+
+
+def test_a_file_holding_an_unread_comment_opens_itself(page, desk):
+    branch = page.evaluate("() => data.branches[0].ref")
+    card = page.locator("section.file[data-path='added.py']")
+    card.locator("input[type=checkbox]").check()
+    page.wait_for_selector("section.file[data-path='added.py'][data-open='false']")
+    page.reload(wait_until="load")
+    page.wait_for_selector("section.file")
+    # Reviewed and read: nothing asks for it to be open.
+    assert page.locator("section.file[data-path='added.py']").get_attribute("data-open") == "false"
+
+    desk.post(
+        "/comments",
+        [{"branch": branch, "path": "added.py", "line": 1, "side": "new", "text": "arrived after you read it"}],
+    )
+    page.reload(wait_until="load")
+    page.wait_for_selector("section.file")
+    # A remark the reader has never been shown is not hidden behind a file they had finished with.
+    again = page.locator("section.file[data-path='added.py']")
+    assert again.get_attribute("data-open") == "true"
+    assert "arrived after you read it" in again.inner_text()
+
+    # Shown once, it stops asking: the file goes back to being folded away.
+    page.reload(wait_until="load")
+    page.wait_for_selector("section.file")
+    assert page.locator("section.file[data-path='added.py']").get_attribute("data-open") == "false"
+
+    # One that arrives already settled is unread too, so it opens its file and shows the thread rather than an outline.
+    made = desk.post(
+        "/comments",
+        [{"branch": branch, "path": "added.py", "line": 1, "side": "new", "text": "settled before you saw it"}],
+    )["seqs"][0]
+    desk.post("/resolve", {"seq": [made], "who": "session"})
+    page.reload(wait_until="load")
+    page.wait_for_selector("section.file")
+    assert page.locator("section.file[data-path='added.py']").get_attribute("data-open") == "true"
+    assert page.locator(f"#note-{made} .thread.folded").count() == 0
+    assert "settled before you saw it" in page.locator(f"#note-{made}").inner_text()
+
+    # Read now, so it folds to its remark and lets the file close again.
+    page.reload(wait_until="load")
+    page.wait_for_selector("section.file")
+    assert page.locator(f"#note-{made} .thread.folded").count() == 1
+    page.locator("section.file[data-path='added.py'] input[type=checkbox]").uncheck()
+    page.evaluate("() => localStorage.clear()")
+
+
+def test_a_sync_that_could_not_happen_says_so_where_the_reader_is(page, desk):
+    branch = page.evaluate("() => data.branches[0].ref")
+    knows = [
+        {"match": "repos/someone/somewhere --jq", "out": "someone/somewhere"},
+        {"match": "pr list", "out": json.dumps([{"number": 7, "url": "u", "title": "t", "headRefName": branch}])},
+    ]
+    desk.github_answers(rules=knows)
+    gen_diff_data.run(desk.repo, "remote", "add", "origin", "https://github.com/someone/somewhere.git")
+    try:
+        assert desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})["ok"]
+        page.reload(wait_until="load")
+        page.wait_for_selector("section.file")
+        assert page.locator("#toast").get_attribute("data-open") == "false"
+
+        # GitHub refuses the sync, and the panel it happened in is not where the reader is looking.
+        desk.github_answers(rules=[{"match": "graphql", "code": 1, "err": "gh: Bad credentials (HTTP 401)"}, *knows])
+        page.locator("#logopen").click()
+        page.wait_for_selector("#log[data-open='true']")
+        page.locator("#logsync").click()
+        page.wait_for_selector("#toast[data-open='true']", timeout=30000)
+        said = page.locator("#toastsaid").inner_text()
+        assert "Could not sync" in said
+        assert "401" in said
+
+        # It stays until dismissed, since a reason worth reading is worth reading at leisure.
+        page.locator("#logclose").click()
+        assert page.locator("#toast").get_attribute("data-open") == "true"
+        page.locator("#toastclose").click()
+        assert page.locator("#toast").get_attribute("data-open") == "false"
+    finally:
+        gen_diff_data.run(desk.repo, "remote", "remove", "origin")
+        desk.github_answers(code=1, err="gh: Not Found (HTTP 404)")
+        desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})
+        page.reload(wait_until="load")
+        page.wait_for_selector("section.file")
+        page.evaluate("() => localStorage.clear()")
