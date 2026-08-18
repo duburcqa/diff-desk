@@ -150,7 +150,7 @@
   .search input { width: 100%; min-width: 0; padding-left: 26px; }
   .search svg { position: absolute; left: 8px; width: 13px; height: 13px; color: var(--faint); }
   /* Never let a label fold onto a second line: that is what turned the bar into two rows. */
-  .toggle { cursor: pointer; flex: none; white-space: nowrap; }
+  .toggle { position: relative; cursor: pointer; flex: none; white-space: nowrap; }
   #scope { flex: none; max-width: 26ch; }
   #goto { flex: none; width: 7ch; text-align: center; font-family: var(--mono); }
   #goto.lost { border-color: var(--del-ink); color: var(--del-ink); }
@@ -482,11 +482,13 @@
     cursor: pointer;
   }
   button.tiny:hover { color: var(--accent); border-color: var(--accent); }
+  /* Out of the flow, so saying that something is waiting neither moves the label nor changes what the button measures. */
   .dot {
-    display: inline-block;
+    position: absolute;
+    top: 3px;
+    right: 4px;
     width: 6px;
     height: 6px;
-    margin-left: 6px;
     border-radius: 50%;
     background: var(--stale);
     opacity: 0;
@@ -577,7 +579,7 @@
     cursor: pointer;
   }
   .logrow:hover { border-color: var(--accent); }
-  .logrow[data-state="resolved"] { opacity: 0.7; }
+  .logrow[data-state="resolved"] { background: var(--add-bg); border-color: color-mix(in srgb, var(--add-ink) 35%, transparent); }
   .logrow b { flex: none; font-family: var(--mono); font-size: 11px; }
   .logrow .said { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
   .logrow .mark, .thread .mark { flex: none; font-family: var(--mono); font-size: 10.5px; padding: 0 6px; border-radius: 999px; }
@@ -1110,7 +1112,6 @@
     said.textContent = note.text.split("\n")[0].slice(0, 90);
     item.append(where, said);
     for (const [label, kind] of [
-      [note.state === "resolved" ? "resolved" : "open", note.state],
       [note.github === "none" ? "local only" : GITHUB_MARK[note.github], note.github],
       [closing(note), note.prResolve === "done" ? "posted" : "pending"],
       [isOutdated(note, keys) ? "code moved on" : "", "outdated"],

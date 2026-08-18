@@ -493,7 +493,8 @@ def test_a_comment_resolved_here_does_not_claim_the_pull_request_agrees(page, de
     row = page.locator("#logrows .logrow").filter(has_text="a remark of its own").first
     marks = row.locator(".mark").all_inner_texts()
     # Closed here and posted there, but the thread on the pull request is not resolved - and the page must say so.
-    assert "resolved" in marks
+    # Being closed is said by the colour the row is drawn in, and the pull request's disagreement by a mark of its own.
+    assert row.get_attribute("data-state") == "resolved"
     assert "on the PR" in marks
     assert [mark for mark in marks if mark.startswith("not resolved there")]
     assert "resolved there" not in marks
@@ -1656,6 +1657,18 @@ def test_the_panel_buttons_never_move(page, desk):
     )
     assert after == widths
     assert page.locator("#logdot").get_attribute("data-on") == "true"
+    # The dot is out of the flow, so the label it is shown beside stays centred in its button.
+    centred = page.evaluate(
+        """() => {
+          const button = document.getElementById('logopen');
+          const range = document.createRange();
+          range.selectNodeContents(button.firstChild);
+          const words = range.getBoundingClientRect();
+          const box = button.getBoundingClientRect();
+          return Math.abs((words.left + words.right) / 2 - (box.left + box.right) / 2);
+        }"""
+    )
+    assert centred < 1.5
     page.locator("#logclose").click()
     page.evaluate("() => localStorage.clear()")
 
