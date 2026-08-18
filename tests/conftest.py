@@ -43,6 +43,9 @@ def repo(tmp_path_factory):
     body = [f"line {number}" for number in range(1, FILE_LINES + 1)]
     (root / "sample.py").write_text("\n".join(body) + "\n")
     (root / "kept.py").write_text("untouched\n")
+    # A second long file, which no test comments on: a drag needs a stretch of rows with nothing hanging between them,
+    # and comments accumulate in this desk by design - the file they are written on runs out of clean stretches.
+    (root / "wide.py").write_text("\n".join(f"wide {number}" for number in range(1, 41)) + "\n")
     # A file a couple of directories down, so the file list has a tree to draw and a chain to fold.
     (root / "pkg" / "sub").mkdir(parents=True)
     # Indented, so a test can tell whether copying a selection keeps the indentation that makes code usable.
@@ -54,6 +57,11 @@ def repo(tmp_path_factory):
     body[SECOND_EDIT - 1] = f"line {SECOND_EDIT} rewritten"
     (root / "sample.py").write_text("\n".join(body) + "\n")
     (root / "added.py").write_text("brand new\n")
+    wide = [f"wide {number}" for number in range(1, 41)]
+    # A block of lines rather than one, so its single hunk holds rows enough for a drag to cross several of them.
+    for number in range(18, 25):
+        wide[number - 1] = f"wide {number} rewritten"
+    (root / "wide.py").write_text("\n".join(wide) + "\n")
     (root / "pkg" / "sub" / "deep.py").write_text("def area(r):\n    return 2\nthree\n")
     git(root, "add", "-A")
     git(root, "commit", "-m", "rewrite two lines and add a file")

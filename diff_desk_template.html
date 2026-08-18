@@ -402,10 +402,20 @@
     cursor: pointer;
   }
   button.ghost { background: transparent; color: var(--muted); border-color: var(--rule-strong); }
+  button.solid:disabled, button.ghost:disabled, button.toggle:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  button.solid:disabled:hover, button.ghost:disabled:hover, button.toggle:disabled:hover {
+    color: inherit;
+    border-color: inherit;
+    filter: none;
+  }
   /* Coloured like a file whose diff has moved on, which is the same news: what is on screen is behind what is on disk. */
   #moved { background: var(--stale-bg); color: var(--stale); border-color: var(--stale); }
   #moved:hover { border-color: var(--stale); filter: brightness(1.06); }
   #moved[data-busy] { animation: working 0.9s ease-in-out infinite; cursor: progress; }
+  #moved:disabled { background: var(--surface); color: var(--muted); border-color: var(--rule-strong); }
   @keyframes working {
     50% { opacity: 0.45; }
   }
@@ -472,6 +482,16 @@
     cursor: pointer;
   }
   button.tiny:hover { color: var(--accent); border-color: var(--accent); }
+  .dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-left: 6px;
+    border-radius: 50%;
+    background: var(--stale);
+    opacity: 0;
+  }
+  .dot[data-on="true"] { opacity: 1; }
   .thread blockquote, .note blockquote {
     display: block;
     margin: 4px 0;
@@ -689,8 +709,8 @@
       <span class="minus num" id="tminus"></span>
     </div>
   </div>
-  <button class="toggle" id="logopen" title="Every comment recorded, and where each one stands">Comments</button>
-  <button class="solid" id="moved" hidden title="The branch has moved on since this page was built">Refresh</button>
+  <button class="toggle" id="logopen" title="Every comment recorded, and where each one stands">Comments<i class="dot" id="logdot" aria-hidden="true"></i></button>
+  <button class="solid" id="moved" disabled title="Refresh the diffs once the branch has moved on">Refresh</button>
 </header>
 
 <div class="source" id="source" data-open="false">
@@ -725,7 +745,7 @@
   <div class="rows" id="logrows"></div>
   <div class="actions">
     <button class="solid" id="logretry" title="Post the comments bound for the pull request whose post did not land">Retry sync failures</button>
-    <button class="ghost" id="logbind">Send the local ones too</button>
+    <button class="ghost" id="logbind" title="Aim the comments kept local at the pull request, and send them">Send the local ones too</button>
     <button class="ghost" id="logsync">Sync all with the PR</button>
     <span class="status" id="logresult"></span>
   </div>
@@ -779,7 +799,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "ctx", "hidedone", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logretry", "logbind", "logsync", "logclose", "logresult", "logresolved", "brand", "repo", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "toast", "toastsaid", "toastclose"]) {
+  for (const id of ["tabs", "scope", "q", "ctx", "hidedone", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logretry", "logbind", "logsync", "logclose", "logresult", "logresolved", "brand", "repo", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "toast", "toastsaid", "toastclose", "logdot"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -890,7 +910,7 @@
       const answer = await fetch("state", { cache: "no-store" });
       if (!answer.ok) return;
       const { stamp } = await answer.json();
-      if (stamp && data.stamp) els.moved.hidden = stamp === data.stamp;
+      if (stamp && data.stamp) els.moved.disabled = stamp === data.stamp;
     } catch (error) {
       // Nothing is serving, which the comments already say.
     }
@@ -993,14 +1013,13 @@
     const posted = rows.filter((note) => note.github === "posted").length;
     if (posted) counted.push(`${posted} on the PR`);
     els.logcount.textContent = counted.join(" \u00b7 ");
-    els.logopen.textContent = owed.length ? `Comments (${owed.length} waiting)` : `Comments (${rows.length})`;
+    // Always in the layout, so saying that something is waiting cannot move the button it is said on.
+    els.logdot.dataset.on = String(owed.length > 0);
     const local = rows.filter((note) => note.github === "none");
     els.logretry.disabled = !owed.length;
     els.logbind.disabled = !local.length || !branch().pr;
     els.logsync.disabled = !branch().pr;
-    els.logbind.textContent = local.length
-      ? `Send the ${local.length} local one${local.length === 1 ? "" : "s"} too`
-      : "Send the local ones too";
+
     els.logrows.innerHTML = "";
     const batches = new Map();
     for (const note of rows) {
@@ -2076,7 +2095,7 @@
     // second press until it is done.
     els.moved.dataset.busy = "true";
     els.moved.disabled = true;
-    els.moved.textContent = "Refreshing...";
+    let landed = false;
     try {
       const outcome = await (
         await fetch("scan", {
@@ -2093,7 +2112,8 @@
       Object.assign(state, reading);
       // A branch that has gone from the payload cannot be the one being read.
       if (!data.branches[state.branch]) state.branch = 0;
-      els.moved.hidden = true;
+      // Collected: there is nothing left to refresh until the branch moves again.
+      landed = true;
       clearSel();
       showSource();
       renderTabs();
@@ -2105,10 +2125,9 @@
     } catch (error) {
       els.srcstatus.textContent = `scan failed: ${error.message}`;
     } finally {
-      // Back to being an offer: still there when the branch has moved on and the scan did not land.
+      // Pressable again when the scan did not land, since the branch has still moved on.
       delete els.moved.dataset.busy;
-      els.moved.disabled = false;
-      els.moved.textContent = "Refresh";
+      els.moved.disabled = landed;
     }
   }
 

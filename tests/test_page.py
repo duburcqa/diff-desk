@@ -71,6 +71,11 @@ def sample(page):
     return page.locator("section.file").filter(has=page.locator("text=sample.py")).first
 
 
+def wide(page):
+    """The card of the file no test comments on, which is where a drag finds rows with nothing hanging between them."""
+    return page.locator("section.file[data-path='wide.py']")
+
+
 def submit(page, text):
     """Write the comment, add it to the review, and send the batch: recording happens on the send, not the write."""
     page.locator("tr[data-composer='true'] textarea").fill(text)
@@ -125,7 +130,7 @@ def drag(page, first, last, column):
 @pytest.mark.parametrize("upward", [False, True])
 def test_dragging_lines_selects_the_range_and_opens_the_box(page, column, upward):
     # Within one file: a range belongs to a single diff, so the rows are taken from one card rather than by position.
-    lines = sample(page).locator("tr[data-line]")
+    lines = wide(page).locator("tr[data-line]")
     first, last = (lines.nth(9), lines.nth(2)) if upward else (lines.nth(2), lines.nth(9))
     held, kept = drag(page, first, last, column)
     assert held >= 4
@@ -575,9 +580,12 @@ def test_a_file_changed_since_it_was_reviewed_opens_itself(page, desk):
     try:
         written.write_text(kept + "SAID_ON_DISK = 1\n")
         # Refreshed rather than reloaded, so the fold the reader just made is still remembered when the diff arrives.
-        page.wait_for_function("() => !document.getElementById('moved').hidden", timeout=30000)
+        page.wait_for_function("() => !document.getElementById('moved').disabled", timeout=30000)
         page.locator("#moved").click()
-        page.wait_for_function("() => document.getElementById('moved').hidden", timeout=30000)
+        page.wait_for_function(
+            "() => { const it = document.getElementById('moved'); return it.disabled && !it.dataset.busy; }",
+            timeout=30000,
+        )
         # Reviewed and folded, then changed: the reader has not seen this diff, so it is not folded away for them.
         again = page.locator("section.file[data-path='added.py']")
         assert again.get_attribute("data-open") == "true"
@@ -896,7 +904,9 @@ def test_the_log_says_where_every_comment_stands(page, desk):
     assert "local only" in marks
     # What is owed is offered for sending, rather than being discoverable only in a log file.
     assert page.locator("#logretry").is_enabled()
-    assert "waiting" in page.locator("#logopen").inner_text()
+    # Said by the dot and by what the button holds, since the label itself never changes width.
+    assert page.locator("#logdot").get_attribute("data-on") == "true"
+    assert "waiting for GitHub" in page.locator("#logopen").get_attribute("title")
     page.locator("#logclose").click()
 
 
@@ -1325,7 +1335,7 @@ def test_a_branch_that_has_moved_on_offers_a_refresh_that_keeps_the_place(page, 
     branch = page.evaluate("() => data.branches[0].ref")
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
-    assert page.locator("#moved").is_hidden()
+    assert page.locator("#moved").is_disabled()
 
     gen_diff_data.run(desk.repo, "checkout", "-q", branch)
     written = desk.repo / "added.py"
@@ -1333,7 +1343,7 @@ def test_a_branch_that_has_moved_on_offers_a_refresh_that_keeps_the_place(page, 
     try:
         written.write_text(kept + "SAID_ON_DISK = 1\n")
         # Offered rather than taken: the diff under the reader is only rebuilt when they ask for it.
-        page.wait_for_function("() => !document.getElementById('moved').hidden", timeout=30000)
+        page.wait_for_function("() => !document.getElementById('moved').disabled", timeout=30000)
         assert "SAID_ON_DISK" not in page.locator("#main").inner_text()
 
         # Coloured like a file whose diff has moved on: the same news, so the same colour draws the eye to it.
@@ -1351,21 +1361,23 @@ def test_a_branch_that_has_moved_on_offers_a_refresh_that_keeps_the_place(page, 
             painted[1],
         )
 
-        # Pressing it is acknowledged while the diffs are collected, and the label goes back if nothing landed.
+        # Pressing it is acknowledged while the diffs are collected, and it stays exactly where and what it was.
         working = page.evaluate(
             """async () => {
-              const going = rescan(true);
               const button = document.getElementById('moved');
+              const box = button.getBoundingClientRect();
+              const going = rescan(true);
               const said = { busy: button.dataset.busy, label: button.textContent, off: button.disabled };
               await going;
-              return { ...said, after: button.textContent, hidden: button.hidden };
+              const after = button.getBoundingClientRect();
+              return { ...said, width: Math.round(box.width) === Math.round(after.width), settled: button.disabled };
             }"""
         )
         assert working["busy"] == "true"
-        assert working["label"] == "Refreshing..."
+        assert working["label"] == "Refresh"
         assert working["off"] is True
-        assert working["after"] == "Refresh"
-        assert working["hidden"] is True
+        assert working["width"] is True
+        assert working["settled"] is True
         assert "SAID_ON_DISK" in page.locator("#main").inner_text()
         # The branch being read is still the one being read.
         assert page.evaluate("() => data.branches[state.branch].ref") == branch
@@ -1612,6 +1624,39 @@ def test_a_file_holding_an_unread_comment_opens_itself(page, desk):
     page.wait_for_selector("section.file")
     assert page.locator(f"#note-{made} .thread.folded").count() == 1
     page.locator("section.file[data-path='added.py'] input[type=checkbox]").uncheck()
+    page.evaluate("() => localStorage.clear()")
+
+
+def test_the_panel_buttons_never_move(page, desk):
+    branch = page.evaluate("() => data.branches[0].ref")
+    page.locator("#logopen").click()
+    page.wait_for_selector("#log[data-open='true']")
+    named = ["moved", "logopen", "logretry", "logbind", "logsync", "logclose"]
+    widths = page.evaluate(
+        "(named) => named.map((id) => Math.round(document.getElementById(id).getBoundingClientRect().width))", named
+    )
+    assert all(width > 0 for width in widths)
+
+    desk.post(
+        "/comments",
+        {
+            "comments": [
+                {"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": "waiting to go"}
+            ],
+            "github": True,
+        },
+    )
+    page.reload(wait_until="load")
+    page.wait_for_selector("section.file")
+    page.locator("#logopen").click()
+    page.wait_for_selector("#log[data-open='true']")
+    # Something is waiting now, which changes what can be pressed but never where anything is.
+    after = page.evaluate(
+        "(named) => named.map((id) => Math.round(document.getElementById(id).getBoundingClientRect().width))", named
+    )
+    assert after == widths
+    assert page.locator("#logdot").get_attribute("data-on") == "true"
+    page.locator("#logclose").click()
     page.evaluate("() => localStorage.clear()")
 
 
