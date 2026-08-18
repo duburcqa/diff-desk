@@ -16,6 +16,10 @@ Run in the background, then give the user the URL:
 
     python3 ~/.claude/skills/diff-desk/desk.py serve --dir <repo> --base <ref> [refs ...]
 
+Serving fast-forwards the desk itself to what has been published and restarts into it, so a review always runs the
+current tool. It only ever fast-forwards a clean `main`: a checkout carrying work in progress, or sitting on another
+branch, is left alone and says so - which is what a session sees when it is serving from a working copy being changed.
+
 `refs` are local branches, pull request numbers (`3243`, `#3243`, `pr/3243`), or a mix of both; omit them to offer
 every local branch ahead of the base. `--base` defaults to `upstream/main`. The checked-out branch is shown with its
 uncommitted work included. A pull request is fetched from the upstream repository by number into
@@ -68,20 +72,20 @@ after each batch; it resumes from the current end unless given `--since N`.
 ## Changing the page
 
 `diff_desk_template.html` holds the page, with `__DIFF_DATA__` and `__BUILD__` substituted at build time. After
-editing it, verify with the harness rather than by inspection - it drives the real page in Chrome, WebKit and Firefox
-and asserts the drag, mixed ranges, gap expansion and the single-click paths:
+editing it, verify with the suite rather than by inspection - it drives the real page in Chromium, WebKit and Firefox
+against a desk of its own, and covers the drag, mixed ranges, gap expansion, the single-click paths, the layout under a
+comment, and every exchange with a stand-in for `gh`:
 
-    python3 ~/.claude/skills/diff-desk/drag_probe.py
-    python3 ~/.claude/skills/diff-desk/sticky_probe.py
+    cd ~/.claude/skills/diff-desk && python3 -m pytest
 
-Pointer behaviour differs between engines, so a change to selection or hit testing is not done until both pass in all
-three. `sticky_probe.py` covers layout instead: that the pinned file head clears the page header at three widths, and
-that filling a gap leaves no delimiter behind. The header carries a build stamp; if the user reports stale behaviour,
-have them compare it first.
+Pointer behaviour differs between engines, so a change to selection or hit testing is not done until it passes in all
+three. The header carries a build stamp; if the user reports stale behaviour, have them compare it first.
 
-Two traps these harnesses exist to catch, both of which shipped broken before they did:
+Three traps the suite exists to catch, all of which shipped broken before it did:
 
 - An `overflow` on the file card makes the card its own scrollport, so its head never pins and the hunk delimiter is
   what stands at the top of the view, reading as the file's name.
 - A trailing click follows every drag, aimed at the pin or at an ancestor depending on the engine, and collapses the
   range to one line unless it is swallowed.
+- A comment hangs inside the diff table, so one left without a width of its own fills the table and moves every column
+  under it - which the page redrawing itself turns into a flicker.

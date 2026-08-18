@@ -13,7 +13,9 @@ desk.py refs --dir <repo> --base <ref>               the branches ahead of a bas
 
 import argparse
 import json
+import os
 import pathlib
+import subprocess
 import sys
 import time
 import urllib.error
@@ -25,6 +27,48 @@ import serve_diff
 
 HERE = pathlib.Path(__file__).parent
 URL = f"http://127.0.0.1:{serve_diff.PORT}"
+
+
+def refresh():
+    """Fast-forward this desk to what has been published, and run that instead of what is already loaded.
+
+    Only ever a fast-forward of a clean `main`: the checkout is the user's, so work in progress and any other branch are
+    left exactly as they are, with a word about why nothing was taken. Whatever came in is running code, so the process
+    hands over to it - and never asks a second time, since a desk relaunched by its own update would fetch for ever.
+    """
+    if os.environ.get("DIFF_DESK_UPDATED"):
+        return
+    os.environ["DIFF_DESK_UPDATED"] = "1"
+    here = pathlib.Path(__file__).resolve().parent
+
+    def git(*words, quiet=False):
+        done = subprocess.run(
+            ["git", "-C", str(here), *words], capture_output=True, text=True, timeout=120, check=False
+        )
+        if done.returncode != 0 and not quiet:
+            print(f"not updated: git {words[0]} said {' '.join((done.stderr or done.stdout).split())[:120]}")
+        return done.returncode == 0, done.stdout.strip()
+
+    inside, _ = git("rev-parse", "--git-dir", quiet=True)
+    if not inside:
+        return
+    _, branch = git("rev-parse", "--abbrev-ref", "HEAD", quiet=True)
+    _, dirty = git("status", "--porcelain", quiet=True)
+    if branch != "main" or dirty:
+        print(f"not updated: {here} is on {branch or 'a detached head'}{' with uncommitted work' if dirty else ''}")
+        return
+    fetched, _ = git("fetch", "--quiet", "origin", "main")
+    if not fetched:
+        return
+    _, before = git("rev-parse", "HEAD", quiet=True)
+    moved, _ = git("merge", "--ff-only", "--quiet", "origin/main")
+    if not moved:
+        return
+    _, after = git("rev-parse", "HEAD", quiet=True)
+    if after == before:
+        return
+    print(f"updated to {after[:9]}, restarting")
+    os.execv(sys.executable, [sys.executable, *sys.argv])
 
 
 def ask(route, payload=None):
@@ -65,6 +109,7 @@ def show(note):
 
 
 def serve(args):
+    refresh()
     payload = gen_diff_data.collect(args.dir, args.base, args.refs)
     if not payload["branches"]:
         sys.exit(f"nothing ahead of {args.base} in {args.dir}")
