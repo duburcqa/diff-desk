@@ -1,7 +1,7 @@
 """One entry point for the diff desk: serve a branch for review, then pick up the comments it collects.
 
 desk.py serve --dir <repo> --base <ref> [refs ...]   collect the diffs and serve them (blocks)
-desk.py watch [--since N]                            block until the reviewer says something, then print it
+desk.py watch [--since N] [--once]                   print whatever the reviewer says, as they say it
 desk.py comments [--all]                             what has been submitted, unresolved unless --all
 desk.py reply 3 "why it happens ..."                 answer a comment without closing it
 desk.py edit 3 "what I actually meant ..."            rewrite a comment, keeping what it said before
@@ -100,12 +100,16 @@ def show(note):
         marks.append(f"github {note['github']}")
     if note.get("error"):
         marks.append(f"error {note['error'][:60]}")
-    print(f"[{note['seq']}] {note.get('branch', '?')} {note['path']}:{span(note)} ({note.get('side')}) {text}")
-    print(f"      {' | '.join(marks)}")
+    # Flushed as it goes: a watch that keeps running holds its output in a buffer otherwise, and a session reading
+    # along sees a heading with nothing under it.
+    print(
+        f"[{note['seq']}] {note.get('branch', '?')} {note['path']}:{span(note)} ({note.get('side')}) {text}", flush=True
+    )
+    print(f"      {' | '.join(marks)}", flush=True)
     for answer in note.get("replies") or []:
-        print(f"      {answer['who']} {answer['at']}: {' '.join(answer['text'].split())}")
+        print(f"      {answer['who']} {answer['at']}: {' '.join(answer['text'].split())}", flush=True)
     for earlier in note.get("edits") or []:
-        print(f"      was {earlier['at']}: {' '.join(earlier['text'].split())[:80]}")
+        print(f"      was {earlier['at']}: {' '.join(earlier['text'].split())[:80]}", flush=True)
 
 
 def serve(args):
@@ -150,6 +154,8 @@ def watch(args):
         since = max((row.get("event", row["seq"]) for row in sent), default=0)
     print(f"watching for anything said past event {since}", flush=True)
     deadline = time.monotonic() + args.timeout if args.timeout else None
+    # Never returns of its own accord: a reviewer says one thing, then another, and a watch that stopped at the first
+    # left every word after it unheard - which is what happened before it kept going.
     while deadline is None or time.monotonic() < deadline:
         # The session's own writes bump the cursor too, so what it is waiting for is told from what it just did.
         fresh = [row for row in (ask(f"/comments?event={since}") or []) if row.get("eventBy") == "you"]
@@ -157,7 +163,9 @@ def watch(args):
             print(f"{len(fresh)} comment(s) with news:", flush=True)
             for note in fresh:
                 show(note)
-            return
+            since = max(row.get("event", row["seq"]) for row in fresh)
+            if args.once:
+                return
         time.sleep(args.every)
     print("nothing said within the timeout")
 
@@ -250,6 +258,7 @@ job.set_defaults(run=serve)
 
 job = jobs.add_parser("watch", help="block until a review batch is submitted")
 job.add_argument("--since", type=int, default=None, help="event to resume from; the oldest open comment by default")
+job.add_argument("--once", action="store_true", help="stop after the first thing said, rather than keeping watch")
 job.add_argument("--every", type=float, default=10.0, help="seconds between polls")
 job.add_argument("--timeout", type=float, default=0.0, help="give up after this many seconds; 0 waits forever")
 job.set_defaults(run=watch)

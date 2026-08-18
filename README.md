@@ -46,8 +46,9 @@ On the page:
   recorded, threaded, replied to and resolved like any other, reads as "the file" wherever a line range would be, and
   reaches a pull request as a review comment naming the file with no line beside it.
 - **A session hears about replies, not only comments.** The log carries an event cursor that every write bumps, and
-  `desk.py watch` follows it: an answer written on a comment read long ago wakes the session exactly as a new comment
-  does. Each event says which side made it, so a session never mistakes its own reply for news.
+  `desk.py watch` follows it: an answer written on a comment read long ago reaches the session exactly as a new comment
+  does. Each event says which side made it, so a session never mistakes its own reply for news, and the watch keeps
+  running rather than stopping at the first thing said.
 - **Every comment is a thread.** Either side can reply, and either side can resolve or reopen it. Resolving folds the
   thread to its remark alone and keeps every reply behind one click, so closing a comment discards nothing.
 - **A comment can be deleted**, whole or down to its last reply, from the `x` on the thread and the one on that reply.

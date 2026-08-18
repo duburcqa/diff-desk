@@ -2,6 +2,7 @@
 
 import concurrent.futures
 import json
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -961,3 +962,23 @@ def test_a_reply_is_news_even_on_a_comment_already_read(desk):
     # Read now, so it is behind the cursor again.
     caught_up = news[0]["event"]
     assert not [row for row in desk.get(f"/comments?event={caught_up}") if row.get("eventBy") == "you"]
+
+
+def test_watching_hears_everything_said_not_only_the_first(desk):
+    watching = desk.cli("watch", "--every", "0.2", "--timeout", "20")
+    try:
+        # Two things said one after the other: a watch that stopped at the first left the second unheard.
+        first = desk.post(
+            "/comments",
+            [{"branch": "feature", "path": "sample.py", "line": 71, "side": "new", "text": "the first word"}],
+        )["seqs"][0]
+        time.sleep(1.0)
+        desk.post("/reply", {"seq": first, "text": "and the second word", "who": "you"})
+        time.sleep(1.5)
+    finally:
+        watching.terminate()
+        said = watching.communicate(timeout=30)[0]
+    assert "the first word" in said
+    assert "and the second word" in said
+    # Its own writes are not news to it, so a session's reply never wakes it.
+    assert said.count("comment(s) with news") == 2

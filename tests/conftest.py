@@ -97,6 +97,17 @@ class Desk:
         with urllib.request.urlopen(f"{self.url}{route}", timeout=30) as answer:
             return json.loads(answer.read() or b"null")
 
+    def cli(self, *words):
+        """Run desk.py against this desk, as a session would from the command line."""
+        return subprocess.Popen(
+            [sys.executable, str(ROOT / "desk.py"), *words],
+            cwd=ROOT,
+            env={**os.environ, "DIFF_DESK_HOME": str(self.home), "DIFF_DESK_PORT": self.url.rsplit(":", 1)[1]},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+
     def page(self):
         """The page itself, as a browser asks for it, which is what a reload does."""
         with urllib.request.urlopen(f"{self.url}/", timeout=60) as answer:

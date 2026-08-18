@@ -2742,7 +2742,10 @@
     }
   }
 
-  setInterval(tick, 10000);
+  const polling = setInterval(tick, 10000);
+  // A page on its way out stops asking: a request still in flight when it goes is reported as an error by some engines,
+  // and there is nobody left to tell anyway.
+  addEventListener("pagehide", () => clearInterval(polling));
 
   const measureHead = () => {
     const box = document.querySelector("header").getBoundingClientRect();
