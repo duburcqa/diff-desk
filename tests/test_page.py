@@ -1477,3 +1477,80 @@ def test_a_reply_quoting_a_passage_shows_it_as_a_quote(page, desk):
     assert ">" not in answer
     assert page.locator(f"#note-{made} .line.reply code").first.inner_text() == "code"
     page.evaluate("() => localStorage.clear()")
+
+
+def test_a_recorded_comment_shows_the_number_it_is_referred_to_by(page, desk):
+    card = sample(page)
+    line = card.locator("tr.a[data-line]").first
+    line.locator("td.code").first.hover()
+    line.locator("button.pin").first.click()
+    saying = f"referred to by number, number {len(desk.get('/comments')) + 1}"
+    submit(page, saying)
+    page.wait_for_timeout(200)
+    made = desk.get("/comments")[-1]["seq"]
+
+    # A session answers by number, so the number is on the thread rather than only in the panel.
+    head = page.locator(f"#note-{made} .thread > .line .who").first
+    assert head.inner_text().startswith(f"[{made}]")
+    page.evaluate("() => localStorage.clear()")
+
+
+def test_a_file_comment_being_written_outlives_the_poll(page, desk):
+    card = sample(page)
+    card.locator(".filehead button.tiny", has_text="Comment on the file").first.click()
+    page.wait_for_selector(".filenote.writing")
+    page.locator(".filenote.writing textarea").fill("about the file as a whole")
+
+    # The page redraws itself while it is read, and the box a comment is being written in must survive that.
+    page.evaluate("() => { document.getElementById('main').blur(); document.activeElement.blur(); }")
+    page.evaluate("() => tick()")
+    page.wait_for_timeout(200)
+    assert page.locator(".filenote.writing").count() == 1
+    assert page.locator(".filenote.writing textarea").input_value() == "about the file as a whole"
+    page.locator(".filenote.writing button.ghost", has_text="Cancel").first.click()
+    page.evaluate("() => localStorage.clear()")
+
+
+def test_a_comment_can_be_reached_by_its_number(page, desk):
+    card = sample(page)
+    line = card.locator("tr.a[data-line]").first
+    line.locator("td.code").first.hover()
+    line.locator("button.pin").first.click()
+    saying = f"reached by number, number {len(desk.get('/comments')) + 1}"
+    submit(page, saying)
+    page.wait_for_timeout(200)
+    made = desk.get("/comments")[-1]["seq"]
+    # Settled and in a file marked reviewed, which is everything that would keep it out of sight.
+    desk.post("/resolve", {"seq": [made], "who": "session"})
+    card.locator("input[type=checkbox]").check()
+    page.reload(wait_until="load")
+    page.wait_for_selector("section.file")
+
+    # '#' from anywhere asks for a number, and the number is the one a session refers to the comment by.
+    page.keyboard.press("#")
+    assert page.evaluate("() => document.activeElement.id") == "goto"
+    page.keyboard.type(str(made))
+    page.keyboard.press("Enter")
+    page.wait_for_function(
+        """(seq) => {
+          const thread = document.getElementById(`note-${seq}`);
+          if (!thread) return false;
+          const box = thread.getBoundingClientRect();
+          const covered = document.querySelector("header").getBoundingClientRect().bottom;
+          return box.top >= covered && box.bottom < window.innerHeight;
+        }""",
+        arg=made,
+        timeout=8000,
+    )
+    assert saying in page.locator(f"#note-{made}").inner_text()
+    # Unfolded, not merely on screen: a settled thread folds to an outline of its remark, which is not reading it.
+    assert page.locator(f"#note-{made} .thread.folded").count() == 0
+    assert page.locator(f"#note-{made} .actions").count() == 1
+
+    # A number no comment answers to says so rather than going anywhere.
+    page.keyboard.press("#")
+    page.keyboard.type("999999")
+    page.keyboard.press("Enter")
+    assert page.locator("#goto.lost").count() == 1
+    page.locator("section.file[data-path='sample.py'] input[type=checkbox]").uncheck()
+    page.evaluate("() => localStorage.clear()")

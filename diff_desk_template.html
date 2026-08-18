@@ -152,6 +152,8 @@
   /* Never let a label fold onto a second line: that is what turned the bar into two rows. */
   .toggle { cursor: pointer; flex: none; white-space: nowrap; }
   #scope { flex: none; max-width: 26ch; }
+  #goto { flex: none; width: 7ch; text-align: center; font-family: var(--mono); }
+  #goto.lost { border-color: var(--del-ink); color: var(--del-ink); }
   .tabs { flex: none; }
   .toggle[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
   select:focus-visible, .toggle:focus-visible, input:focus-visible, .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -635,6 +637,7 @@
   <button class="toggle" id="sourceopen" title="Choose the repository, the base and the branches to review">Source</button>
   <div class="tabs" id="tabs" role="tablist" aria-label="Branch"></div>
   <select id="scope" aria-label="Commit"></select>
+  <input id="goto" type="text" inputmode="numeric" placeholder="#" aria-label="Go to comment by number" title="Go to a comment by its number - press # from anywhere" />
   <label class="search">
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2 14 14"/></svg>
     <input id="q" type="search" placeholder="Filter paths" aria-label="Filter paths" />
@@ -736,7 +739,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "ctx", "hidedone", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logretry", "logbind", "logsync", "logclose", "logresult", "logresolved", "brand", "repo", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved"]) {
+  for (const id of ["tabs", "scope", "q", "ctx", "hidedone", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logretry", "logbind", "logsync", "logclose", "logresult", "logresolved", "brand", "repo", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -821,6 +824,23 @@
       notes.live = false;
       return { ok: false, error: error.message };
     }
+  }
+
+  function goTo(said) {
+    const wanted = Number.parseInt(String(said).replace(/^#/, ""), 10);
+    const note = Number.isNaN(wanted) ? null : mine().find((row) => row.seq === wanted);
+    if (!note) {
+      els.goto.classList.add("lost");
+      window.setTimeout(() => els.goto.classList.remove("lost"), 900);
+      return false;
+    }
+    // Resolved and folded away, or in a file marked reviewed: reach() shows whatever it takes to read the thread.
+    if (note.state === "resolved") unfolded.add(note.seq);
+    render();
+    reach(note);
+    els.goto.value = "";
+    els.goto.blur();
+    return true;
   }
 
   async function watchBranch() {
@@ -1319,7 +1339,8 @@
     head.className = "line";
     const who = document.createElement("span");
     who.className = "who";
-    who.textContent = note.pending ? `${span(note)} pending` : span(note);
+    // The number a session refers to a comment by, right where the comment is: "[58]" in an answer means this thread.
+    who.textContent = note.pending ? `${span(note)} pending` : `[${note.seq}] ${span(note)}`;
     const text = document.createElement("span");
     text.className = "said";
     written(text, note.text);
@@ -2480,6 +2501,12 @@
   els.srcdir.addEventListener("change", loadRefs);
   els.srcfilter.addEventListener("input", drawRefs);
   grows(els.traynote);
+  els.goto.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") goTo(els.goto.value);
+    if (event.key === "Escape") els.goto.blur();
+  });
+  // A number in the address is a comment as well, so a link to one lands on it.
+  window.addEventListener("hashchange", () => goTo(window.location.hash));
   els.srcscan.addEventListener("click", () => rescan(false));
   els.moved.addEventListener("click", () => rescan(true));
   els.traysend.addEventListener("click", submitReview);
@@ -2528,6 +2555,12 @@
       els.q.focus();
       return;
     }
+    if (event.key === "#") {
+      event.preventDefault();
+      els.goto.focus();
+      els.goto.select();
+      return;
+    }
     const count = entries().length;
     if (event.key === "j" && count) jump(Math.min(state.current + 1, count - 1));
     if (event.key === "k" && count) jump(Math.max(state.current - 1, 0));
@@ -2546,12 +2579,13 @@
   });
 
   // Resolutions are posted by whoever is working through the comments, so an idle page picks them up on its own.
-  setInterval(async () => {
+  async function tick() {
     // Never redraw under a gesture: rebuilding the table destroys the pin holding the pointer, and the release that
     // would have opened the comment box is delivered to a node that is no longer in the page.
     if (drag.on) return;
     await watchBranch();
-    if (!notes.live || document.querySelector("tr[data-composer]") || notes.drafts.length) return;
+    // Every box a comment is written in, whichever it is: a redraw rebuilds the card and takes the box with it.
+    if (!notes.live || document.querySelector("tr[data-composer], .filenote.writing") || notes.drafts.length) return;
     // A box being typed into is rebuilt by a redraw, which takes the focus with it even when the words are kept.
     if (document.activeElement && document.activeElement.matches("textarea, input:not([type=checkbox])")) return;
     await loadNotes();
@@ -2563,7 +2597,9 @@
       await closeThere(false);
       await syncThere(false);
     }
-  }, 10000);
+  }
+
+  setInterval(tick, 10000);
 
   const measureHead = () => {
     const box = document.querySelector("header").getBoundingClientRect();
@@ -2584,5 +2620,7 @@
   loadNotes().then(() => {
     drawLog();
     render();
+    // Opened on a comment, the page goes to it: the comments are only known once they have been read.
+    if (/^#\d+$/.test(window.location.hash)) goTo(window.location.hash);
   });
 </script>

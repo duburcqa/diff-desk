@@ -79,6 +79,9 @@ A comment remembers the line it was written against, so when the diff moves unde
 follows that line to wherever it went and says "moved from L<n>" rather than sitting on a line number that now holds
 something else. A comment whose line is no longer in the diff at all is **kept**, marked "code moved on", and shown at
 the end of the file it belonged to. Neither is ever resolved or deleted on your behalf.
+- **Every comment wears the number it is referred to by**, so an answer that says "[58]" points at a thread you can
+  find. Press `#` from anywhere, type the number, and the page goes to it - unfolding the file and the thread whatever
+  state they were left in - and a URL ending in `#58` lands on it the same way.
 - **What you have not seen does not stay folded.** A file whose diff has changed since you marked it reviewed opens
   itself, and so does a resolved thread that has been answered since you last read it - folding again once you have.
   A fold you make by hand is remembered against the diff you made it on, so it holds until that diff moves.
