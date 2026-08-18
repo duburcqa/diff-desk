@@ -214,13 +214,17 @@ def ahead_refs(root, base):
 def stamp(root, base, refs):
     """What the diffs of these refs are built from, in one string: their tips, the base, and the work on disk.
 
+    The work on disk is taken as the content of the change, not as the list of files carrying it: an edit inside a file
+    that was already modified - a rename swept through it, a comment rewritten - leaves `git status` saying exactly what
+    it said before, and a page comparing that would believe it was up to date while showing the previous diff.
+
     Cheap enough to ask for every few seconds, which is what lets a page notice the branch has moved on without
-    collecting a single diff.
+    collecting the diffs and rebuilding itself around them.
     """
     root = str(pathlib.Path(root).expanduser())
     marks = [run(root, "rev-parse", ref).strip() for ref in (base, *refs)]
-    # Uncommitted work is part of what the checked-out branch shows, so its state has to count as well.
     marks.append(run(root, "status", "--porcelain").strip())
+    marks.append(run(root, "diff", "HEAD").strip())
     return hashlib.sha1("\x1f".join(marks).encode()).hexdigest()[:16]
 
 

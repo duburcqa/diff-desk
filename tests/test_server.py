@@ -964,6 +964,30 @@ def test_a_reply_is_news_even_on_a_comment_already_read(desk):
     assert not [row for row in desk.get(f"/comments?event={caught_up}") if row.get("eventBy") == "you"]
 
 
+def test_the_branch_has_moved_on_when_a_modified_file_changes_again(desk):
+    gen_diff_data.run(desk.repo, "checkout", "-q", "feature")
+    written = desk.repo / "added.py"
+    kept = written.read_text()
+    try:
+        written.write_text(kept + "SAID_ONCE = 1\n")
+        desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": ["feature"]})
+        first = desk.get("/state")["stamp"]
+        assert desk.get("/data")["stamp"] == first
+
+        # Edited again, in a file `git status` was already reporting: the list of modified files says exactly what it
+        # said before, so a stamp built from that list alone would claim the page was up to date.
+        written.write_text(kept + "SAID_TWICE = 2\n")
+        assert desk.get("/state")["stamp"] != first
+
+        # Back to what it was, and the stamp with it.
+        written.write_text(kept + "SAID_ONCE = 1\n")
+        assert desk.get("/state")["stamp"] == first
+    finally:
+        written.write_text(kept)
+        gen_diff_data.run(desk.repo, "checkout", "-q", "main")
+        desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": ["feature"]})
+
+
 def test_watching_hears_everything_said_not_only_the_first(desk):
     watching = desk.cli("watch", "--every", "0.2", "--timeout", "20")
     try:
