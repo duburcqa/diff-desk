@@ -42,10 +42,13 @@ one, run in the background - it blocks until a batch lands, prints it, and exits
     python3 ~/.claude/skills/diff-desk/desk.py watch
 
 It keeps running and prints whatever the reviewer says, as they say it - not only the first thing, and not only new
-comments: a reply on a comment already read reaches it just the same, since it follows the log's event cursor rather than
-the comment numbers. A session's own replies and resolutions bump that cursor too and are told apart, so what it is
-waiting for is never confused with what it just did. `--once` stops it after the first report, for a session that wants
-one batch and nothing more.
+comments: a reply on a comment already read reaches it just the same, since it follows the log's event cursor rather
+than the comment numbers. A session's own replies and resolutions bump that cursor too and are told apart, so what it is
+waiting for is never confused with what it just did.
+
+`--once` stops it after the first report, and where it stopped is remembered, so the way to be woken rather than to keep
+looking is to arm `watch --once` in the background, answer what it reports, and arm it again: the same reply never wakes
+a session twice, and nothing said while it was answering is lost. `--since N` overrides where it resumes from.
 
 Each comment prints as `[seq] branch path:line-endLine (side) text`, followed by its state and any replies. Answer in
 the thread, and close what is done - the page shows both without a reload:
@@ -60,8 +63,8 @@ reply, and the reviewer can reopen it. Resolving a comment that was posted to a 
 there, and says "not resolved there yet" until GitHub confirms it.
 
 `desk.py sync` carries replies both ways with the pull request and takes its word on what is resolved. Run it when the
-reviewer mentions having answered on GitHub, or before working through comments, so the two copies agree. `desk.py comments [--all]` lists what is outstanding. Start a fresh `watch`
-after each batch; it resumes from the current end unless given `--since N`.
+reviewer mentions having answered on GitHub, or before working through comments, so the two copies agree.
+`desk.py comments [--all]` lists what is outstanding.
 
 ## Behaviour to know
 

@@ -112,6 +112,17 @@ def show(note):
         print(f"      was {earlier['at']}: {' '.join(earlier['text'].split())[:80]}", flush=True)
 
 
+def heard_upto():
+    """The event the last watch stopped at, or None if nothing has ever watched this desk."""
+    kept = gen_diff_data.home() / "watched.json"
+    return json.loads(kept.read_text())["event"] if kept.exists() else None
+
+
+def stop_at(event):
+    kept = gen_diff_data.home() / "watched.json"
+    kept.write_text(json.dumps({"event": event}))
+
+
 def serve(args):
     refresh()
     payload = gen_diff_data.collect(args.dir, args.base, args.refs)
@@ -139,20 +150,28 @@ def watch(args):
     What it follows is the log's event cursor rather than the comment numbers, so a reply on a comment the session has
     already read wakes it just as a new comment does - and the reviewer's answer to a question is not lost because the
     comment it hangs on is old news.
+
+    Where it stopped is written down, so watching again carries on from there. That is what makes a watch that stops at
+    the first word usable: a session arms it, is woken, answers, and arms it again, with the same reply never waking it
+    twice - whereas one starting over from the oldest open comment reported what had just been dealt with, each time.
     """
     if ask("/data") is None:
         sys.exit("nothing is serving; start with 'desk.py serve' first")
     sent = ask("/comments") or []
-    # Anything still open is unaddressed, whenever it arrived, so watching starts before it rather than after: a cursor
-    # set to the end swallows whatever was written while the last batch was being worked on.
+    # Anything still open is unaddressed, whenever it arrived, so a first watch starts before it rather than after: a
+    # cursor set to the end swallows whatever was written while the last batch was being worked on.
     waiting = [row.get("event", row["seq"]) for row in sent if row.get("state") == "open"]
+    stopped = heard_upto()
     if args.since is not None:
         since = args.since
+    elif stopped is not None:
+        since = stopped
     elif waiting:
         since = min(waiting) - 1
     else:
         since = max((row.get("event", row["seq"]) for row in sent), default=0)
     print(f"watching for anything said past event {since}", flush=True)
+    stop_at(since)
     deadline = time.monotonic() + args.timeout if args.timeout else None
     # Never returns of its own accord: a reviewer says one thing, then another, and a watch that stopped at the first
     # left every word after it unheard - which is what happened before it kept going.
@@ -164,6 +183,7 @@ def watch(args):
             for note in fresh:
                 show(note)
             since = max(row.get("event", row["seq"]) for row in fresh)
+            stop_at(since)
             if args.once:
                 return
         time.sleep(args.every)
@@ -257,7 +277,9 @@ job.add_argument("--base", default="upstream/main", help="the ref to diff agains
 job.set_defaults(run=serve)
 
 job = jobs.add_parser("watch", help="block until a review batch is submitted")
-job.add_argument("--since", type=int, default=None, help="event to resume from; the oldest open comment by default")
+job.add_argument(
+    "--since", type=int, default=None, help="event to resume from; where the last watch stopped by default"
+)
 job.add_argument("--once", action="store_true", help="stop after the first thing said, rather than keeping watch")
 job.add_argument("--every", type=float, default=10.0, help="seconds between polls")
 job.add_argument("--timeout", type=float, default=0.0, help="give up after this many seconds; 0 waits forever")

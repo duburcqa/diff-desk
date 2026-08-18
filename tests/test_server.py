@@ -1006,3 +1006,12 @@ def test_watching_hears_everything_said_not_only_the_first(desk):
     assert "and the second word" in said
     # Its own writes are not news to it, so a session's reply never wakes it.
     assert said.count("comment(s) with news") == 2
+
+    # Watching again carries on from where that one stopped: what has been heard once does not wake anything twice, and
+    # a watch that stops at the first word can therefore be armed again after answering it.
+    again = desk.cli("watch", "--once", "--every", "0.2", "--timeout", "3")
+    assert "the first word" not in again.communicate(timeout=30)[0]
+    desk.post("/reply", {"seq": first, "text": "and a third word", "who": "you"})
+    heard = desk.cli("watch", "--once", "--every", "0.2", "--timeout", "20").communicate(timeout=40)[0]
+    assert "and a third word" in heard
+    assert heard.count("comment(s) with news") == 1
