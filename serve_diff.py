@@ -4,6 +4,7 @@ Endpoints, all on 127.0.0.1 so nothing is exposed off the machine:
   GET  /                      the page
   GET  /data                  the payload the page renders
   GET  /refs?dir=&base=       branches ahead of a base, for the source picker
+  GET  /state                 what the served diffs are built from, so a page can tell the branch has moved on
   POST /scan                  {dir, base, refs} - regenerate the payload and return it
   GET  /comments?since=N      every recorded comment past the cursor, each with its seq and batch
   POST /comments              {comments: [...], github: bool} - a batch as submitted, or a bare list of comments
@@ -53,6 +54,24 @@ from typing import NamedTuple
 from urllib.parse import parse_qs, urlparse
 
 import gen_diff_data
+
+
+class Source(NamedTuple):
+    """Where the served diffs come from: the repository, what they are taken against, and which refs are shown."""
+
+    root: str
+    base: str
+    refs: list
+
+
+class Serving:
+    """What is being served, so a page load can collect it again and a page can be told it has moved on.
+
+    Named at startup and renamed by every scan, since a scan is how the reader chooses what to review.
+    """
+
+    source = None
+
 
 HERE = pathlib.Path(__file__).parent
 HOME = gen_diff_data.home()
@@ -154,6 +173,30 @@ def resolve_thread(thread):
     if answer.get("data", {}).get("resolveReviewThread", {}).get("thread", {}).get("isResolved") is True:
         return "done", ""
     return "failed", "GitHub did not report the thread as resolved"
+
+
+def rebuild():
+    """Collect the served diffs again and rewrite the page around them, keeping the last good pair on any failure.
+
+    One at a time, since two page loads at once would write the same two files: what a caller gets is either the diffs
+    as they now stand, or exactly what was being served before.
+    """
+    source = Serving.source
+    if source is None:
+        return None
+    with BUILDING:
+        try:
+            payload = gen_diff_data.collect(source.root, source.base, source.refs)
+        except Exception as error:  # noqa: BLE001 - a page must still be served, so this is reported and set aside
+            print(f"REBUILD FAILED {type(error).__name__}: {error}", flush=True)
+            return None
+        if not payload["branches"]:
+            print(f"REBUILD FAILED nothing ahead of {source.base} in {source.root}", flush=True)
+            return None
+        DATA.write_text(json.dumps(payload, separators=(",", ":")))
+        if TEMPLATE.exists():
+            PAGE.write_text(gen_diff_data.render_page(TEMPLATE.read_text(), payload))
+        return payload
 
 
 def delete_comment(repo, comment):
@@ -325,6 +368,9 @@ def write_notes(rows):
 # and a comment recorded in between is simply gone.
 CHANGING = threading.Lock()
 
+# Collecting the diffs ends in a write of the payload and of the page, so it is done one at a time for the same reason.
+BUILDING = threading.Lock()
+
 
 @contextlib.contextmanager
 def changing():
@@ -358,6 +404,8 @@ class Handler(BaseHTTPRequestHandler):
         path = route.path.rstrip("/")
         if path in ("", "/index.html"):
             print(f"PAGE served to {self.headers.get('User-Agent', '?')}", flush=True)
+            # Loading the page is asking for the diffs as they stand, so they are collected again before it goes out.
+            rebuild()
             self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
         elif path == "/data":
             self._send(200, DATA.read_bytes(), "application/json")
@@ -375,6 +423,10 @@ class Handler(BaseHTTPRequestHandler):
                     "pulls": sorted(pulls.values(), key=lambda row: -row["number"]),
                 }
             )
+        elif path == "/state":
+            source = Serving.source
+            marked = gen_diff_data.stamp(source.root, source.base, source.refs) if source else None
+            self._json({"stamp": marked})
         elif path == "/lines":
             self._lines(query)
         elif path == "/favicon.ico":
@@ -430,6 +482,7 @@ class Handler(BaseHTTPRequestHandler):
         base = order.get("base") or "upstream/main"
         refs = [ref for ref in (order.get("refs") or []) if ref]
         print(f"SCAN {root} {base} {refs or '(every branch ahead)'}", flush=True)
+        Serving.source = Source(root, base, refs)
         try:
             payload = gen_diff_data.collect(root, base, refs)
         except Exception as error:  # noqa: BLE001 - whatever went wrong belongs on the page, not in a traceback
@@ -809,7 +862,8 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-def main():
+def main(source=None):
+    Serving.source = source
     print(f"diff desk on http://127.0.0.1:{PORT}/  (comments -> {NOTES})", flush=True)
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
 

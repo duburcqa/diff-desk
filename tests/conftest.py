@@ -89,6 +89,11 @@ class Desk:
         with urllib.request.urlopen(f"{self.url}{route}", timeout=30) as answer:
             return json.loads(answer.read() or b"null")
 
+    def page(self):
+        """The page itself, as a browser asks for it, which is what a reload does."""
+        with urllib.request.urlopen(f"{self.url}/", timeout=60) as answer:
+            return answer.read().decode()
+
     def post(self, route, payload):
         request = urllib.request.Request(
             f"{self.url}{route}",

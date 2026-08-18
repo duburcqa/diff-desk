@@ -79,6 +79,11 @@ A comment remembers the line it was written against, so when the diff moves unde
 follows that line to wherever it went and says "moved from L<n>" rather than sitting on a line number that now holds
 something else. A comment whose line is no longer in the diff at all is **kept**, marked "code moved on", and shown at
 the end of the file it belonged to. Neither is ever resolved or deleted on your behalf.
+- **The branch is watched while you read it.** A reload collects the diffs again, and a page left open offers a
+  **Refresh** once what it was built from has moved on - a commit, a fixup, work saved on disk. It is offered, never
+  taken: rebuilding the diff under you would move the ground you are on, and taking it keeps the branch and commit you
+  were reading, along with every comment and tick. Comments written and not yet sent are kept through both, so a
+  refresh, a reload, or a browser closed on them costs nothing.
 - **The file list is a tree** following the repository's folders, each foldable and remembered across reloads, with a
   count per folder. A chain of single-child directories is one row, so a deep path costs one line and not one per
   level. Walking onto a file inside a folded folder reveals it.

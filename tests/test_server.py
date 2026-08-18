@@ -8,6 +8,7 @@ import urllib.request
 
 import pytest
 
+import gen_diff_data
 from conftest import FILE_LINES, SECOND_EDIT
 from serve_diff import is_refusal
 
@@ -906,3 +907,33 @@ def test_a_deletion_refused_by_github_leaves_the_comment_exactly_as_it_was(desk)
     still = {row["seq"]: row for row in desk.get("/comments")}[seq]
     assert still["state"] == "open"
     assert still["github"] == "posted"
+
+
+def test_loading_the_page_collects_the_diffs_as_they_now_stand(desk):
+    gen_diff_data.run(desk.repo, "checkout", "-q", "feature")
+    written = desk.repo / "added.py"
+    kept = written.read_text()
+    try:
+        desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": ["feature"]})
+        was = desk.get("/state")["stamp"]
+        assert was
+        assert desk.get("/data")["stamp"] == was
+
+        # Work saved on disk is part of what the checked-out branch shows, so the desk reports it has moved on - and
+        # goes on serving what it collected until it is asked for more.
+        written.write_text(kept + "SAID_ON_DISK = 1\n")
+        moved = desk.get("/state")["stamp"]
+        assert moved != was
+        assert desk.get("/data")["stamp"] == was
+        assert "SAID_ON_DISK" not in json.dumps(desk.get("/data"))
+
+        # Loading the page is that request, so what it is built from holds the new line and stands at the new stamp.
+        assert "SAID_ON_DISK" in desk.page()
+        fresh = desk.get("/data")
+        assert fresh["stamp"] == moved
+        assert "SAID_ON_DISK" in json.dumps(fresh)
+    finally:
+        written.write_text(kept)
+        gen_diff_data.run(desk.repo, "checkout", "-q", "main")
+        desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": ["feature"]})
+    assert "SAID_ON_DISK" not in json.dumps(desk.get("/data"))

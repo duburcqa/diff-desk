@@ -211,6 +211,19 @@ def ahead_refs(root, base):
     return rows
 
 
+def stamp(root, base, refs):
+    """What the diffs of these refs are built from, in one string: their tips, the base, and the work on disk.
+
+    Cheap enough to ask for every few seconds, which is what lets a page notice the branch has moved on without
+    collecting a single diff.
+    """
+    root = str(pathlib.Path(root).expanduser())
+    marks = [run(root, "rev-parse", ref).strip() for ref in (base, *refs)]
+    # Uncommitted work is part of what the checked-out branch shows, so its state has to count as well.
+    marks.append(run(root, "status", "--porcelain").strip())
+    return hashlib.sha1("\x1f".join(marks).encode()).hexdigest()[:16]
+
+
 def collect(root, base, refs, upstream=None):
     """The whole reviewable payload: one entry per ref, each with its per-commit breakdown."""
     root = str(pathlib.Path(root).expanduser())
@@ -226,6 +239,7 @@ def collect(root, base, refs, upstream=None):
         "upstream": upstream,
         "branches": [],
     }
+    data["stamp"] = stamp(root, base, refs)
     for wanted in refs:
         number = pull_number(wanted)
         request = None

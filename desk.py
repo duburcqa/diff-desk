@@ -126,7 +126,7 @@ def serve(args):
     if ask("/data") is not None:
         print(f"already serving, page rebuilt: {URL}")
         return
-    serve_diff.main()
+    serve_diff.main(serve_diff.Source(args.dir, args.base, args.refs))
 
 
 def watch(args):

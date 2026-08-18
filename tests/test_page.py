@@ -1257,3 +1257,59 @@ def test_a_comment_does_not_shift_the_columns_of_the_diff_it_hangs_under(page, d
     )
     assert folded["seen"] == [folded["was"]]
     page.evaluate("() => localStorage.clear()")
+
+
+def test_a_branch_that_has_moved_on_offers_a_refresh_that_keeps_the_place(page, desk):
+    branch = page.evaluate("() => data.branches[0].ref")
+    page.reload(wait_until="load")
+    page.wait_for_selector("section.file")
+    assert page.locator("#moved").is_hidden()
+
+    gen_diff_data.run(desk.repo, "checkout", "-q", branch)
+    written = desk.repo / "added.py"
+    kept = written.read_text()
+    try:
+        written.write_text(kept + "SAID_ON_DISK = 1\n")
+        # Offered rather than taken: the diff under the reader is only rebuilt when they ask for it.
+        page.wait_for_function("() => !document.getElementById('moved').hidden", timeout=30000)
+        assert "SAID_ON_DISK" not in page.locator("#main").inner_text()
+
+        page.locator("#moved").click()
+        page.wait_for_function("() => document.getElementById('moved').hidden", timeout=30000)
+        assert "SAID_ON_DISK" in page.locator("#main").inner_text()
+        # The branch being read is still the one being read.
+        assert page.evaluate("() => data.branches[state.branch].ref") == branch
+    finally:
+        written.write_text(kept)
+        gen_diff_data.run(desk.repo, "checkout", "-q", "main")
+        desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})
+        page.reload(wait_until="load")
+        page.wait_for_selector("section.file")
+
+
+def test_a_comment_waiting_to_be_sent_survives_a_refresh_and_a_reload(page, desk):
+    card = sample(page)
+    line = card.locator("tr.a[data-line]").first
+    line.locator("td.code").first.hover()
+    line.locator("button.pin").first.click()
+    saying = f"waiting to be sent, number {len(desk.get('/comments')) + 1}"
+    page.locator("tr[data-composer='true'] textarea").fill(saying)
+    page.locator("tr[data-composer='true'] button.solid:not(.direct)").click()
+    page.wait_for_selector("#tray[data-open='true']")
+    try:
+        # Rebuilding the diff must not throw away words that have been written and not yet sent.
+        page.evaluate("() => rescan(true)")
+        page.wait_for_function("() => document.getElementById('tray').dataset.open === 'true'")
+        assert saying in page.locator("#traylist").inner_text()
+
+        page.reload(wait_until="load")
+        page.wait_for_selector("section.file")
+        assert page.locator("#tray").get_attribute("data-open") == "true"
+        assert saying in page.locator("#traylist").inner_text()
+        # Still a draft, so nothing of it has reached the log.
+        assert all(saying != row["text"] for row in desk.get("/comments"))
+    finally:
+        # Tolerant of an empty tray, so a draft that did not survive is reported by the assertion that looked for it.
+        if page.locator("#tray").get_attribute("data-open") == "true":
+            page.locator("#traydrop").click()
+        page.evaluate("() => localStorage.clear()")

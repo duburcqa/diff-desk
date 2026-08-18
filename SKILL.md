@@ -27,6 +27,11 @@ uncommitted work included. A pull request is fetched from the upstream repositor
 already up just rebuilds the page. The user can also switch repository, base, branches and pull requests from the
 page's own Source panel.
 
+A page load collects the diffs again, so a reload always shows the branch as it now stands, uncommitted work included.
+While the page is open it watches what it was built from and offers a **Refresh** in the bar once that has moved on - a
+commit, a fixup, work saved on disk - rather than rebuilding the diff under the reader. Taking it keeps the branch and
+commit being read. So an edit made while the user is reviewing needs no command from the session; tell them to refresh.
+
 `desk.py refs --dir <repo> --base <ref>` lists what is available: branches ahead of the base, and open pull requests.
 
 ## Picking up the comments
