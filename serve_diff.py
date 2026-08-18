@@ -11,10 +11,15 @@ Endpoints, all on 127.0.0.1 so nothing is exposed off the machine:
   POST /edit                  {seq, text} - rewrite a comment, keeping what it said before
   POST /reply                 {seq, text, who} - add a reply to a comment, from the session or from the reviewer
   POST /resolve               {seq: [...], answer, resolved, who} - close comments, or reopen them
+  POST /drop                  {seq, reply, repo, pr} - delete a comment, or only its last reply, here and there
   POST /publish               {repo, pr, summary, seq, resolved} - post those comments as one review; everything owed
                               when seq is omitted, which is how a post that did not land is retried
   POST /close                 {repo, pr} - resolve, on the pull request, the threads of comments closed here
   POST /sync                  {repo, pr} - carry replies both ways and take the pull request's word on what is resolved
+
+Deleting is the one thing that does discard: a dropped comment leaves the page and every exchange with the pull
+request, and a dropped reply is gone from the thread. What was posted is deleted on the pull request first, so a
+deletion that could not be made there leaves both copies as they were rather than hiding a remark that is still on it.
 
 A comment settled here stays here: posting and carrying replies leave it out unless the request asks for it, since a
 remark already answered has no business arriving on the pull request. Resolving a thread that is already there is a
@@ -151,6 +156,20 @@ def resolve_thread(thread):
     return "failed", "GitHub did not report the thread as resolved"
 
 
+def delete_comment(repo, comment):
+    """Delete one review comment from a pull request, and say why it did not go when it did not."""
+    done = subprocess.run(
+        [*gen_diff_data.github(), "api", "-X", "DELETE", f"/repos/{repo}/pulls/comments/{comment}"],
+        capture_output=True,
+        text=True,
+        timeout=90,
+        check=False,
+    )
+    if done.returncode != 0:
+        return False, " ".join((done.stderr or done.stdout).split())[:300]
+    return True, ""
+
+
 class Reconciled(NamedTuple):
     """What one comment and its thread owe each other: replies each way, and where resolution stands."""
 
@@ -220,7 +239,7 @@ def owes_resolution(row):
     Read from the state rather than from the moment it was closed: a comment closed here before it was ever posted, or
     closed by an older version of this desk, owes one just the same. Only GitHub having confirmed it settles the matter.
     """
-    if row.get("github") != "posted":
+    if row.get("github") != "posted" or row.get("state") == "deleted":
         return False
     if row.get("state") != "resolved":
         return row.get("prResolve") in ("pending", "failed")
@@ -393,6 +412,8 @@ class Handler(BaseHTTPRequestHandler):
             self._reply()
         elif path == "/resolve":
             self._resolve()
+        elif path == "/drop":
+            self._drop()
         elif path == "/publish":
             self._publish()
         elif path == "/close":
@@ -534,6 +555,75 @@ class Handler(BaseHTTPRequestHandler):
         print(f"{'RESOLVED' if closing else 'REOPENED'} {touched} comment(s) by {who}", flush=True)
         self._json({"ok": True, "resolved": touched, "state": "resolved" if closing else "open"})
 
+    def _drop(self):
+        """Delete a comment, or only its last reply, here and on the pull request when it was posted.
+
+        GitHub deletes a review comment whether or not anything answered it, and every reply is a comment of its own, so
+        what this desk put there is deleted newest first. Replies written on the pull request itself are left alone, and
+        a thread still holding one of them stays there with what remains.
+
+        The pull request goes first: a deletion that could not be made there leaves the comment here untouched, so the
+        two copies never disagree about what is still said.
+        """
+        order = self._body()
+        seq = order.get("seq")
+        last_only = bool(order.get("reply"))
+        with CHANGING:
+            rows = read_notes()
+        found = next((row for row in rows if row["seq"] == seq), None)
+        if found is None or found.get("state") == "deleted":
+            self._json({"ok": False, "error": f"no comment numbered {seq}"})
+            return
+        replies = found.get("replies") or []
+        if last_only and not replies:
+            self._json({"ok": False, "error": "nothing has been said in answer to it"})
+            return
+        # Newest first, so the comment that opened the thread is the last to go.
+        going = (
+            [replies[-1]["text"]] if last_only else [answer["text"] for answer in reversed(replies)] + [found["text"]]
+        )
+        gone = 0
+        if found.get("github") == "posted" and order.get("repo") and order.get("pr"):
+            threads, trouble = review_threads(order["repo"], order["pr"])
+            if threads is None:
+                print(f"DROP FAILED {trouble}", flush=True)
+                self._json({"ok": False, "error": trouble})
+                return
+            thread = next(
+                (
+                    node
+                    for node in threads
+                    if node["comments"]["nodes"] and node["comments"]["nodes"][0]["body"] == found["text"]
+                ),
+                None,
+            )
+            there = {
+                answer["body"]: answer["databaseId"]
+                for answer in (thread or {"comments": {"nodes": []}})["comments"]["nodes"]
+            }
+            for text in going:
+                if text not in there:
+                    continue
+                went, trouble = delete_comment(order["repo"], there[text])
+                if not went:
+                    print(f"DROP FAILED {trouble}", flush=True)
+                    self._json({"ok": False, "error": trouble, "deleted": gone})
+                    return
+                gone += 1
+        with changing() as fresh:
+            row = next((row for row in fresh if row["seq"] == seq), None)
+            if row is not None:
+                if last_only:
+                    row["replies"] = (row.get("replies") or [])[:-1]
+                else:
+                    row["state"] = "deleted"
+                    row["prResolve"] = "none"
+        print(
+            f"DROPPED {'the last reply of' if last_only else ''} [{seq}] ({gone} deleted on the pull request)",
+            flush=True,
+        )
+        self._json({"ok": True, "seq": seq, "reply": last_only, "deleted": gone})
+
     def _publish(self):
         """Post comments to a pull request as one review, and record where each of them now stands.
 
@@ -549,6 +639,7 @@ class Handler(BaseHTTPRequestHandler):
             for row in rows
             if row.get("github") in ("pending", "failed")
             and under_review(row, order)
+            and row.get("state") != "deleted"
             and (order.get("resolved") or row.get("state") != "resolved")
         ]
         sending = [row for row in owed if row["seq"] in wanted] if wanted else owed
@@ -672,7 +763,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         with CHANGING:
             rows = read_notes()
-        posted = {row["seq"]: row for row in rows if row.get("github") == "posted" and under_review(row, order)}
+        posted = {
+            row["seq"]: row
+            for row in rows
+            if row.get("github") == "posted" and row.get("state") != "deleted" and under_review(row, order)
+        }
         theirs = {}
         for thread in threads:
             said = thread["comments"]["nodes"]

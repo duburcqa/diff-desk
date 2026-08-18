@@ -425,11 +425,11 @@ def test_each_recorded_batch_can_be_sent_by_itself(page, desk):
         assert groups.count() >= 2
         sends = page.locator("#logrows .batchhead button.tiny")
         # Every batch still holding something unposted can be sent by itself; one already on the PR offers nothing.
-        # What the panel lists by default: batches still holding something unposted and unresolved.
+        # What the panel lists by default: batches still holding something unposted, unresolved and not deleted.
         pending = {
             row["batch"]
             for row in desk.get("/comments")
-            if row["branch"] == branch and row["github"] != "posted" and row["state"] != "resolved"
+            if row["branch"] == branch and row["github"] != "posted" and row["state"] not in ("resolved", "deleted")
         }
         assert sends.count() == len(pending)
         assert "PR #7" in sends.last.inner_text()
@@ -747,7 +747,8 @@ def test_the_log_reaches_a_comment_and_leaves_what_is_settled_out(page, desk):
           const thread = document.getElementById(`note-${seq}`);
           if (!thread) return false;
           const box = thread.getBoundingClientRect();
-          return box.top > 0 && box.bottom < window.innerHeight;
+          const covered = document.querySelector("header").getBoundingClientRect().bottom;
+          return box.top >= covered && box.bottom < window.innerHeight;
         }""",
         arg=made,
         timeout=8000,
@@ -757,10 +758,11 @@ def test_the_log_reaches_a_comment_and_leaves_what_is_settled_out(page, desk):
           const thread = document.getElementById(`note-${seq}`);
           if (!thread) return null;
           const box = thread.getBoundingClientRect();
+          const covered = document.querySelector("header").getBoundingClientRect().bottom;
           return {
             open: thread.closest('section.file').dataset.open,
             panelShut: document.getElementById('log').dataset.open,
-            inView: box.top > 0 && box.bottom < window.innerHeight,
+            inView: box.top >= covered && box.bottom < window.innerHeight,
           };
         }""",
         made,
@@ -1147,4 +1149,90 @@ def test_marking_a_file_reviewed_is_remembered_across_reloads(page):
     again.locator("input[type=checkbox]").uncheck()
     page.wait_for_timeout(150)
     assert again.get_attribute("data-done") == "false"
+    page.evaluate("() => localStorage.clear()")
+
+
+def test_a_comment_and_its_last_reply_can_be_deleted_from_the_page(page, desk):
+    card = sample(page)
+    line = card.locator("tr.a[data-line]").first
+    line.locator("td.code").first.hover()
+    line.locator("button.pin").first.click()
+    saying = f"written to be deleted, number {len(desk.get('/comments')) + 1}"
+    submit(page, saying)
+    page.wait_for_timeout(200)
+    made = desk.get("/comments")[-1]["seq"]
+    desk.post("/reply", {"seq": made, "text": "first answer", "who": "session"})
+    desk.post("/reply", {"seq": made, "text": "second answer", "who": "session"})
+    page.reload(wait_until="load")
+    page.wait_for_selector("section.file")
+    thread = page.locator(f"#note-{made}")
+
+    # Only the last reply carries a way out, and taking it leaves the comment and what was said before it.
+    page.on("dialog", lambda dialog: dialog.accept())
+    assert thread.locator(".line.reply button.drop").count() == 1
+    thread.locator(".line.reply button.drop").click()
+    page.wait_for_function("(seq) => document.querySelectorAll(`#note-${seq} .line.reply`).length === 1", arg=made)
+    kept = {row["seq"]: row for row in desk.get("/comments")}[made]
+    assert [answer["text"] for answer in kept["replies"]] == ["first answer"]
+
+    # Dropping the comment itself takes it off the page and out of the panel, and the log says it is gone.
+    thread.locator(".thread > .line button.drop").first.click()
+    page.wait_for_function("(seq) => !document.getElementById(`note-${seq}`)", arg=made)
+    assert {row["seq"]: row for row in desk.get("/comments")}[made]["state"] == "deleted"
+    page.locator("#logopen").click()
+    page.wait_for_selector("#log[data-open='true']")
+    assert page.locator("#logrows .logrow").filter(has_text=saying).count() == 0
+    page.locator("#logclose").click()
+    page.evaluate("() => localStorage.clear()")
+
+
+def test_a_comment_does_not_shift_the_columns_of_the_diff_it_hangs_under(page, desk):
+    card = sample(page)
+    line = card.locator("tr.a[data-line]").first
+    line.locator("td.code").first.hover()
+    line.locator("button.pin").first.click()
+    submit(page, f"hanging under the diff, number {len(desk.get('/comments')) + 1}")
+    page.wait_for_timeout(200)
+
+    # The page redraws itself while it is read, and a comment sized to nothing would fill the table and move every
+    # column under it.
+    widths = page.evaluate(
+        """async () => {
+          const gutter = () => Math.round(document.querySelector('section.file[data-open="true"] td.ln')
+            .getBoundingClientRect().width);
+          const seen = [gutter()];
+          render();
+          seen.push(gutter());
+          await new Promise(requestAnimationFrame);
+          await new Promise(requestAnimationFrame);
+          seen.push(gutter());
+          return seen;
+        }"""
+    )
+    assert widths[0] > 0
+    assert len(set(widths)) == 1
+
+    # Folding the file leaves its body with no room to report, which must not be taken for a width its comment should
+    # have: sized to nothing the comment fills the table, the code column collapses and the page stretches. Sampled
+    # frame by frame, since what this costs the reader is one flash of a diff laid out wrongly.
+    folded = page.evaluate(
+        """async () => {
+          const card = document.querySelector('section.file[data-open="true"]');
+          const shape = () => {
+            const cell = card.querySelector('td.ln').getBoundingClientRect();
+            return `${Math.round(cell.width)}|${Math.round(document.documentElement.scrollHeight)}`;
+          };
+          const was = shape();
+          card.dataset.open = "false";
+          await new Promise((done) => setTimeout(done, 150));
+          card.dataset.open = "true";
+          const seen = [];
+          for (let i = 0; i < 12; i++) {
+            await new Promise(requestAnimationFrame);
+            seen.push(shape());
+          }
+          return { was, seen: [...new Set(seen)] };
+        }"""
+    )
+    assert folded["seen"] == [folded["was"]]
     page.evaluate("() => localStorage.clear()")

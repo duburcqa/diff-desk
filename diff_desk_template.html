@@ -881,7 +881,7 @@
     note.side !== "file" && !keys.has(`${note.path}|${note.side}|${placed(note)}`);
 
   function mine() {
-    return notes.sent.filter((note) => belongs(note) && note.path !== "(review)");
+    return notes.sent.filter((note) => belongs(note) && note.path !== "(review)" && note.state !== "deleted");
   }
 
   const withResolved = () => els.logresolved.checked;
@@ -958,10 +958,15 @@
       box.classList.add("found");
       window.setTimeout(() => box.classList.remove("found"), 1600);
     }
-    // Unfolding the card moves everything below it, so the scroll waits for that layout: otherwise it aims at the
-    // old position and lands with the thread off screen.
+    // Unfolding the card moves everything below it, so the scroll waits for that layout: aiming before it lands with
+    // the thread off screen. Where it is aimed is worked out here rather than left to the browser, which centres on the
+    // whole window and so can leave the thread under the page header - and answers differently from engine to engine.
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      thread.scrollIntoView({ behavior: "smooth", block: "center" });
+      const box = thread.getBoundingClientRect();
+      const covered = document.querySelector("header").getBoundingClientRect().bottom;
+      const room = window.innerHeight - covered;
+      const middle = Math.max(0, (room - box.height) / 2);
+      window.scrollTo({ top: Math.max(0, window.scrollY + box.top - covered - middle), behavior: "smooth" });
     }));
   }
 
@@ -1116,7 +1121,8 @@
   const send1 = (note) => sendAll([note], "");
 
   function notesAt(path, line, side) {
-    const hit = (note) => belongs(note) && note.path === path && note.side === side && placed(note) === line;
+    const hit = (note) =>
+      belongs(note) && note.state !== "deleted" && note.path === path && note.side === side && placed(note) === line;
     return [...notes.sent.filter(hit), ...notes.drafts.filter(hit).map((draft) => ({ ...draft, pending: true }))];
   }
 
@@ -1320,21 +1326,35 @@
       }
       head.append(mark);
     }
+    const drop = document.createElement("button");
+    drop.className = "drop";
+    drop.textContent = "\u00d7";
     if (note.pending) {
-      const drop = document.createElement("button");
-      drop.className = "drop";
       drop.title = "Remove this comment";
-      drop.textContent = "\u00d7";
       drop.addEventListener("click", () => {
         notes.drafts = notes.drafts.filter((draft) => draft !== note.source);
         drawTray();
         render();
       });
       head.append(drop);
+    } else if (notes.live) {
+      const posted = note.github === "posted";
+      drop.title = posted ? "Delete this comment, here and on the pull request" : "Delete this comment";
+      drop.addEventListener("click", async () => {
+        const answers = (note.replies || []).length;
+        const also = answers ? ` and ${answers} repl${answers === 1 ? "y" : "ies"}` : "";
+        if (!window.confirm(`Delete this comment${also}${posted ? ", on the pull request as well" : ""}?`)) return;
+        const outcome = await post("drop", { seq: note.seq, ...where() });
+        if (!outcome.ok) window.alert(`It is still there: ${outcome.error || "GitHub unreachable"}`);
+        await loadNotes();
+        drawLog();
+        render();
+      });
+      head.append(drop);
     }
     box.append(head);
 
-    for (const answer of note.replies || []) {
+    (note.replies || []).forEach((answer, index, answers) => {
       const said = document.createElement("div");
       said.className = `line reply ${answer.who}`;
       const from = document.createElement("span");
@@ -1345,8 +1365,24 @@
       body.className = "said";
       written(body, answer.text);
       said.append(from, body);
+      // Only the last one can go: deleting further up would leave the answers below it standing against nothing.
+      if (!note.pending && notes.live && index === answers.length - 1) {
+        const undo = document.createElement("button");
+        undo.className = "drop";
+        undo.textContent = "\u00d7";
+        undo.title = note.github === "posted" ? "Delete this reply, here and on the pull request" : "Delete this reply";
+        undo.addEventListener("click", async () => {
+          if (!window.confirm("Delete the last reply?")) return;
+          const outcome = await post("drop", { seq: note.seq, reply: true, ...where() });
+          if (!outcome.ok) window.alert(`It is still there: ${outcome.error || "GitHub unreachable"}`);
+          await loadNotes();
+          drawLog();
+          render();
+        });
+        said.append(undo);
+      }
       box.append(said);
-    }
+    });
 
     // A recorded comment can be answered and closed from here; resolving keeps the thread and all of its replies.
     if (!note.pending && notes.live) {
@@ -1944,8 +1980,18 @@
       return;
     }
     shown.forEach((file, index) => els.main.append(card(file, index)));
+    fitNotes();
     markCurrent();
     paintSel();
+  }
+
+  // Written before the page is painted: the observer below only hears about a body a frame later, and a comment left
+  // without a width of its own falls back to filling the table, which redistributes every column under it.
+  function fitNotes() {
+    for (const body of els.main.querySelectorAll("section.file[data-open='true'] .body")) {
+      const room = body.clientWidth;
+      if (room) body.style.setProperty("--seen", `${Math.round(room)}px`);
+    }
   }
 
   // What each file's body can actually show, and how far it has been scrolled: together they keep every comment on
@@ -1953,7 +1999,13 @@
   const roomFor = new ResizeObserver((entries) => {
     // Written on the next frame, and only when it changes: what it sets moves the comments hanging inside, which the
     // observer would otherwise see again within the same delivery.
-    const rooms = entries.map((entry) => [entry.target, `${Math.round(entry.contentRect.width)}px`]);
+    // A folded file reports no room at all, which is not a width its comments should take: sized to nothing they fill
+    // the table instead, collapsing the code column and stretching the page. What it last had room for stands.
+    // A folded file reports no room at all, which is not a width its comments should take: sized to nothing they fill
+    // the table instead, collapsing the code column and stretching the page. What it last had room for stands.
+    const rooms = entries
+      .filter((entry) => entry.contentRect.width)
+      .map((entry) => [entry.target, `${Math.round(entry.contentRect.width)}px`]);
     requestAnimationFrame(() => {
       for (const [node, room] of rooms) {
         if (node.style.getPropertyValue("--seen") !== room) node.style.setProperty("--seen", room);
@@ -2014,6 +2066,7 @@
     }
     grow.addEventListener("click", () => {
       wrap.dataset.open = wrap.dataset.open === "true" ? "false" : "true";
+      fitNotes();
     });
 
     const counts = document.createElement("span");

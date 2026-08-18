@@ -46,7 +46,12 @@ On the page:
   recorded, threaded, replied to and resolved like any other, reads as "the file" wherever a line range would be, and
   reaches a pull request as a review comment naming the file with no line beside it.
 - **Every comment is a thread.** Either side can reply, and either side can resolve or reopen it. Resolving folds the
-  thread to its remark alone and keeps every reply behind one click; nothing is ever deleted.
+  thread to its remark alone and keeps every reply behind one click, so closing a comment discards nothing.
+- **A comment can be deleted**, whole or down to its last reply, from the `x` on the thread and the one on that reply.
+  A comment already posted is deleted on the pull request as well, newest first, and a deletion GitHub refuses leaves it
+  here untouched rather than hiding a remark that is still there. Deleting is the one thing that does discard: it is
+  asked for each time, and only the last reply can go, since deleting further up would leave the answers below it
+  standing against nothing.
 - **Resolving one that reached the pull request resolves it there too**, by finding the thread its text opened and
   resolving that. Until GitHub confirms it, the comment reads "resolved here" and "not resolved there yet" rather than
   claiming agreement it does not have; a resolution that could not be made is retried like a post that did not land.

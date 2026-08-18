@@ -769,3 +769,140 @@ def test_a_branch_behind_the_base_shows_the_difference_it_does_have(desk):
     assert branch["commits"] == []
     assert branch["files"][0]["path"] == "added.py"
     desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": ["feature"]})
+
+
+def test_a_dropped_comment_is_deleted_on_the_pull_request_and_leaves_the_log_behind(desk):
+    made = desk.post(
+        "/comments",
+        {
+            "comments": [
+                {"branch": "feature", "path": "sample.py", "line": 42, "side": "new", "text": "written to be dropped"}
+            ],
+            "github": True,
+        },
+    )
+    seq = made["seqs"][0]
+    desk.github_answers(out=json.dumps({"html_url": "https://github.com/someone/somewhere/pull/7#review-1"}))
+    desk.post("/publish", {"repo": "someone/somewhere", "pr": 7, "seq": [seq]})
+    desk.post("/reply", {"seq": seq, "text": "answered before it went", "who": "session"})
+
+    threads = {
+        "data": {
+            "repository": {
+                "pullRequest": {
+                    "reviewThreads": {
+                        "nodes": [
+                            {
+                                "id": "T_drop",
+                                "isResolved": False,
+                                "comments": {
+                                    "nodes": [
+                                        {
+                                            "databaseId": 900,
+                                            "body": "written to be dropped",
+                                            "path": "sample.py",
+                                            "author": {"login": "duburcqa"},
+                                        },
+                                        {
+                                            "databaseId": 901,
+                                            "body": "answered before it went",
+                                            "path": "sample.py",
+                                            "author": {"login": "duburcqa"},
+                                        },
+                                    ]
+                                },
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    }
+    desk.github_answers(rules=[{"match": "reviewThreads", "out": json.dumps(threads)}])
+
+    outcome = desk.post("/drop", {"seq": seq, "repo": "someone/somewhere", "pr": 7})
+    assert outcome["ok"]
+    # The reply goes first and the comment that opened the thread last, so nothing is left answering a deleted remark.
+    deletions = [call for call in desk.github_calls() if "DELETE" in call]
+    assert [call.split("/")[-1] for call in deletions[-2:]] == ["901", "900"]
+    dropped = {row["seq"]: row for row in desk.get("/comments")}[seq]
+    assert dropped["state"] == "deleted"
+    assert dropped["text"] == "written to be dropped"
+
+    # Dropped, it owes the pull request nothing and is offered to nothing: a sweep must not raise it from the log.
+    assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 7})["sent"] == 0
+    assert desk.post("/close", {"repo": "someone/somewhere", "pr": 7})["closed"] == 0
+    assert desk.post("/drop", {"seq": seq, "repo": "someone/somewhere", "pr": 7})["ok"] is False
+
+
+def test_dropping_the_last_reply_leaves_the_comment_and_what_was_said_before_it(desk):
+    made = desk.post(
+        "/comments",
+        {
+            "comments": [{"branch": "feature", "path": "sample.py", "line": 43, "side": "new", "text": "kept"}],
+            "github": False,
+        },
+    )
+    seq = made["seqs"][0]
+    assert desk.post("/drop", {"seq": seq, "reply": True})["ok"] is False
+
+    desk.post("/reply", {"seq": seq, "text": "first answer", "who": "session"})
+    desk.post("/reply", {"seq": seq, "text": "second answer", "who": "you"})
+    outcome = desk.post("/drop", {"seq": seq, "reply": True})
+    assert outcome["ok"]
+    kept = {row["seq"]: row for row in desk.get("/comments")}[seq]
+    assert kept["state"] == "open"
+    assert [answer["text"] for answer in kept["replies"]] == ["first answer"]
+
+
+def test_a_deletion_refused_by_github_leaves_the_comment_exactly_as_it_was(desk):
+    made = desk.post(
+        "/comments",
+        {
+            "comments": [{"branch": "feature", "path": "sample.py", "line": 44, "side": "new", "text": "refused drop"}],
+            "github": True,
+        },
+    )
+    seq = made["seqs"][0]
+    desk.github_answers(out=json.dumps({"html_url": "https://github.com/someone/somewhere/pull/7#review-1"}))
+    desk.post("/publish", {"repo": "someone/somewhere", "pr": 7, "seq": [seq]})
+
+    threads = {
+        "data": {
+            "repository": {
+                "pullRequest": {
+                    "reviewThreads": {
+                        "nodes": [
+                            {
+                                "id": "T_refused",
+                                "isResolved": False,
+                                "comments": {
+                                    "nodes": [
+                                        {
+                                            "databaseId": 950,
+                                            "body": "refused drop",
+                                            "path": "sample.py",
+                                            "author": {"login": "duburcqa"},
+                                        }
+                                    ]
+                                },
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    }
+    desk.github_answers(
+        rules=[
+            {"match": "reviewThreads", "out": json.dumps(threads)},
+            {"match": "DELETE", "code": 1, "err": "gh: Forbidden (HTTP 403)"},
+        ]
+    )
+    outcome = desk.post("/drop", {"seq": seq, "repo": "someone/somewhere", "pr": 7})
+    assert outcome["ok"] is False
+    assert "403" in outcome["error"]
+    # Still on the pull request, so it is still here: the two copies never disagree about what is said.
+    still = {row["seq"]: row for row in desk.get("/comments")}[seq]
+    assert still["state"] == "open"
+    assert still["github"] == "posted"
