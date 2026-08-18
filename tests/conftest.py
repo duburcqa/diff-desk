@@ -15,6 +15,10 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+# Git may reach nothing but the disk here, so the fetch a pull request ref asks for fails at once instead of spending
+# the better part of a minute resolving a repository that only the stand-in for gh knows about.
+os.environ["GIT_ALLOW_PROTOCOL"] = "file"
+
 import gen_diff_data  # noqa: E402  (the package under test lives beside its tests)
 
 # The two lines the fixture branch rewrites, far enough apart to leave a gap between the hunks they produce.
@@ -129,6 +133,9 @@ class Desk:
 def desk(repo, tmp_path_factory):
     home = tmp_path_factory.mktemp("home")
     port = free_port()
+    # Said to a file rather than to a pipe: nothing here reads the desk as it talks, and a pipe nobody empties fills up
+    # and stops the server mid-answer once a long enough session has been served.
+    told = (home / "serve.log").open("w")
     process = subprocess.Popen(
         [sys.executable, str(ROOT / "desk.py"), "serve", "--dir", str(repo), "--base", "main", "feature"],
         cwd=ROOT,
@@ -141,7 +148,7 @@ def desk(repo, tmp_path_factory):
             "FAKE_GH_SCRIPT": str(home / "fake_gh.json"),
             "FAKE_GH_LOG": str(home / "fake_gh.log"),
         },
-        stdout=subprocess.PIPE,
+        stdout=told,
         stderr=subprocess.STDOUT,
         text=True,
     )
@@ -149,7 +156,7 @@ def desk(repo, tmp_path_factory):
     running.github_answers(code=1, err="gh: Not Found (HTTP 404)")
     for _ in range(200):
         if process.poll() is not None:
-            pytest.fail(f"the desk exited: {process.stdout.read()}")
+            pytest.fail(f"the desk exited: {(home / 'serve.log').read_text()}")
         try:
             running.get("/data")
             break
@@ -161,6 +168,7 @@ def desk(repo, tmp_path_factory):
     yield running
     process.terminate()
     process.wait(timeout=10)
+    told.close()
 
 
 @pytest.fixture(scope="session")
