@@ -24,23 +24,26 @@
     --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   }
 
+  /* The dark palette is written twice, once for the system setting and once for the explicit toggle, so a token raised
+     in one is raised in the other or the two disagree. Text holds at least 7:1 over every ground it sits on - a changed
+     line's own tint included - and the quieter greys that carry line numbers and labels hold 4.5:1. */
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       --ground: #11141a;
-      --surface: #171b23;
-      --surface-sunk: #1d222b;
-      --ink: #e7eaf0;
-      --muted: #949eaf;
-      --faint: #6d7787;
-      --rule: #262c36;
-      --rule-strong: #333b47;
+      --surface: #151a21;
+      --surface-sunk: #1b212a;
+      --ink: #f2f5fa;
+      --muted: #adb8c9;
+      --faint: #8b95a6;
+      --rule: #2c333f;
+      --rule-strong: #414b59;
       --accent: #93aeec;
       --accent-soft: #1b2536;
-      --add-ink: #79cfa4;
-      --add-bg: #15271e;
+      --add-ink: #a8e6c3;
+      --add-bg: #132d20;
       --add-gutter: #2c5340;
-      --del-ink: #e49c8c;
-      --del-bg: #291916;
+      --del-ink: #f5b3a4;
+      --del-bg: #331b17;
       --del-gutter: #5c332a;
       --stale: #e0b567;
       --stale-bg: #2a2113;
@@ -50,20 +53,20 @@
 
   :root[data-theme="dark"] {
     --ground: #11141a;
-    --surface: #171b23;
-    --surface-sunk: #1d222b;
-    --ink: #e7eaf0;
-    --muted: #949eaf;
-    --faint: #6d7787;
-    --rule: #262c36;
-    --rule-strong: #333b47;
+    --surface: #151a21;
+    --surface-sunk: #1b212a;
+    --ink: #f2f5fa;
+    --muted: #adb8c9;
+    --faint: #8b95a6;
+    --rule: #2c333f;
+    --rule-strong: #414b59;
     --accent: #93aeec;
     --accent-soft: #1b2536;
-    --add-ink: #79cfa4;
-    --add-bg: #15271e;
+    --add-ink: #a8e6c3;
+    --add-bg: #132d20;
     --add-gutter: #2c5340;
-    --del-ink: #e49c8c;
-    --del-bg: #291916;
+    --del-ink: #f5b3a4;
+    --del-bg: #331b17;
     --del-gutter: #5c332a;
     --stale: #e0b567;
     --stale-bg: #2a2113;
