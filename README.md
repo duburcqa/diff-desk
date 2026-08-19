@@ -2,6 +2,8 @@
 
 A local code review page for any git range, and a way to hand the comments you leave on it to an AI coding session.
 
+![The review page: the file tree, a diff with a comment thread open, and the comment panel](media/desk.png)
+
 Point it at a repository and a base ref; it serves a review page on `127.0.0.1:8787` with your branches as tabs, each
 scoped to the whole range or to a single commit. You comment on lines by dragging over them; every submitted batch is
 recorded to a file with a cursor, so a session can pick up exactly what it has not seen yet, work through it, and mark
