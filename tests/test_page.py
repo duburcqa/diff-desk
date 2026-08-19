@@ -595,6 +595,70 @@ def test_a_file_opened_by_hand_stays_open_when_the_page_redraws(page):
     page.evaluate("() => localStorage.clear()")
 
 
+def test_the_path_filter_lists_what_it_matches_for_picking_by_name(page):
+    page.set_viewport_size({"width": 1200, "height": 600})
+    page.locator("#q").click()
+    page.wait_for_selector("#palette:not([hidden])")
+    listed = page.locator("#palette .pick")
+    paths = page.evaluate("() => [...document.querySelectorAll('section.file')].map((card) => card.dataset.path)")
+    assert listed.count() == len(paths)
+    # The name stands on its own and the directory beside it, which is how a file is recognised in a list of many.
+    assert listed.first.locator("b").inner_text() == paths[0].split("/")[-1]
+
+    # Typing narrows the list to what it matches, and the first match is the one waiting to be taken.
+    page.locator("#q").fill("deep")
+    page.wait_for_function("() => document.querySelectorAll('#palette .pick').length === 1")
+    assert listed.first.get_attribute("data-on") == "true"
+    assert "pkg/sub" in listed.first.locator(".where").inner_text()
+
+    # Taken with the keyboard: the list closes and the file it named is what the reader is brought to.
+    page.locator("#q").press("Enter")
+    page.wait_for_selector("#palette", state="hidden")
+    page.wait_for_timeout(500)
+    assert (
+        page.evaluate(
+            """() => {
+          const covered = document.querySelector('header').getBoundingClientRect().bottom;
+          const cards = [...document.querySelectorAll('section.file')];
+          const near = cards.map((card) => Math.abs(card.getBoundingClientRect().top - covered));
+          return cards[near.indexOf(Math.min(...near))].dataset.path;
+        }"""
+        )
+        == "pkg/sub/deep.py"
+    )
+
+    # Reopened, stepped through with the arrows, and taken by a press on the row itself.
+    page.locator("#q").fill("")
+    page.locator("#q").click()
+    page.wait_for_selector("#palette:not([hidden])")
+    page.locator("#q").press("ArrowDown")
+    assert listed.nth(1).get_attribute("data-on") == "true"
+    page.locator("#q").press("ArrowUp")
+    assert listed.first.get_attribute("data-on") == "true"
+    wanted = listed.nth(2).get_attribute("data-path")
+    listed.nth(2).click()
+    page.wait_for_selector("#palette", state="hidden")
+    page.wait_for_timeout(500)
+    assert (
+        page.evaluate(
+            """() => {
+          const covered = document.querySelector('header').getBoundingClientRect().bottom;
+          const cards = [...document.querySelectorAll('section.file')];
+          const near = cards.map((card) => Math.abs(card.getBoundingClientRect().top - covered));
+          return cards[near.indexOf(Math.min(...near))].dataset.path;
+        }"""
+        )
+        == wanted
+    )
+
+    # Escape closes the list and leaves the review as it was.
+    page.locator("#q").click()
+    page.wait_for_selector("#palette:not([hidden])")
+    page.locator("#q").press("Escape")
+    page.wait_for_selector("#palette", state="hidden")
+    assert page.locator("section.file").count() == len(paths)
+
+
 def test_stepping_lands_on_the_file_left_to_review_nearest_the_reader(page):
     page.set_viewport_size({"width": 1200, "height": 500})
     paths = page.evaluate("() => [...document.querySelectorAll('section.file')].map((card) => card.dataset.path)")
