@@ -383,6 +383,9 @@ def test_code_and_comments_stay_legible_in_every_theme(page, desk):
     # and the delimiter is all there is to go on.
     page.locator(f"#note-{made['seq']} button.solid").filter(has_text="Resolve").click()
     page.wait_for_selector(f"#note-{made['seq']} .thread.done")
+    # Shown whole again: the reader's own resolve folds a thread, and a folded one carries no box to reply in.
+    page.locator(f"#note-{made['seq']} button.tiny").filter(has_text="resolved").click()
+    page.wait_for_selector(f"#note-{made['seq']} .thread:not(.folded) .actions textarea")
 
     read = """({theme, seq}) => {
       const root = document.documentElement;
@@ -442,6 +445,11 @@ def test_code_and_comments_stay_legible_in_every_theme(page, desk):
         leftGap: Math.round(box.left - view.left),
         rightGap: Math.round(view.right - box.right),
         codeSpread: Math.max(...code) - Math.min(...code),
+        reply: (() => {
+          const box = thread.querySelector(".actions textarea");
+          const said = getComputedStyle(box);
+          return { ink: said.color, ground: said.backgroundColor };
+        })(),
       };
     }"""
 
@@ -466,6 +474,10 @@ def test_code_and_comments_stay_legible_in_every_theme(page, desk):
         assert seen["delTint"] >= 1.05
 
     for seen in arms.values():
+        # The box a reply is written in is dressed by the page like every other, or it paints the browser's own white
+        # over a dark thread - the one patch a reader cannot read at all.
+        assert seen["reply"]["ink"] == seen["tokens"]["--ink"]
+        assert seen["reply"]["ground"] == seen["tokens"]["--surface"]
         # Outlined all round rather than on the left alone, rounded and lifted: a card over the diff, in either theme.
         assert min(seen["outline"]) >= 1
         assert seen["outline"][3] >= 3

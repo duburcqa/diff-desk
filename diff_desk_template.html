@@ -433,7 +433,7 @@
     transform: translateX(var(--slid, 0px));
   }
   .notebox { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px 10px; border-left: 3px solid var(--accent); }
-  .notebox textarea, .tray textarea {
+  .notebox textarea, .tray textarea, .thread .actions textarea {
     font: inherit;
     font-family: var(--sans);
     font-size: 12.5px;
@@ -533,7 +533,8 @@
   .thread .mark.failed { color: var(--del-ink); background: var(--del-bg); }
   .thread .mark.posted { color: var(--add-ink); background: var(--add-bg); }
   .thread .actions { align-items: center; }
-  .thread .actions textarea { flex: 1; min-height: 0; resize: vertical; }
+  /* The rest of a reply box reads with the boxes above; what is its own here is that it fills the row it sits in. */
+  .thread .actions textarea { flex: 1; min-height: 0; }
   button.tiny {
     flex: none;
     font: inherit;
