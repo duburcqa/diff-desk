@@ -844,11 +844,12 @@ def test_a_file_changed_since_it_was_reviewed_opens_itself(page, desk):
     try:
         written.write_text(kept + "SAID_ON_DISK = 1\n")
         # Refreshed rather than reloaded, so the fold the reader just made is still remembered when the diff arrives.
-        page.wait_for_function("() => !document.getElementById('moved').disabled", timeout=30000)
+        # The page only looks for news on its own timer, so that round is driven here rather than waited out.
+        page.evaluate("() => tick()")
+        page.wait_for_function("() => !document.getElementById('moved').disabled")
         page.locator("#moved").click()
         page.wait_for_function(
-            "() => { const it = document.getElementById('moved'); return it.disabled && !it.dataset.busy; }",
-            timeout=30000,
+            "() => { const it = document.getElementById('moved'); return it.disabled && !it.dataset.busy; }"
         )
         # Reviewed and folded, then changed: the reader has not seen this diff, so it is not folded away for them.
         again = page.locator("section.file[data-path='added.py']")
@@ -1664,7 +1665,9 @@ def test_a_branch_that_has_moved_on_offers_a_refresh_that_keeps_the_place(page, 
     try:
         written.write_text(kept + "SAID_ON_DISK = 1\n")
         # Offered rather than taken: the diff under the reader is only rebuilt when they ask for it.
-        page.wait_for_function("() => !document.getElementById('moved').disabled", timeout=30000)
+        # The page only looks for news on its own timer, so that round is driven here rather than waited out.
+        page.evaluate("() => tick()")
+        page.wait_for_function("() => !document.getElementById('moved').disabled")
         assert "SAID_ON_DISK" not in page.locator("#main").inner_text()
 
         # Coloured like a file whose diff has moved on: the same news, so the same colour draws the eye to it.
