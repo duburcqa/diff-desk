@@ -17,6 +17,13 @@ playwright = pytest.importorskip("playwright.sync_api")
 
 ENGINES = ("chromium", "webkit", "firefox")
 STEP = 20
+# The file the reader is on: the card whose head sits nearest the bar floating over the top of the page.
+NEAREST = """() => {
+  const covered = document.querySelector('header').getBoundingClientRect().bottom;
+  const cards = [...document.querySelectorAll('section.file')];
+  const near = cards.map((card) => Math.abs(card.getBoundingClientRect().top - covered));
+  return cards[near.indexOf(Math.min(...near))].dataset.path;
+}"""
 
 
 @pytest.fixture(scope="module")
@@ -63,6 +70,25 @@ def until(question, seconds=10.0):
     raise AssertionError("the desk never reported it")
 
 
+def settle(page):
+    """Give the page the two frames a scroll or a resize takes to be laid out, since the next read is of that layout."""
+    page.evaluate("() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))")
+
+
+def reached(page, want):
+    """Wait for a pick to have brought the file it names under the bar, which is where it leaves the reader."""
+    page.wait_for_function(f"(want) => ({NEAREST})() === want", arg=want)
+
+
+def keys_reach(page):
+    """Wait for the focus to have left every box, since a letter typed into a box is the box's and not a shortcut.
+
+    Closing the picker blurs the box it carries, and the focus is only gone from it a task later in some engines: a
+    shortcut pressed before then is typed into the box instead, and nothing at all happens on the page.
+    """
+    page.wait_for_function("() => !['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)")
+
+
 def rows(page, kind=""):
     return page.locator(f"tr{kind}[data-line]")
 
@@ -75,9 +101,13 @@ def sample(page):
 def read(page, seq):
     """Bring a thread in front of the reader and redraw, which is what makes its replies count as read."""
     page.evaluate("(seq) => document.getElementById(`note-${seq}`).scrollIntoView({block: 'center'})", seq)
-    page.wait_for_timeout(400)
+    # Having been seen is reported by an observer, so the redraw waits on that word rather than on a guessed pause.
+    page.wait_for_function(
+        "(seq) => { const box = document.querySelector(`#note-${seq} .thread`);"
+        " return !box.dataset.answers || heard[seq] >= Number(box.dataset.answers); }",
+        arg=seq,
+    )
     page.evaluate("() => render()")
-    page.wait_for_timeout(150)
 
 
 def wide(page):
@@ -86,7 +116,11 @@ def wide(page):
 
 
 def submit(page, text):
-    """Write the comment, add it to the review, and send the batch: recording happens on the send, not the write."""
+    """Write the comment, add it to the review, and send the batch: recording happens on the send, not the write.
+
+    The tray empties only once the desk has answered for the batch, so the comment can be read back the moment this
+    returns.
+    """
     page.locator("tr[data-composer='true'] textarea").fill(text)
     page.locator("tr[data-composer='true'] button.solid:not(.direct)").click()
     page.wait_for_selector("#tray[data-open='true']")
@@ -95,7 +129,10 @@ def submit(page, text):
 
 
 def submit_alone(page, text):
-    """Send one comment straight from the box, without it waiting in the review tray."""
+    """Send one comment straight from the box, without it waiting in the review tray.
+
+    The box goes only once the desk has answered, so the comment can be read back the moment this returns.
+    """
     page.locator("tr[data-composer='true'] textarea").fill(text)
     page.locator("tr[data-composer='true'] button.solid.direct").click()
     page.wait_for_function("() => document.querySelectorAll(\"tr[data-composer='true']\").length === 0")
@@ -110,7 +147,7 @@ def drag(page, first, last, column):
     where = {"pin": "button.pin", "rail": "td.ln", "code": "td.code"}[column]
     # Press on something in view, the way a hand has to: mid-viewport, clear of the header floating over the top.
     first.evaluate("node => node.scrollIntoView({block: 'center'})")
-    page.wait_for_timeout(80)
+    settle(page)
     if column == "pin":
         first.locator("td.code").first.hover()
     start = first.locator(where).first.bounding_box()
@@ -131,7 +168,7 @@ def drag(page, first, last, column):
     # What the range holds at the moment of release, which is what the release must not change.
     held = page.locator("tr.sel").count()
     page.mouse.up()
-    page.wait_for_timeout(80)
+    page.wait_for_selector("body.dragging", state="detached")
     return held, page.locator("tr.sel").count()
 
 
@@ -200,14 +237,16 @@ def test_a_thread_can_be_answered_rewritten_closed_and_reopened_from_the_page(pa
     thread.locator(".line:not(.reply) button.tiny").filter(has_text="Edit").click()
     thread.locator("textarea").first.fill("the remark, rewritten")
     thread.locator("button.solid").filter(has_text="Save").click()
-    page.wait_for_timeout(400)
+    page.wait_for_function(
+        f"() => document.querySelector('#note-{seq} .thread > .line .said')?.textContent === 'the remark, rewritten'"
+    )
     rewritten = {row["seq"]: row for row in desk.get("/comments")}[seq]
     assert rewritten["text"] == "the remark, rewritten"
     # Rewriting keeps what it said before, so an edit never silently rewrites history.
     assert [earlier["text"] for earlier in rewritten["edits"]] == ["the remark as first written"]
 
     page.locator(f"#note-{seq} button.solid").filter(has_text="Resolve").click()
-    page.wait_for_timeout(400)
+    page.wait_for_selector(f"#note-{seq} .thread.folded")
     assert {row["seq"]: row for row in desk.get("/comments")}[seq]["state"] == "resolved"
     # A resolved thread folds to its remark alone: its replies and its actions are one click away, never discarded.
     folded = page.locator(f"#note-{seq} .thread.folded")
@@ -215,11 +254,11 @@ def test_a_thread_can_be_answered_rewritten_closed_and_reopened_from_the_page(pa
     assert page.locator(f"#note-{seq} .reply").count() == 0
     assert page.locator(f"#note-{seq} textarea").count() == 0
     page.locator(f"#note-{seq} button.tiny").filter(has_text="resolved").click()
-    page.wait_for_timeout(200)
+    page.wait_for_selector(f"#note-{seq} .thread.folded", state="detached")
     assert page.locator(f"#note-{seq} .thread.folded").count() == 0
     assert page.locator(f"#note-{seq} .reply").count() == 1
     page.locator(f"#note-{seq} button.ghost").filter(has_text="Reopen").click()
-    page.wait_for_timeout(400)
+    page.wait_for_selector(f"#note-{seq} .thread.done", state="detached")
     reopened = {row["seq"]: row for row in desk.get("/comments")}[seq]
     assert reopened["state"] == "open"
     # Closing and reopening leave the thread exactly as it was: no reply invented, none dropped.
@@ -249,7 +288,6 @@ def test_one_comment_can_be_sent_without_a_batch(page, desk):
     line.locator("button.pin").first.click()
     before = len(desk.get("/comments"))
     submit_alone(page, "sent straight from the box")
-    page.wait_for_timeout(300)
     rows = desk.get("/comments")
     # Recorded on its own, and the tray is never involved.
     assert len(rows) == before + 1
@@ -293,7 +331,7 @@ def test_the_file_list_follows_the_folders(page):
     # Walking onto a file inside a folded folder reveals it rather than marking something out of sight.
     page.keyboard.press("j")
     page.keyboard.press("j")
-    page.wait_for_timeout(200)
+    page.wait_for_selector("#filelist .fileitem[data-current='true']")
     current = page.locator("#filelist .fileitem[data-current='true']")
     assert current.count() == 1
     assert current.first.is_visible()
@@ -337,14 +375,18 @@ def test_a_local_comment_can_be_turned_towards_the_pull_request(page, desk):
     assert standing.inner_text() == "local only"
     # The decision is changeable after the fact, so a comment written before deciding does not have to be rewritten.
     standing.click()
-    page.wait_for_timeout(400)
+    page.wait_for_function(
+        f"() => document.querySelector('#note-{made['seq']} button.mark').textContent !== 'local only'"
+    )
     assert {row["seq"]: row for row in desk.get("/comments")}[made["seq"]]["github"] in ("pending", "failed", "refused")
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
     back = page.locator(f"#note-{made['seq']} button.mark").first
     assert back.inner_text() != "local only"
     back.click()
-    page.wait_for_timeout(400)
+    page.wait_for_function(
+        f"() => document.querySelector('#note-{made['seq']} button.mark').textContent === 'local only'"
+    )
     assert {row["seq"]: row for row in desk.get("/comments")}[made["seq"]]["github"] == "none"
 
 
@@ -642,8 +684,8 @@ def test_a_comment_resolved_here_does_not_claim_the_pull_request_agrees(page, de
     page.wait_for_selector("#log[data-open='true']")
     # Settled comments are out of the listing by default, so this one is asked for.
     page.locator("#logresolved").check()
-    page.wait_for_timeout(150)
     row = page.locator("#logrows .logrow").filter(has_text="a remark of its own").first
+    row.wait_for()
     marks = row.locator(".mark").all_inner_texts()
     # Closed here and posted there, but the thread on the pull request is not resolved - and the page must say so.
     # Being closed is said by the colour the row is drawn in, and the pull request's disagreement by a mark of its own.
@@ -660,17 +702,17 @@ def test_marking_a_file_reviewed_from_inside_it_brings_reading_back_to_the_next_
     page.set_viewport_size({"width": 1200, "height": 420})
     card = sample(page)
     path = card.get_attribute("data-path")
-    page.evaluate(
+    started = page.evaluate(
         """(path) => {
           const node = document.querySelector(`section.file[data-path="${CSS.escape(path)}"]`);
           window.scrollTo(0, node.offsetTop + node.offsetHeight * 0.6);
+          return Math.round(window.scrollY);
         }""",
         path,
     )
-    page.wait_for_timeout(150)
-    started = page.evaluate("() => Math.round(window.scrollY)")
     card.locator("input[type=checkbox]").check()
-    page.wait_for_timeout(400)
+    page.wait_for_selector(f"section.file[data-path='{path}'][data-done='true']")
+    settle(page)
     placed = page.evaluate(
         """(path) => {
           const node = document.querySelector(`section.file[data-path="${CSS.escape(path)}"]`);
@@ -745,20 +787,11 @@ def test_the_path_filter_lists_what_it_matches_for_picking_by_name(page):
     # Taken with the keyboard: the list closes and the file it named is what the reader is brought to.
     page.locator("#pq").press("Enter")
     page.wait_for_selector("#palette", state="hidden")
-    page.wait_for_timeout(500)
-    assert (
-        page.evaluate(
-            """() => {
-          const covered = document.querySelector('header').getBoundingClientRect().bottom;
-          const cards = [...document.querySelectorAll('section.file')];
-          const near = cards.map((card) => Math.abs(card.getBoundingClientRect().top - covered));
-          return cards[near.indexOf(Math.min(...near))].dataset.path;
-        }"""
-        )
-        == "pkg/sub/deep.py"
-    )
+    reached(page, "pkg/sub/deep.py")
+    assert page.evaluate(NEAREST) == "pkg/sub/deep.py"
 
     # Reopened with the shortcut, stepped through with the arrows, and taken by a press on the row itself.
+    keys_reach(page)
     page.keyboard.press("/")
     page.wait_for_selector("#palette:not([hidden])")
     page.locator("#pq").fill("")
@@ -770,20 +803,11 @@ def test_the_path_filter_lists_what_it_matches_for_picking_by_name(page):
     wanted = listed.nth(2).get_attribute("data-path")
     listed.nth(2).click()
     page.wait_for_selector("#palette", state="hidden")
-    page.wait_for_timeout(500)
-    assert (
-        page.evaluate(
-            """() => {
-          const covered = document.querySelector('header').getBoundingClientRect().bottom;
-          const cards = [...document.querySelectorAll('section.file')];
-          const near = cards.map((card) => Math.abs(card.getBoundingClientRect().top - covered));
-          return cards[near.indexOf(Math.min(...near))].dataset.path;
-        }"""
-        )
-        == wanted
-    )
+    reached(page, wanted)
+    assert page.evaluate(NEAREST) == wanted
 
     # Escape closes the list and leaves the review as it was.
+    keys_reach(page)
     page.keyboard.press("/")
     page.wait_for_selector("#palette:not([hidden])")
     page.locator("#pq").press("Escape")
@@ -794,37 +818,41 @@ def test_the_path_filter_lists_what_it_matches_for_picking_by_name(page):
 def test_stepping_lands_on_the_file_left_to_review_nearest_the_reader(page):
     page.set_viewport_size({"width": 1200, "height": 500})
     paths = page.evaluate("() => [...document.querySelectorAll('section.file')].map((card) => card.dataset.path)")
-    reading = """() => {
-      const covered = document.querySelector('header').getBoundingClientRect().bottom;
-      const cards = [...document.querySelectorAll('section.file')];
-      const near = cards.map((card) => Math.abs(card.getBoundingClientRect().top - covered));
-      return cards[near.indexOf(Math.min(...near))].dataset.path;
-    }"""
     # The first one dealt with, so stepping down from the top has to pass over it.
     page.locator(f"section.file[data-path='{paths[0]}'] input[type=checkbox]").check()
     page.evaluate("() => window.scrollTo(0, 0)")
-    page.wait_for_timeout(200)
+    settle(page)
+    # A step scrolls smoothly, and where the next one goes is counted from where that scroll leaves the reader, so each
+    # is waited out rather than paused over. A step aims the file it takes at the line its own scroll margin asks for,
+    # so that file sitting on that line is the scroll having arrived.
+    landed = """() => {
+      const card = document.getElementById(`f${state.current}`);
+      const aimed = parseFloat(getComputedStyle(card).scrollMarginTop);
+      return Math.abs(card.getBoundingClientRect().top - aimed) <= 1;
+    }"""
 
     # Nothing above the top of the page, and what lies below it is what is left to review.
     assert page.locator("#pback").is_disabled()
     assert page.locator("#pnext").is_enabled()
     page.locator("#pnext").click()
-    page.wait_for_timeout(600)
-    assert page.evaluate(reading) == paths[1]
+    page.wait_for_function(landed)
+    assert page.evaluate(NEAREST) == paths[1]
 
     # Stepping down again passes to the one after it, and stepping back up returns to where it came from.
     page.locator("#pnext").click()
-    page.wait_for_timeout(600)
-    assert page.evaluate(reading) == paths[2]
+    page.wait_for_function(landed)
+    assert page.evaluate(NEAREST) == paths[2]
+    # What is left to step to is answered a frame after the scroll that arrived, so the buttons are read one later.
+    settle(page)
     assert page.locator("#pback").is_enabled()
     page.locator("#pback").click()
-    page.wait_for_timeout(600)
-    assert page.evaluate(reading) == paths[1]
+    page.wait_for_function(landed)
+    assert page.evaluate(NEAREST) == paths[1]
 
     # Everything dealt with leaves nowhere to step, in either direction.
     for path in paths:
         page.locator(f"section.file[data-path='{path}'] input[type=checkbox]").check()
-    page.wait_for_timeout(200)
+    settle(page)
     assert page.locator("#pnext").is_disabled()
     assert page.locator("#pback").is_disabled()
     for path in paths:
@@ -877,7 +905,6 @@ def test_a_resolved_thread_answered_since_opens_itself(page, desk):
     line.locator("button.pin").first.click()
     saying = f"answered after settling, number {len(desk.get('/comments')) + 1}"
     submit(page, saying)
-    page.wait_for_timeout(200)
     made = desk.get("/comments")[-1]["seq"]
     # Resolved by the reader, so folded to its remark, and folded still when they open the page again.
     page.locator(f"#note-{made} button.solid").filter(has_text="Resolve").click()
@@ -895,16 +922,18 @@ def test_a_resolved_thread_answered_since_opens_itself(page, desk):
 
     # Read now, so it folds again.
     read(page, made)
+    page.wait_for_selector(f"#note-{made} .thread.folded")
     assert page.locator(f"#note-{made} .thread.folded").count() == 1
     page.evaluate("() => localStorage.clear()")
 
 
 def test_marking_a_file_reviewed_from_above_it_leaves_the_view_alone(page):
-    page.evaluate("() => window.scrollTo(0, 0)")
-    page.wait_for_timeout(120)
-    before = page.evaluate("() => Math.round(window.scrollY)")
+    before = page.evaluate("() => { window.scrollTo(0, 0); return Math.round(window.scrollY); }")
     card = page.locator("section.file").first
     card.locator("input[type=checkbox]").check()
+    page.wait_for_selector("section.file[data-done='true']")
+    # Held a moment past the tick: what is being asked is that nothing moved the reader, so a late scroll must have
+    # every chance to show itself.
     page.wait_for_timeout(300)
     # The reader had not reached inside it, so folding it must not move them anywhere.
     assert page.evaluate("() => Math.round(window.scrollY)") == before
@@ -979,7 +1008,7 @@ def test_a_letter_held_with_a_modifier_is_left_to_the_browser(page):
     before = page.evaluate("() => String(window.getSelection())")
     for combination in ("Meta+c", "Control+c", "Meta+r", "Meta+j", "Meta+k"):
         page.keyboard.press(combination)
-    page.wait_for_timeout(150)
+    page.wait_for_function("() => 'k' in window.__taken")
     taken = page.evaluate("() => window.__taken")
     # Copy, reload and the rest belong to the browser: taking them left the shortcut doing nothing in their place.
     assert not any(taken.values()), taken
@@ -987,8 +1016,9 @@ def test_a_letter_held_with_a_modifier_is_left_to_the_browser(page):
     assert page.evaluate("() => String(window.getSelection())") == before
 
     # The same letters alone are still this page's own.
+    page.evaluate("() => { window.__taken = {}; }")
     page.keyboard.press("c")
-    page.wait_for_timeout(150)
+    page.wait_for_function("() => 'c' in window.__taken")
     assert page.evaluate("() => window.__taken.c") is True
     page.keyboard.press("Escape")
     for _ in range(page.locator("tr[data-composer='true']").count()):
@@ -1054,7 +1084,7 @@ def test_a_review_keeps_its_comments_and_ticks_when_opened_from_another_ref(page
         line.locator("button.pin").first.click()
         submit(page, "said on the branch")
         card.locator("input[type=checkbox]").check()
-        page.wait_for_timeout(200)
+        page.wait_for_selector("section.file[data-path='sample.py'][data-done='true']")
 
         # The same review, opened from the head fetched by number instead of from the branch.
         gen_diff_data.run(desk.repo, "update-ref", "refs/diffdesk/pull/21", branch)
@@ -1066,7 +1096,7 @@ def test_a_review_keeps_its_comments_and_ticks_when_opened_from_another_ref(page
         assert again.get_attribute("data-done") == "true"
         assert again.get_attribute("data-open") == "false"
         again.locator("button.grow").click()
-        page.wait_for_timeout(200)
+        again.locator(".body").first.wait_for()
         assert "said on the branch" in again.inner_text()
         # The log is what this review holds, so finding the remark there is the history being attributed to it.
         page.locator("#logopen").click()
@@ -1089,12 +1119,11 @@ def test_the_log_reaches_a_comment_and_leaves_what_is_settled_out(page, desk):
     # Worded uniquely: each engine runs against the same desk, and a shared wording would find the other's row.
     saying = f"worth reaching, number {len(desk.get('/comments')) + 1}"
     submit(page, saying)
-    page.wait_for_timeout(200)
     made = desk.get("/comments")[-1]["seq"]
 
     # A file folded away still holds its comment, and the panel goes to it.
     card.locator("input[type=checkbox]").check()
-    page.wait_for_timeout(150)
+    page.wait_for_selector("section.file[data-path='sample.py'][data-done='true']")
     page.locator("#logopen").click()
     page.wait_for_selector("#log[data-open='true']")
     page.locator("#logrows .logrow").filter(has_text=saying).first.click()
@@ -1139,7 +1168,7 @@ def test_the_log_reaches_a_comment_and_leaves_what_is_settled_out(page, desk):
     listing = page.locator("#logrows .logrow").filter(has_text=saying)
     assert listing.count() == 0
     page.locator("#logresolved").check()
-    page.wait_for_timeout(200)
+    page.locator("#logrows .logrow").filter(has_text=saying).first.wait_for()
     assert page.locator("#logrows .logrow").filter(has_text=saying).count() >= 1
     page.locator("#logresolved").uncheck()
     page.locator("#logclose").click()
@@ -1187,7 +1216,6 @@ def test_a_comment_follows_the_line_it_was_written_against(page, desk):
     line.locator("td.code").first.hover()
     line.locator("button.pin").first.click()
     submit(page, "about this very line")
-    page.wait_for_timeout(200)
     note = desk.get("/comments")[-1]
     # The line it was written against is remembered, which is what lets it be found again.
     assert note["anchor"] == code
@@ -1206,7 +1234,6 @@ def test_a_comment_follows_the_line_it_was_written_against(page, desk):
         }""",
         [card.locator(".path").first.inner_text(), code, was],
     )
-    page.wait_for_timeout(200)
     shown = page.evaluate(
         """() => {
           const threads = [...document.querySelectorAll('.thread')];
@@ -1302,7 +1329,7 @@ def test_a_release_the_page_never_sees_does_not_leave_it_dragging(page):
 def test_dragging_across_the_code_selects_the_code(page):
     lines = sample(page).locator("tr[data-line]")
     lines.nth(2).evaluate("node => node.scrollIntoView({block: 'center'})")
-    page.wait_for_timeout(80)
+    settle(page)
     one = lines.nth(2).locator("td.code").first.bounding_box()
     four = lines.nth(5).locator("td.code").first.bounding_box()
     page.mouse.move(one["x"] + 20, one["y"] + one["height"] / 2)
@@ -1322,8 +1349,10 @@ def test_a_gap_can_be_filled_and_leaves_no_bare_delimiter(page):
     before = card.locator("tr.c").count()
     gap = card.locator("button.expand").first
     assert "+" in gap.inner_text() or "all" in gap.inner_text()
-    gap.click()
-    page.wait_for_timeout(600)
+    # The lines a gap holds are fetched, so the answer arriving is what says the click is done with.
+    with page.expect_response(lambda answer: "/lines" in answer.url):
+        gap.click()
+    settle(page)
     assert card.locator("tr.c").count() > before
     # A line brought in is the file's own, numbered identically on both sides, which is what makes it commentable.
     brought = page.evaluate("""() => {
@@ -1351,8 +1380,11 @@ def test_expanding_every_gap_reaches_the_whole_file(page):
         buttons = card.locator("button.expand")
         if not buttons.count():
             break
-        buttons.first.click()
-        page.wait_for_timeout(400)
+        # Waited on the answer rather than on the rows: a file already whole still offers its last gap, and the click
+        # that fills nothing has only the answer to show for itself.
+        with page.expect_response(lambda answer: "/lines" in answer.url):
+            buttons.first.click()
+        settle(page)
     shown = page.evaluate("""() => {
       const cards = [...document.querySelectorAll('section.file')];
       const card = cards.find((node) => node.textContent.includes('sample.py'));
@@ -1452,7 +1484,7 @@ def test_the_source_panel_lists_what_can_be_reviewed(page):
 def test_a_file_changed_since_it_was_reviewed_says_so_where_the_count_is(page, desk):
     card = sample(page)
     card.locator("input[type=checkbox]").check()
-    page.wait_for_timeout(150)
+    page.wait_for_selector("section.file[data-path='sample.py'][data-done='true']")
     assert "reopened" not in page.locator("#ptext").inner_text().lower()
 
     # The same file, its diff moved on: the tick is dropped, and the count says how many were dropped rather than
@@ -1462,7 +1494,6 @@ def test_a_file_changed_since_it_was_reviewed_says_so_where_the_count_is(page, d
       file.digest = 'moved-on';
       render();
     }""")
-    page.wait_for_timeout(150)
     # Read case-insensitively: the label is set in capitals by the style, not by what is written into it.
     reads = page.locator("#ptext").inner_text().lower()
     assert "1 reopened" in reads
@@ -1471,7 +1502,6 @@ def test_a_file_changed_since_it_was_reviewed_says_so_where_the_count_is(page, d
     # The tick is kept, so the file still shows it was read once and says the diff has moved since - and it survives the
     # next render rather than being cleared by the very act of noticing it.
     page.evaluate("() => render()")
-    page.wait_for_timeout(120)
     assert "1 reopened" in page.locator("#ptext").inner_text().lower()
     assert card.get_attribute("data-done") == "false"
     assert "changed since review" in card.inner_text().lower()
@@ -1484,7 +1514,7 @@ def test_a_file_changed_since_it_was_reviewed_says_so_where_the_count_is(page, d
 @pytest.mark.parametrize("width", [1900, 1400, 1100, 900])
 def test_the_top_bar_holds_one_line(page, width):
     page.set_viewport_size({"width": width, "height": 900})
-    page.wait_for_timeout(120)
+    settle(page)
     bar = page.evaluate("""() => {
       const head = document.querySelector('header');
       const kids = [...head.children].filter((node) => node.offsetParent !== null);
@@ -1516,7 +1546,7 @@ def test_the_pinned_file_head_clears_the_page_header(page, width):
       const tall = cards.reduce((one, other) => (other.offsetHeight > one.offsetHeight ? other : one));
       window.scrollTo(0, tall.offsetTop + tall.offsetHeight / 2);
     }""")
-    page.wait_for_timeout(250)
+    settle(page)
     look = page.evaluate("""() => {
       const header = document.querySelector('header').getBoundingClientRect();
       const pinned = [...document.querySelectorAll('.filehead')]
@@ -1539,7 +1569,7 @@ def test_the_pinned_file_head_clears_the_page_header(page, width):
 def test_marking_a_file_reviewed_is_remembered_across_reloads(page):
     card = sample(page)
     card.locator("input[type=checkbox]").check()
-    page.wait_for_timeout(150)
+    page.wait_for_selector("section.file[data-path='sample.py'][data-done='true']")
     assert card.get_attribute("data-done") == "true"
     # Reviewed folds the diff away, which is the point of the tick.
     assert card.get_attribute("data-open") == "false"
@@ -1548,7 +1578,7 @@ def test_marking_a_file_reviewed_is_remembered_across_reloads(page):
     again = sample(page)
     assert again.get_attribute("data-done") == "true"
     again.locator("input[type=checkbox]").uncheck()
-    page.wait_for_timeout(150)
+    page.wait_for_selector("section.file[data-path='sample.py'][data-done='false']")
     assert again.get_attribute("data-done") == "false"
     page.evaluate("() => localStorage.clear()")
 
@@ -1560,7 +1590,6 @@ def test_a_reply_can_be_rewritten_and_a_comment_and_its_last_reply_deleted_from_
     line.locator("button.pin").first.click()
     saying = f"written to be deleted, number {len(desk.get('/comments')) + 1}"
     submit(page, saying)
-    page.wait_for_timeout(200)
     made = desk.get("/comments")[-1]["seq"]
     desk.post("/reply", {"seq": made, "text": "first answer", "who": "session"})
     desk.post("/reply", {"seq": made, "text": "second answer", "who": "session"})
@@ -1607,7 +1636,6 @@ def test_a_comment_does_not_shift_the_columns_of_the_diff_it_hangs_under(page, d
     line.locator("td.code").first.hover()
     line.locator("button.pin").first.click()
     submit(page, f"hanging under the diff, number {len(desk.get('/comments')) + 1}")
-    page.wait_for_timeout(200)
 
     # The page redraws itself while it is read, and a comment sized to nothing would fill the table and move every
     # column under it.
@@ -1748,7 +1776,6 @@ def test_a_reply_being_written_survives_the_page_redrawing_itself(page, desk):
     line.locator("button.pin").first.click()
     saying = f"answered while writing, number {len(desk.get('/comments')) + 1}"
     submit(page, saying)
-    page.wait_for_timeout(200)
     made = desk.get("/comments")[-1]["seq"]
     page.locator(f"#note-{made} button.solid").filter(has_text="Resolve").click()
     page.wait_for_selector(f"#note-{made} .thread.folded")
@@ -1778,20 +1805,20 @@ def test_a_box_takes_the_height_of_what_is_written_into_it(page, desk):
     line.locator("td.code").first.hover()
     line.locator("button.pin").first.click()
     box = page.locator("tr[data-composer='true'] textarea")
-    page.wait_for_timeout(150)
+    settle(page)
     one = box.bounding_box()["height"]
     box.fill("\n".join(f"line {index} of a long remark" for index in range(8)))
-    page.wait_for_timeout(150)
+    settle(page)
     many = box.bounding_box()["height"]
     # Grown to what it holds, and back down when it holds less.
     assert many > one
     box.fill("one line again")
-    page.wait_for_timeout(150)
+    settle(page)
     assert abs(box.bounding_box()["height"] - one) < 2
 
     # Never past what leaves the diff readable, whatever is pasted into it.
     box.fill("\n".join(f"line {index} of something very long" for index in range(200)))
-    page.wait_for_timeout(150)
+    settle(page)
     assert box.bounding_box()["height"] <= page.evaluate("() => window.innerHeight") * 0.45 + 2
     page.keyboard.press("Escape")
     page.evaluate("() => localStorage.clear()")
@@ -1804,7 +1831,6 @@ def test_a_reply_quoting_a_passage_shows_it_as_a_quote(page, desk):
     line.locator("button.pin").first.click()
     saying = f"quoted back at me, number {len(desk.get('/comments')) + 1}"
     submit(page, saying)
-    page.wait_for_timeout(200)
     made = desk.get("/comments")[-1]["seq"]
     desk.post(
         "/reply",
@@ -1835,7 +1861,6 @@ def test_a_recorded_comment_shows_the_number_it_is_referred_to_by(page, desk):
     line.locator("button.pin").first.click()
     saying = f"referred to by number, number {len(desk.get('/comments')) + 1}"
     submit(page, saying)
-    page.wait_for_timeout(200)
     made = desk.get("/comments")[-1]["seq"]
 
     # A session answers by number, so the number is on the thread rather than only in the panel.
@@ -1853,6 +1878,8 @@ def test_a_file_comment_being_written_outlives_the_poll(page, desk):
     # The page redraws itself while it is read, and the box a comment is being written in must survive that.
     page.evaluate("() => { document.getElementById('main').blur(); document.activeElement.blur(); }")
     page.evaluate("() => tick()")
+    # Held a moment past the round: what is being asked is that the box was left alone, so a redraw that would take it
+    # away must have every chance to happen.
     page.wait_for_timeout(200)
     assert page.locator(".filenote.writing").count() == 1
     assert page.locator(".filenote.writing textarea").input_value() == "about the file as a whole"
@@ -1867,7 +1894,6 @@ def test_a_comment_can_be_reached_by_its_number(page, desk):
     line.locator("button.pin").first.click()
     saying = f"reached by number, number {len(desk.get('/comments')) + 1}"
     submit(page, saying)
-    page.wait_for_timeout(200)
     made = desk.get("/comments")[-1]["seq"]
     # Settled and in a file marked reviewed, which is everything that would keep it out of sight.
     page.locator(f"#note-{made} button.solid").filter(has_text="Resolve").click()
@@ -2048,14 +2074,12 @@ def test_a_reply_below_the_fold_is_not_taken_for_read(page, desk):
     line.locator("button.pin").first.click()
     saying = f"answered out of sight, number {len(desk.get('/comments')) + 1}"
     submit(page, saying)
-    page.wait_for_timeout(200)
     made = desk.get("/comments")[-1]["seq"]
     # Resolved by the reader, so folded, then answered by the session: it shows itself again until they have had it.
     page.locator(f"#note-{made} button.solid").filter(has_text="Resolve").click()
     page.wait_for_selector(f"#note-{made} .thread.folded")
     desk.post("/reply", {"seq": made, "text": "settled it", "who": "session"})
     page.evaluate("() => loadNotes()")
-    page.wait_for_timeout(200)
 
     # Redrawn twice with the thread out of the reader's view: building it is what used to count as reading it, so the
     # second redraw is where a thread wrongly marked read folds itself away.
@@ -2078,9 +2102,7 @@ def test_a_reply_below_the_fold_is_not_taken_for_read(page, desk):
     assert "settled it" in page.locator(f"#note-{made}").inner_text()
 
     # Brought in front of the reader, it counts as read and folds away on the next redraw.
-    page.evaluate("(seq) => document.getElementById(`note-${seq}`).scrollIntoView({block: 'center'})", made)
-    page.wait_for_timeout(400)
-    page.evaluate("() => render()")
-    page.wait_for_timeout(150)
+    read(page, made)
+    page.wait_for_selector(f"#note-{made} .thread.folded")
     assert page.locator(f"#note-{made} .thread.folded").count() == 1
     page.evaluate("() => localStorage.clear()")
