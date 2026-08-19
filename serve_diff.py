@@ -458,17 +458,41 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404)
 
     def _lines(self, query):
-        """A slice of a file at a revision, which is how the page fills the gaps between hunks."""
+        """A slice of a file at a revision, which is how the page fills the gaps between hunks.
+
+        Work on disk is the one revision that can move under a page, and what a gap is asked in is the numbering of the
+        diff the page holds. Anchors are how that is answered per gap: the lines the page has on either side of it, at
+        the numbers it has them. Each is looked for where the page says it is and then, failing that, wherever it now
+        reads - so work written above the gap, which moves every number below it, still fills. What both anchors must
+        agree on is the shift, since that is what says the gap still holds the lines it did; when they cannot, or when
+        one of them no longer reads at all, the gap has moved under the reader and this says so rather than answering.
+        """
         root = pathlib.Path(query.get("dir", ["."])[0])
         rev = query.get("rev", [""])[0]
         name = query.get("path", [""])[0]
+        anchors = json.loads(query.get("anchors", ["[]"])[0])
         text = gen_diff_data.run(root, "show", f"{rev}:{name}") if rev else (root / name).read_text()
         rows = text.split("\n")
         if rows and rows[-1] == "":
             rows.pop()
-        low = max(1, int(query.get("from", ["1"])[0]))
-        high = min(len(rows), int(query.get("to", [str(len(rows))])[0]))
-        self._json({"total": len(rows), "from": low, "to": high, "lines": rows[low - 1 : high]})
+        shifts = set()
+        for number, held in anchors:
+            if 0 < number <= len(rows) and rows[number - 1] == held:
+                shifts.add(0)
+                continue
+            reads = [spot + 1 for spot, row in enumerate(rows) if row == held]
+            if not reads:
+                self._json({"stale": True, "lines": [], "total": 0})
+                return
+            shifts.add(min(reads, key=lambda spot: abs(spot - number)) - number)
+        if len(shifts) > 1:
+            self._json({"stale": True, "lines": [], "total": 0})
+            return
+        shift = shifts.pop() if shifts else 0
+        low = max(1, int(query.get("from", ["1"])[0]) + shift)
+        high = min(len(rows), int(query.get("to", [str(len(rows))])[0]) + shift)
+        # Reported in the numbering the page asked in, which is what it lays the lines out at.
+        self._json({"total": len(rows), "from": low - shift, "to": high - shift, "lines": rows[low - 1 : high]})
 
     def do_POST(self):
         path = urlparse(self.path).path.rstrip("/")

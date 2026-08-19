@@ -61,6 +61,41 @@ def test_a_slice_of_the_file_fills_a_gap(desk):
     assert ranged["lines"] == [f"line {SECOND_EDIT}"]
 
 
+def test_a_gap_fills_while_the_blocks_bounding_it_still_read_as_the_page_holds_them(desk):
+    written = desk.repo / "wide.py"
+    kept = written.read_text()
+    lines = kept.split("\n")
+    try:
+        # The lines the page holds on either side of the gap it is filling, at the numbers it holds them.
+        anchors = urllib.parse.quote(json.dumps([[4, lines[3]], [8, lines[7]]]))
+        asked = f"/lines?dir={urllib.parse.quote(str(desk.repo))}&path=wide.py&from=5&to=7&anchors={anchors}"
+        assert desk.get(asked)["lines"] == lines[4:7]
+
+        # A line written further down leaves those numbers naming the same lines, so the block is still the reader's.
+        written.write_text(kept.replace(lines[19], "SAID_BELOW = 1"))
+        assert desk.get(asked)["lines"] == lines[4:7]
+
+        # A line written above them moves every number below it, and the gap still holds the lines it held: the anchors
+        # are found where they now read, agree on the shift, and what lies between them is what comes back.
+        written.write_text("SAID_ABOVE = 1\n" + kept)
+        assert desk.get(asked)["lines"] == lines[4:7]
+
+        # An anchor rewritten is the block itself moving under the reader, which no shift accounts for.
+        written.write_text(kept.replace(lines[3], "SAID_AT_THE_EDGE = 1"))
+        moved = desk.get(asked)
+        assert moved["stale"]
+        assert moved["lines"] == []
+
+        # Lines taken from inside the gap leave the two anchors disagreeing on where the block now is.
+        written.write_text("\n".join(lines[:5] + lines[6:]))
+        assert desk.get(asked)["stale"]
+        # A revision cannot move, so a slice of one is answered whatever the work on disk says.
+        committed = f"/lines?dir={urllib.parse.quote(str(desk.repo))}&rev=feature&path=wide.py&from=5&to=7"
+        assert desk.get(committed)["lines"] == lines[4:7]
+    finally:
+        written.write_text(kept)
+
+
 def test_a_slice_beyond_the_file_is_clamped(desk):
     beyond = FILE_LINES + 40
     where = f"/lines?dir={urllib.parse.quote(str(desk.repo))}&rev=feature&path=sample.py&from={FILE_LINES}&to={beyond}"
