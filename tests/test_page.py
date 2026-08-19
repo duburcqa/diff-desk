@@ -226,6 +226,21 @@ def test_a_thread_can_be_answered_rewritten_closed_and_reopened_from_the_page(pa
     assert reopened["text"] == "the remark, rewritten"
     assert [reply["text"] for reply in reopened["replies"]] == ["a reply from the reviewer"]
 
+    # A second thread, open in front of the reader, that the session settles while they read it: the poll brings the
+    # resolution in and the thread stands as they left it, which is resolved and showing every word of itself.
+    other = sample(page).locator("tr.a[data-line]").last
+    other.locator("td.code").first.hover()
+    other.locator("button.pin").first.click()
+    submit(page, "the remark the session settles")
+    settled = desk.get("/comments")[-1]["seq"]
+    desk.post("/resolve", {"seq": [settled], "who": "session"})
+    page.evaluate("() => tick()")
+    page.wait_for_selector(f"#note-{settled} .thread.done")
+    assert page.locator(f"#note-{settled} .thread.folded").count() == 0
+    assert "the remark the session settles" in page.locator(f"#note-{settled}").inner_text()
+    assert page.locator(f"#note-{settled} textarea").count() == 1
+    page.evaluate("() => localStorage.clear()")
+
 
 def test_one_comment_can_be_sent_without_a_batch(page, desk):
     line = sample(page).locator("tr.a[data-line]").first
@@ -339,13 +354,10 @@ def test_a_folded_thread_says_what_it_is_about_even_when_it_is_only_code(page, d
         "/comments",
         [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": "```py\nreturn 1\n```"}],
     )
-    desk.post("/resolve", {"seq": [made["seq"]], "who": "session"})
     page.reload(wait_until="load")
-    # Settled but never seen, so it shows itself first; read once it folds to its remark, which is what is checked.
     page.wait_for_selector(f"#note-{made['seq']} .thread")
-    page.evaluate("(seq) => document.getElementById(`note-${seq}`).scrollIntoView({block: 'center'})", made["seq"])
-    page.wait_for_timeout(400)
-    page.evaluate("() => render()")
+    # Resolved by the reader, which is what folds a thread to its remark, and what is checked here is that remark.
+    page.locator(f"#note-{made['seq']} button.solid").filter(has_text="Resolve").click()
     page.wait_for_selector(f"#note-{made['seq']} .thread.folded")
     said = page.locator(f"#note-{made['seq']} .said").first
     # Folded to one line, and a comment made only of code still says what it is about rather than showing nothing.
@@ -629,11 +641,11 @@ def test_a_resolved_thread_answered_since_opens_itself(page, desk):
     submit(page, saying)
     page.wait_for_timeout(200)
     made = desk.get("/comments")[-1]["seq"]
-    desk.post("/resolve", {"seq": [made], "who": "session"})
+    # Resolved by the reader, so folded to its remark, and folded still when they open the page again.
+    page.locator(f"#note-{made} button.solid").filter(has_text="Resolve").click()
+    page.wait_for_selector(f"#note-{made} .thread.folded")
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
-    # Settled, and read once it has been in front of the reader: then it folds to its remark.
-    read(page, made)
     assert page.locator(f"#note-{made} .thread.folded").count() == 1
 
     desk.post("/reply", {"seq": made, "text": "one more thing about it", "who": "session"})
@@ -1445,8 +1457,8 @@ def test_a_reply_being_written_survives_the_page_redrawing_itself(page, desk):
     submit(page, saying)
     page.wait_for_timeout(200)
     made = desk.get("/comments")[-1]["seq"]
-    desk.post("/resolve", {"seq": [made], "who": "session"})
-    page.wait_for_function("(seq) => document.querySelector(`#note-${seq} .thread.done`)", arg=made, timeout=30000)
+    page.locator(f"#note-{made} button.solid").filter(has_text="Resolve").click()
+    page.wait_for_selector(f"#note-{made} .thread.folded")
 
     # A resolved thread is folded to its remark, and a reply half written into it is words not yet finished.
     thread = page.locator(f"#note-{made}")
@@ -1565,7 +1577,8 @@ def test_a_comment_can_be_reached_by_its_number(page, desk):
     page.wait_for_timeout(200)
     made = desk.get("/comments")[-1]["seq"]
     # Settled and in a file marked reviewed, which is everything that would keep it out of sight.
-    desk.post("/resolve", {"seq": [made], "who": "session"})
+    page.locator(f"#note-{made} button.solid").filter(has_text="Resolve").click()
+    page.wait_for_selector(f"#note-{made} .thread.folded")
     card.locator("input[type=checkbox]").check()
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
@@ -1638,10 +1651,13 @@ def test_a_file_holding_an_unread_comment_opens_itself(page, desk):
     assert page.locator(f"#note-{made} .thread.folded").count() == 0
     assert "settled before you saw it" in page.locator(f"#note-{made}").inner_text()
 
-    # Read now, so it folds to its remark and lets the file close again.
+    # Read now, so the file closes again, and the thread stays as wide open as the reader left it: what settled it
+    # was the session, and a resolution they did not make here folds nothing.
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
-    assert page.locator(f"#note-{made} .thread.folded").count() == 1
+    assert page.locator("section.file[data-path='added.py']").get_attribute("data-open") == "false"
+    assert page.locator(f"#note-{made} .thread.done").count() == 1
+    assert page.locator(f"#note-{made} .thread.folded").count() == 0
     page.locator("section.file[data-path='added.py'] input[type=checkbox]").uncheck()
     page.evaluate("() => localStorage.clear()")
 
@@ -1741,7 +1757,10 @@ def test_a_reply_below_the_fold_is_not_taken_for_read(page, desk):
     submit(page, saying)
     page.wait_for_timeout(200)
     made = desk.get("/comments")[-1]["seq"]
-    desk.post("/resolve", {"seq": [made], "answer": "settled it", "who": "session"})
+    # Resolved by the reader, so folded, then answered by the session: it shows itself again until they have had it.
+    page.locator(f"#note-{made} button.solid").filter(has_text="Resolve").click()
+    page.wait_for_selector(f"#note-{made} .thread.folded")
+    desk.post("/reply", {"seq": made, "text": "settled it", "who": "session"})
     page.evaluate("() => loadNotes()")
     page.wait_for_timeout(200)
 

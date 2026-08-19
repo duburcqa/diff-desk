@@ -801,8 +801,10 @@
   // A reply half written, per comment. The page redraws itself while it is read, which builds the thread anew: without
   // this, words typed into a reply go with the box they were typed into.
   const writing = new Map();
-  // Resolved threads are folded away by default; opening one is a per-view choice, not a state worth remembering.
-  const unfolded = new Set();
+  // Which comments the reader folded away themselves, by resolving one here or by folding it by hand. A resolution
+  // reaching the page from the session leaves a thread as it stands, so nothing being read closes under the reader.
+  // Kept, or a reload would show every thread settled long ago in full again.
+  let tucked = new Set();
   // Which files the reader has opened or folded by hand, against what being reviewed would say, each remembered with
   // the diff it was decided on: the page redraws itself while it is read, so without this a file opened to look at a
   // comment folds itself away again moments later - but a file that has changed since is news, and opens.
@@ -907,7 +909,10 @@
       return false;
     }
     // Resolved and folded away, or in a file marked reviewed: reach() shows whatever it takes to read the thread.
-    if (note.state === "resolved") unfolded.add(note.seq);
+    if (note.state === "resolved") {
+      tucked.delete(note.seq);
+      keepTucked();
+    }
     render();
     reach(note);
     els.goto.value = "";
@@ -1020,11 +1025,7 @@
     for (const note of mine()) {
       if (note.path === path) heard[note.seq] = (note.replies || []).length;
     }
-    try {
-      localStorage.setItem("diffdesk.heard", JSON.stringify(heard));
-    } catch (error) {
-      // A storage that refuses to be written costs the reader one file opening itself once.
-    }
+    keepHeard();
   }
 
   function drawLog() {
@@ -1233,11 +1234,7 @@
         noticed.unobserve(entry.target);
       }
       if (!learned) return;
-      try {
-        localStorage.setItem("diffdesk.heard", JSON.stringify(heard));
-      } catch (error) {
-        // A storage that refuses to be written costs the reader one thread opening itself twice.
-      }
+      keepHeard();
     },
     { threshold: 0.4 },
   );
@@ -1268,6 +1265,30 @@
       heard = JSON.parse(localStorage.getItem("diffdesk.heard") || "{}");
     } catch (error) {
       heard = {};
+    }
+  }
+
+  function keepHeard() {
+    try {
+      localStorage.setItem("diffdesk.heard", JSON.stringify(heard));
+    } catch (error) {
+      // A storage that refuses to be written costs the reader a thread, or a file, opening itself once more.
+    }
+  }
+
+  function takeTucked() {
+    try {
+      tucked = new Set(JSON.parse(localStorage.getItem("diffdesk.tucked") || "[]"));
+    } catch (error) {
+      tucked = new Set();
+    }
+  }
+
+  function keepTucked() {
+    try {
+      localStorage.setItem("diffdesk.tucked", JSON.stringify([...tucked]));
+    } catch (error) {
+      // A storage that refuses to be written costs the reader the folds they made, once they reload.
     }
   }
 
@@ -1321,11 +1342,7 @@
     // Written by the reader, so read by the reader: what shows itself later is what somebody else said.
     if (recorded && recorded.ok) {
       for (const seq of recorded.seqs) heard[seq] = 0;
-      try {
-        localStorage.setItem("diffdesk.heard", JSON.stringify(heard));
-      } catch (error) {
-        // A storage that refuses to be written costs the reader one file opening itself once.
-      }
+      keepHeard();
     }
     if (bound && recorded && recorded.ok) {
       els.trayresult.textContent = `Posting ${batch.length} to PR #${branch().pr.number}...`;
@@ -1456,10 +1473,10 @@
     const cell = document.createElement("td");
     cell.colSpan = 5;
     const answers = (note.replies || []).length;
-    // Folded only once the reader has been shown it: a thread settled before they ever saw it, or answered since they
-    // did, is news, and news is read rather than outlined.
+    // Folded where the reader folded it, and only once they have been shown all of it: a thread answered since they
+    // read it is news, and news is read rather than outlined.
     const read = note.seq in heard && answers <= heard[note.seq];
-    const settled = note.state === "resolved" && !unfolded.has(note.seq) && read;
+    const settled = note.state === "resolved" && tucked.has(note.seq) && read;
     const box = document.createElement("div");
     box.className = note.pending ? "thread draft" : note.state === "resolved" ? "thread done" : "thread";
     // What the reader has been shown is what has been on their screen: rendering it is not reading it, and a thread
@@ -1488,8 +1505,9 @@
       turn.textContent = settled ? `resolved${answers ? `, ${answers} repl${answers === 1 ? "y" : "ies"}` : ""}` : "fold";
       turn.title = settled ? "Show the whole thread" : "Fold it away again";
       turn.addEventListener("click", () => {
-        if (settled) unfolded.add(note.seq);
-        else unfolded.delete(note.seq);
+        if (settled) tucked.delete(note.seq);
+        else tucked.add(note.seq);
+        keepTucked();
         render();
       });
       head.append(turn);
@@ -1664,14 +1682,21 @@
       close.className = note.state === "resolved" ? "ghost" : "solid";
       close.textContent = note.state === "resolved" ? "Reopen" : "Resolve";
       close.addEventListener("click", async () => {
-        await post("resolve", {
-          seq: [note.seq],
-          answer: say.value.trim(),
-          resolved: note.state !== "resolved",
-          who: "you",
-        });
+        const shutting = note.state !== "resolved";
+        await post("resolve", { seq: [note.seq], answer: say.value.trim(), resolved: shutting, who: "you" });
         writing.delete(note.seq);
         await loadNotes();
+        if (shutting) {
+          // The reader's own hand on it, which is what folds a thread away, and closed by them is read by them: the
+          // answer they closed it with is their own words, so it is not what reopens the thread as unread.
+          tucked.add(note.seq);
+          const kept = mine().find((row) => row.seq === note.seq);
+          heard[note.seq] = kept ? (kept.replies || []).length : 0;
+          keepHeard();
+        } else {
+          tucked.delete(note.seq);
+        }
+        keepTucked();
         render();
         // Closing it here owes a resolution on the pull request, taken as soon as it is asked for.
         await closeThere(false);
@@ -2793,6 +2818,7 @@
   loadSeen();
   loadFolded();
   takeHeard();
+  takeTucked();
   takeDrafts();
   showSource();
   renderTabs();
