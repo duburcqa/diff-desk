@@ -6,6 +6,8 @@ Endpoints, all on 127.0.0.1 so nothing is exposed off the machine:
   GET  /refs?dir=&base=       branches ahead of a base, for the source picker
   GET  /state                 what the served diffs are built from, so a page can tell the branch has moved on
   POST /scan                  {dir, base, refs} - regenerate the payload and return it
+  GET  /reviewed              which files have been read, so a tick outlives the browser it was made in
+  POST /reviewed              {marks, drop} - tick files at the digest they were read at, or untick them
   GET  /comments?since=N      every recorded comment past the cursor, each with its seq and batch
   GET  /comments?event=N      every comment touched past that event, which is how a session hears about replies
   POST /comments              {comments: [...], github: bool} - a batch as submitted, or a bare list of comments
@@ -80,6 +82,8 @@ PAGE = HOME / "diff_desk.html"
 TEMPLATE = HERE / "diff_desk_template.html"
 DATA = HOME / "diff_data.json"
 NOTES = HOME / "comments.jsonl"
+TICKS = HOME / "reviewed.json"
+PULLS = HOME / "pulls.json"
 PORT = int(os.environ.get("DIFF_DESK_PORT", "8787"))
 
 
@@ -263,6 +267,14 @@ def close_threads(repo, number, owed, threads):
     return outcome
 
 
+def serve_payload(payload):
+    """Make this payload the served one: the numbers it names are remembered, then it and the page are written."""
+    remembered_pulls(payload["branches"])
+    DATA.write_text(json.dumps(payload, separators=(",", ":")))
+    if TEMPLATE.exists():
+        PAGE.write_text(gen_diff_data.render_page(TEMPLATE.read_text(), payload))
+
+
 def rebuild():
     """Collect the served diffs again and rewrite the page around them, keeping the last good pair on any failure.
 
@@ -281,9 +293,7 @@ def rebuild():
         if not payload["branches"]:
             print(f"REBUILD FAILED nothing ahead of {source.base} in {source.root}", flush=True)
             return None
-        DATA.write_text(json.dumps(payload, separators=(",", ":")))
-        if TEMPLATE.exists():
-            PAGE.write_text(gen_diff_data.render_page(TEMPLATE.read_text(), payload))
+        serve_payload(payload)
         return payload
 
 
@@ -459,6 +469,39 @@ def touched(rows, row, by):
     row["eventBy"] = by
 
 
+def read_ticks():
+    """Which files have been read, as `<review> <path>` against the digest of the diff they were read at."""
+    return json.loads(TICKS.read_text()) if TICKS.exists() else {}
+
+
+def write_ticks(marks):
+    """Replace the ticks in one step, so a reader never sees them half-written."""
+    spare = TICKS.with_suffix(".writing")
+    spare.write_text(json.dumps(marks, indent=1, sort_keys=True))
+    os.replace(spare, TICKS)
+
+
+def remembered_pulls(branches):
+    """Fill in the pull request of every ref that has one, and remember what was learnt for the next collect.
+
+    GitHub answers the listing or it does not, and a pull request also leaves it the moment it is merged. Either way the
+    ref stops naming a pull request, and since that name is what the ticks and the comments of a review are filed under,
+    a review read once as `#3237` would read as an untouched branch afterwards. So a number, once seen for a ref, is the
+    ref's number until another one is seen for it.
+    """
+    known = json.loads(PULLS.read_text()) if PULLS.exists() else {}
+    learnt = dict(known)
+    for branch in branches:
+        if branch["pr"]:
+            learnt[branch["ref"]] = branch["pr"]
+        elif branch["ref"] in known:
+            branch["pr"] = known[branch["ref"]]
+    if learnt != known:
+        spare = PULLS.with_suffix(".writing")
+        spare.write_text(json.dumps(learnt, indent=1, sort_keys=True))
+        os.replace(spare, PULLS)
+
+
 def write_notes(rows):
     """Replace the log in one step, so a reader never sees it half-written."""
     spare = NOTES.with_suffix(".writing")
@@ -534,6 +577,8 @@ class Handler(BaseHTTPRequestHandler):
             self._lines(query)
         elif path == "/favicon.ico":
             self._send(204)
+        elif path == "/reviewed":
+            self._json({"marks": read_ticks()})
         elif path == "/comments":
             since = int(query.get("since", ["0"])[0])
             event = int(query.get("event", ["0"])[0])
@@ -586,6 +631,8 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path.rstrip("/")
         if path == "/comments":
             self._record()
+        elif path == "/reviewed":
+            self._reviewed()
         elif path == "/scan":
             self._scan()
         elif path == "/bind":
@@ -607,6 +654,21 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._send(404)
 
+    def _reviewed(self):
+        """Record which files have been read, and which have been unticked.
+
+        Marks arrive as `<review> <path>` against the digest of the diff they were read at, and dropped keys as a list.
+        A page that has been reading offline sends whatever it kept, which is how a browser's own copy is carried up.
+        """
+        order = self._body()
+        with CHANGING:
+            marks = read_ticks()
+            marks.update(order.get("marks") or {})
+            for gone in order.get("drop") or []:
+                marks.pop(gone, None)
+            write_ticks(marks)
+        self._json({"ok": True, "marks": marks})
+
     def _scan(self):
         """Rebuild the payload for the requested repository, base and refs, and rebuild the page around it."""
         order = self._body()
@@ -624,9 +686,7 @@ class Handler(BaseHTTPRequestHandler):
         if not payload["branches"]:
             self._json({"ok": False, "error": f"nothing ahead of {base} in {root}"})
             return
-        DATA.write_text(json.dumps(payload, separators=(",", ":")))
-        if TEMPLATE.exists():
-            PAGE.write_text(gen_diff_data.render_page(TEMPLATE.read_text(), payload))
+        serve_payload(payload)
         files = sum(len(entry["files"]) for entry in payload["branches"])
         print(f"SCANNED {len(payload['branches'])} branch(es), {files} file diffs", flush=True)
         self._json({"ok": True, "data": payload})

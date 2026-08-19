@@ -938,10 +938,27 @@
   }
 
   function loadSeen() {
+    // The browser's copy, which is what a desk that cannot be reached leaves the reader reading against.
     try {
       seen = JSON.parse(localStorage.getItem("diffdesk.seen") || "{}");
     } catch (error) {
       seen = {};
+    }
+  }
+
+  async function takeSeen() {
+    // The desk holds the ticks, so they outlive this browser, its profile, and the address the page was opened at. What
+    // it holds wins; what only this browser holds is sent up, which is how a reader who ticked offline keeps it.
+    try {
+      const response = await fetch("reviewed", { cache: "no-store" });
+      if (!response.ok) throw new Error("no endpoint");
+      const held = (await response.json()).marks || {};
+      const mine = Object.fromEntries(Object.entries(seen).filter(([mark]) => !(mark in held)));
+      seen = { ...seen, ...held };
+      saveSeen();
+      if (Object.keys(mine).length) post("reviewed", { marks: mine });
+    } catch (error) {
+      notes.live = false;
     }
   }
 
@@ -961,6 +978,7 @@
     if (done) seen[key(file.path)] = file.digest;
     else delete seen[key(file.path)];
     saveSeen();
+    post("reviewed", done ? { marks: { [key(file.path)]: file.digest } } : { drop: [key(file.path)] });
   }
 
   function countStale(files) {
@@ -3137,6 +3155,7 @@
   renderScopes();
   render();
   drawTray();
+  takeSeen().then(render);
   loadNotes().then(() => {
     drawLog();
     render();

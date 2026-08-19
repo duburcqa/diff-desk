@@ -48,7 +48,11 @@ def browser(play, request):
 
 @pytest.fixture
 def page(browser, desk):
-    opened = browser.new_page(viewport={"width": 1500, "height": 900})
+    # A tick is kept twice over, by the desk and by the browser, and a test that leaves one behind leaves the next
+    # reading a file already folded away and counted. Its own context is what gives a test an empty browser, and the
+    # desk is asked to drop what it holds once the page that ticked is gone.
+    context = browser.new_context(viewport={"width": 1500, "height": 900})
+    opened = context.new_page()
     problems = []
     opened.on("pageerror", lambda error: problems.append(str(error)))
     opened.goto(f"{desk.url}/", wait_until="load")
@@ -57,7 +61,8 @@ def page(browser, desk):
     opened.wait_for_function("() => document.querySelectorAll('tr[data-line]').length > 0")
     yield opened
     assert problems == []
-    opened.close()
+    context.close()
+    desk.post("/reviewed", {"drop": list(desk.get("/reviewed")["marks"])})
 
 
 def settle(page):
@@ -268,7 +273,6 @@ def test_a_thread_can_be_answered_rewritten_closed_and_reopened_from_the_page(pa
     assert page.locator(f"#note-{settled} .thread.folded").count() == 0
     assert "the remark the session settles" in page.locator(f"#note-{settled}").inner_text()
     assert page.locator(f"#note-{settled} textarea").count() == 1
-    page.evaluate("() => localStorage.clear()")
 
 
 def test_one_comment_can_be_sent_without_a_batch(page, desk):
@@ -736,7 +740,6 @@ def test_marking_a_file_reviewed_from_inside_it_brings_reading_back_to_the_next_
         assert placed["next"] > placed["head"]
     assert placed["scroll"] < started
     card.locator("input[type=checkbox]").uncheck()
-    page.evaluate("() => localStorage.clear()")
     page.set_viewport_size({"width": 1500, "height": 900})
 
 
@@ -758,7 +761,6 @@ def test_a_file_opened_by_hand_stays_open_when_the_page_redraws(page):
     page.evaluate("() => render()")
     assert card.get_attribute("data-open") == "false"
     card.locator(".filehead").first.click()
-    page.evaluate("() => localStorage.clear()")
 
 
 def test_the_path_filter_lists_what_it_matches_for_picking_by_name(page):
@@ -854,7 +856,6 @@ def test_stepping_lands_on_the_file_left_to_review_nearest_the_reader(page):
     assert page.locator("#pback").is_disabled()
     for path in paths:
         page.locator(f"section.file[data-path='{path}'] input[type=checkbox]").uncheck()
-    page.evaluate("() => localStorage.clear()")
 
 
 def test_a_file_changed_since_it_was_reviewed_opens_itself(page, desk):
@@ -892,7 +893,6 @@ def test_a_file_changed_since_it_was_reviewed_opens_itself(page, desk):
         page.reload(wait_until="load")
         page.wait_for_selector("section.file")
         page.locator("section.file[data-path='added.py'] input[type=checkbox]").uncheck()
-        page.evaluate("() => localStorage.clear()")
 
 
 def test_a_resolved_thread_answered_since_opens_itself(page, desk):
@@ -921,7 +921,6 @@ def test_a_resolved_thread_answered_since_opens_itself(page, desk):
     read(page, made)
     page.wait_for_selector(f"#note-{made} .thread.folded")
     assert page.locator(f"#note-{made} .thread.folded").count() == 1
-    page.evaluate("() => localStorage.clear()")
 
 
 def test_marking_a_file_reviewed_from_above_it_leaves_the_view_alone(page):
@@ -935,7 +934,6 @@ def test_marking_a_file_reviewed_from_above_it_leaves_the_view_alone(page):
     # The reader had not reached inside it, so folding it must not move them anywhere.
     assert page.evaluate("() => Math.round(window.scrollY)") == before
     card.locator("input[type=checkbox]").uncheck()
-    page.evaluate("() => localStorage.clear()")
 
 
 def test_copying_a_selection_of_lines_yields_the_code_alone(page):
@@ -1051,7 +1049,7 @@ def test_a_file_can_be_commented_on_as_a_whole(page, desk):
     page.locator("#logclose").click()
 
 
-def test_a_review_keeps_its_comments_and_ticks_when_opened_from_another_ref(page, desk):
+def test_a_review_keeps_its_comments_and_ticks_however_it_is_opened(page, desk):
     branch = page.evaluate("() => data.branches[0].ref")
     knows = [
         {"match": "repos/someone/somewhere --jq", "out": "someone/somewhere"},
@@ -1100,12 +1098,20 @@ def test_a_review_keeps_its_comments_and_ticks_when_opened_from_another_ref(page
         page.wait_for_selector("#log[data-open='true']")
         assert page.locator("#logrows .logrow").filter(has_text="said on the branch").count() >= 1
         page.locator("#logclose").click()
+
+        # GitHub stops answering, which is also what a merged pull request leaves behind: the listing no longer names
+        # one for this ref. The desk holds on to the number it was told, so the same work is still the same review.
+        desk.github_answers(code=1, err="gh: Not Found (HTTP 404)")
+        assert desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})["ok"]
+        page.reload(wait_until="load")
+        page.wait_for_selector("section.file")
+        unanswered = page.locator("section.file").filter(has=page.locator(f"text={name}")).first
+        assert unanswered.get_attribute("data-done") == "true"
     finally:
         gen_diff_data.run(desk.repo, "update-ref", "-d", "refs/diffdesk/pull/21")
         gen_diff_data.run(desk.repo, "remote", "remove", "origin")
         desk.github_answers(code=1, err="gh: Not Found (HTTP 404)")
         desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})
-        page.evaluate("() => localStorage.clear()")
 
 
 def test_the_log_reaches_a_comment_and_leaves_what_is_settled_out(page, desk):
@@ -1169,7 +1175,6 @@ def test_the_log_reaches_a_comment_and_leaves_what_is_settled_out(page, desk):
     assert page.locator("#logrows .logrow").filter(has_text=saying).count() >= 1
     page.locator("#logresolved").uncheck()
     page.locator("#logclose").click()
-    page.evaluate("() => localStorage.clear()")
 
 
 def test_the_log_says_where_every_comment_stands(page, desk):
@@ -1507,7 +1512,6 @@ def test_a_file_changed_since_it_was_reviewed_says_so_where_the_count_is(page, d
     listed = page.locator("#filelist .fileitem[data-stale='true']")
     assert listed.count() == 1
     card.locator("input[type=checkbox]").uncheck()
-    page.evaluate("() => localStorage.clear()")
 
 
 @pytest.mark.parametrize("width", [1900, 1400, 1100, 900])
@@ -1565,7 +1569,7 @@ def test_the_pinned_file_head_clears_the_page_header(page, width):
     assert look["head"]
 
 
-def test_marking_a_file_reviewed_is_remembered_across_reloads(page):
+def test_marking_a_file_reviewed_outlives_the_browser_it_was_made_in(page, desk):
     card = sample(page)
     card.locator("input[type=checkbox]").check()
     page.wait_for_selector("section.file[data-path='sample.py'][data-done='true']")
@@ -1576,10 +1580,19 @@ def test_marking_a_file_reviewed_is_remembered_across_reloads(page):
     page.wait_for_selector("section.file")
     again = sample(page)
     assert again.get_attribute("data-done") == "true"
-    again.locator("input[type=checkbox]").uncheck()
-    page.wait_for_selector("section.file[data-path='sample.py'][data-done='false']")
-    assert again.get_attribute("data-done") == "false"
+
+    # The desk is where the tick is kept, so a browser that forgot everything - another profile, a cleared site, the
+    # page opened from a file - reads the review as it was left.
+    assert [mark.split(" ", 1)[1] for mark in desk.get("/reviewed")["marks"]] == ["sample.py"]
     page.evaluate("() => localStorage.clear()")
+    page.reload(wait_until="load")
+    page.wait_for_selector("section.file[data-path='sample.py'][data-done='true']")
+
+    forgotten = sample(page)
+    forgotten.locator("input[type=checkbox]").uncheck()
+    page.wait_for_selector("section.file[data-path='sample.py'][data-done='false']")
+    assert forgotten.get_attribute("data-done") == "false"
+    assert desk.get("/reviewed")["marks"] == {}
 
 
 def test_a_reply_can_be_rewritten_and_a_comment_and_its_last_reply_deleted_from_the_page(page, desk):
@@ -1626,7 +1639,6 @@ def test_a_reply_can_be_rewritten_and_a_comment_and_its_last_reply_deleted_from_
     page.wait_for_selector("#log[data-open='true']")
     assert page.locator("#logrows .logrow").filter(has_text=saying).count() == 0
     page.locator("#logclose").click()
-    page.evaluate("() => localStorage.clear()")
 
 
 def test_a_comment_does_not_shift_the_columns_of_the_diff_it_hangs_under(page, desk):
@@ -1677,7 +1689,6 @@ def test_a_comment_does_not_shift_the_columns_of_the_diff_it_hangs_under(page, d
         }"""
     )
     assert folded["seen"] == [folded["was"]]
-    page.evaluate("() => localStorage.clear()")
 
 
 def test_a_branch_that_has_moved_on_offers_a_refresh_that_keeps_the_place(page, desk):
@@ -1765,7 +1776,6 @@ def test_a_comment_waiting_to_be_sent_survives_a_refresh_and_a_reload(page, desk
         # Tolerant of an empty tray, so a draft that did not survive is reported by the assertion that looked for it.
         if page.locator("#tray").get_attribute("data-open") == "true":
             page.locator("#traydrop").click()
-        page.evaluate("() => localStorage.clear()")
 
 
 def test_a_reply_being_written_survives_the_page_redrawing_itself(page, desk):
@@ -1795,7 +1805,6 @@ def test_a_reply_being_written_survives_the_page_redrawing_itself(page, desk):
     )
     assert page.locator(f"#note-{made} textarea").first.input_value() == ""
     assert "all of what I mean" in thread.inner_text()
-    page.evaluate("() => localStorage.clear()")
 
 
 def test_a_box_takes_the_height_of_what_is_written_into_it(page, desk):
@@ -1820,7 +1829,6 @@ def test_a_box_takes_the_height_of_what_is_written_into_it(page, desk):
     settle(page)
     assert box.bounding_box()["height"] <= page.evaluate("() => window.innerHeight") * 0.45 + 2
     page.keyboard.press("Escape")
-    page.evaluate("() => localStorage.clear()")
 
 
 def test_a_reply_quoting_a_passage_shows_it_as_a_quote(page, desk):
@@ -1850,7 +1858,6 @@ def test_a_reply_quoting_a_passage_shows_it_as_a_quote(page, desk):
     assert "what I make of it" in answer
     assert ">" not in answer
     assert page.locator(f"#note-{made} .line.reply code").first.inner_text() == "code"
-    page.evaluate("() => localStorage.clear()")
 
 
 def test_a_recorded_comment_shows_the_number_it_is_referred_to_by(page, desk):
@@ -1865,7 +1872,6 @@ def test_a_recorded_comment_shows_the_number_it_is_referred_to_by(page, desk):
     # A session answers by number, so the number is on the thread rather than only in the panel.
     head = page.locator(f"#note-{made} .thread > .line .who").first
     assert head.inner_text().startswith(f"[{made}]")
-    page.evaluate("() => localStorage.clear()")
 
 
 def test_a_file_comment_being_written_outlives_the_poll(page, desk):
@@ -1883,7 +1889,6 @@ def test_a_file_comment_being_written_outlives_the_poll(page, desk):
     assert page.locator(".filenote.writing").count() == 1
     assert page.locator(".filenote.writing textarea").input_value() == "about the file as a whole"
     page.locator(".filenote.writing button.ghost", has_text="Cancel").first.click()
-    page.evaluate("() => localStorage.clear()")
 
 
 def test_a_comment_can_be_reached_by_its_number(page, desk):
@@ -1928,7 +1933,6 @@ def test_a_comment_can_be_reached_by_its_number(page, desk):
     page.keyboard.press("Enter")
     assert page.locator("#goto.lost").count() == 1
     page.locator("section.file[data-path='sample.py'] input[type=checkbox]").uncheck()
-    page.evaluate("() => localStorage.clear()")
 
 
 def test_a_file_holding_an_unread_comment_opens_itself(page, desk):
@@ -1977,7 +1981,6 @@ def test_a_file_holding_an_unread_comment_opens_itself(page, desk):
     assert page.locator(f"#note-{made} .thread.done").count() == 1
     assert page.locator(f"#note-{made} .thread.folded").count() == 0
     page.locator("section.file[data-path='added.py'] input[type=checkbox]").uncheck()
-    page.evaluate("() => localStorage.clear()")
 
 
 def test_the_panel_buttons_never_move(page, desk):
@@ -2022,7 +2025,6 @@ def test_the_panel_buttons_never_move(page, desk):
     )
     assert centred < 1.5
     page.locator("#logclose").click()
-    page.evaluate("() => localStorage.clear()")
 
 
 def test_a_sync_that_could_not_happen_says_so_where_the_reader_is(page, desk):
@@ -2063,7 +2065,6 @@ def test_a_sync_that_could_not_happen_says_so_where_the_reader_is(page, desk):
         desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})
         page.reload(wait_until="load")
         page.wait_for_selector("section.file")
-        page.evaluate("() => localStorage.clear()")
 
 
 def test_a_reply_below_the_fold_is_not_taken_for_read(page, desk):
@@ -2104,4 +2105,3 @@ def test_a_reply_below_the_fold_is_not_taken_for_read(page, desk):
     read(page, made)
     page.wait_for_selector(f"#note-{made} .thread.folded")
     assert page.locator(f"#note-{made} .thread.folded").count() == 1
-    page.evaluate("() => localStorage.clear()")
