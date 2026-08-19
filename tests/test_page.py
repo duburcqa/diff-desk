@@ -31,7 +31,9 @@ def play():
         yield running
 
 
-@pytest.fixture(scope="module", params=ENGINES)
+# An engine's run stands alone - its own browser, and, in a parallel run, its own desk - so each is a group of its own
+# and the three go side by side.
+@pytest.fixture(scope="module", params=[pytest.param(kind, marks=pytest.mark.xdist_group(kind)) for kind in ENGINES])
 def browser(play, request):
     kind = getattr(play, request.param)
     try:

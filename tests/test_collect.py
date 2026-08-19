@@ -5,6 +5,10 @@ import pytest
 import gen_diff_data
 from conftest import FILE_LINES, FIRST_EDIT, SECOND_EDIT
 
+# All of these read one repository built once, and cost next to nothing to run, so they go to a single worker of a
+# parallel run rather than having several build that repository over again.
+pytestmark = pytest.mark.xdist_group("collect")
+
 
 def hunks(entry):
     return [row for row in entry["lines"] if row[0] == "h"]

@@ -16,6 +16,10 @@ import gen_diff_data
 from conftest import FILE_LINES, ROOT, SECOND_EDIT, until
 from serve_diff import is_refusal
 
+# What one of these records the next reads back out of the same desk, so they belong to one worker of a parallel run
+# rather than being spread over several, each holding a desk that never heard the rest.
+pytestmark = pytest.mark.xdist_group("server")
+
 
 def read(desk, route):
     with urllib.request.urlopen(f"{desk.url}{route}", timeout=30) as answer:

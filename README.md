@@ -173,12 +173,20 @@ across all three.
 
 ## Development
 
-    pip install pytest playwright && playwright install chromium firefox webkit
+    pip install pytest pytest-xdist playwright && playwright install chromium firefox webkit
     python3 -m pytest
 
 The suite builds its own repository to review and its own desk to serve it, so it touches neither your checkouts nor
-the network. `tests/test_page.py` drives the page in Chromium, WebKit and Firefox because pointer handling and sticky
-positioning genuinely differ between them - two defects that shipped here were invisible in two engines out of three:
+the network. Nothing is shared between the engines either, so the five groups it is collected into - one per engine,
+one for the server, one for the collector - can be run side by side, which is about three times quicker:
+
+    python3 -m pytest -n 5 --dist loadgroup
+
+Every worker builds its own repository and brings up its own desk on a port of its own. Leave the flags off while
+working on a failure: one process, in order, is where a failure is easiest to read.
+
+`tests/test_page.py` drives the page in Chromium, WebKit and Firefox because pointer handling and sticky positioning
+genuinely differ between them - two defects that shipped here were invisible in two engines out of three:
 
 - A trailing click follows every drag, aimed at the pin or at an ancestor depending on the engine, and collapses the
   range to a single line unless it is swallowed.
