@@ -2777,7 +2777,10 @@
         row.append(left, right, gut, mark, code);
         tbody.append(row);
 
-        for (const note of notesAt(file.path, line, side)) {
+        // A comment left behind is placed by the pass below, so it is skipped here: its recorded line often still
+        // exists, and rendering it in both places showed the reader the same remark twice.
+        const behind = new Set(stranded.map((note) => note.seq));
+        for (const note of notesAt(file.path, line, side).filter((note) => !behind.has(note.seq))) {
           note.source = notes.drafts.find((draft) => draft.text === note.text && draft.line === note.line && draft.path === note.path);
           tbody.append(noteRow(note));
         }

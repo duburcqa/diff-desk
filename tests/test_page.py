@@ -1267,6 +1267,8 @@ def test_a_comment_whose_line_left_the_diff_is_kept_and_marked(page, desk):
     page.wait_for_selector("section.file")
     lost = page.locator(f"#note-{made}")
     assert lost.locator(".mark.outdated").first.inner_text() == "code moved on"
+    # Once, not twice: its recorded line still exists, and it used to be drawn there as well as where it now hangs.
+    assert page.locator(f"#note-{made}").count() == 1
     # Left where it was written rather than packed at the foot of the file, so it keeps the place it was about.
     placed = page.evaluate(
         "(seq) => {"
