@@ -6,7 +6,6 @@ import os
 import shutil
 import subprocess
 import sys
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -14,7 +13,7 @@ import urllib.request
 import pytest
 
 import gen_diff_data
-from conftest import FILE_LINES, ROOT, SECOND_EDIT
+from conftest import FILE_LINES, ROOT, SECOND_EDIT, until
 from serve_diff import is_refusal
 
 
@@ -1276,6 +1275,12 @@ def test_the_branch_has_moved_on_when_a_modified_file_changes_again(desk):
 
 
 def test_watching_hears_everything_said_not_only_the_first(desk):
+    # Where a watch stopped is written down, so what it has heard is asked of that rather than guessed at from a pause.
+    stopped = desk.home / "watched.json"
+
+    def reached(event):
+        return stopped.exists() and json.loads(stopped.read_text())["event"] >= event
+
     watching = desk.cli("watch", "--every", "0.2", "--timeout", "20")
     try:
         # Two things said one after the other: a watch that stopped at the first left the second unheard.
@@ -1283,9 +1288,11 @@ def test_watching_hears_everything_said_not_only_the_first(desk):
             "/comments",
             [{"branch": "feature", "path": "sample.py", "line": 71, "side": "new", "text": "the first word"}],
         )["seqs"][0]
-        time.sleep(1.0)
+        spoken = {row["seq"]: row for row in desk.get("/comments")}[first]["event"]
+        until(lambda: reached(spoken))
         desk.post("/reply", {"seq": first, "text": "and the second word", "who": "you"})
-        time.sleep(1.5)
+        answered = {row["seq"]: row for row in desk.get("/comments")}[first]["event"]
+        until(lambda: reached(answered))
     finally:
         watching.terminate()
         said = watching.communicate(timeout=30)[0]

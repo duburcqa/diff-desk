@@ -31,6 +31,17 @@ def git(root, *args):
     subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True)
 
 
+def until(question, seconds=10.0):
+    """Wait for a state the desk reports rather than for a guessed number of milliseconds."""
+    limit = time.monotonic() + seconds
+    while time.monotonic() < limit:
+        answer = question()
+        if answer:
+            return answer
+        time.sleep(0.1)
+    raise AssertionError("the desk never reported it")
+
+
 def free_port():
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))

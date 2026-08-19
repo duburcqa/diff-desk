@@ -6,12 +6,11 @@ engine is skipped, never silently dropped from the run.
 
 import json
 import re
-import time
 
 import pytest
 
 import gen_diff_data
-from conftest import FIRST_EDIT, SECOND_EDIT
+from conftest import FIRST_EDIT, SECOND_EDIT, until
 
 playwright = pytest.importorskip("playwright.sync_api")
 
@@ -57,17 +56,6 @@ def page(browser, desk):
     yield opened
     assert problems == []
     opened.close()
-
-
-def until(question, seconds=10.0):
-    """Wait for a state the desk reports rather than for a guessed number of milliseconds."""
-    limit = time.monotonic() + seconds
-    while time.monotonic() < limit:
-        answer = question()
-        if answer:
-            return answer
-        time.sleep(0.1)
-    raise AssertionError("the desk never reported it")
 
 
 def settle(page):
