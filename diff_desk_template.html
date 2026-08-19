@@ -949,7 +949,8 @@
     const rows = mine();
     const closed = rows.filter((note) => note.state === "resolved").length;
     const owed = rows.filter((note) => OWED.includes(note.github)).length;
-    if (rows.length) bits.push(`<b>${rows.length}</b> comment${rows.length === 1 ? "" : "s"}, ${closed} resolved`);
+    // A native tooltip is plain text, so the count stands on its own rather than being marked up.
+    if (rows.length) bits.push(`${rows.length} comment${rows.length === 1 ? "" : "s"}, ${closed} resolved`);
     if (owed) bits.push(`${owed} waiting for GitHub`);
     bits.push(notes.live ? "watched by Claude" : "kept in this browser");
     if (staleCount) bits.push(`${staleCount} reopened`);

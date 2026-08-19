@@ -5,6 +5,7 @@ engine is skipped, never silently dropped from the run.
 """
 
 import json
+import re
 import time
 
 import pytest
@@ -920,7 +921,11 @@ def test_the_log_says_where_every_comment_stands(page, desk):
     assert page.locator("#logretry").is_enabled()
     # Said by the dot and by what the button holds, since the label itself never changes width.
     assert page.locator("#logdot").get_attribute("data-on") == "true"
-    assert "waiting for GitHub" in page.locator("#logopen").get_attribute("title")
+    said = page.locator("#logopen").get_attribute("title")
+    assert "waiting for GitHub" in said
+    # A native tooltip carries no markup, so the count reads as a number rather than as tags around one.
+    assert re.match(r"\d+ comments?, \d+ resolved\b", said)
+    assert "<" not in said
     page.locator("#logclose").click()
 
 
