@@ -16,6 +16,7 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import time
@@ -58,8 +59,16 @@ def refresh():
     if branch != "main" or dirty:
         print(f"not updated: {here} is on {branch or 'a detached head'}{' with uncommitted work' if dirty else ''}")
         return
-    fetched, _ = git("fetch", "--quiet", "origin", "main")
+    fetched, _ = git("fetch", "--quiet", "origin", "main", quiet=True)
     if not fetched:
+        # A network that carries HTTPS but not SSH is a normal state of affairs - a locked-down machine, a sandbox, a
+        # corporate route - and a desk that quietly serves last week's page because of it is worse than a slow fetch.
+        # The published repository is public, so the same fetch over HTTPS needs nothing but the address.
+        _, remote = git("remote", "get-url", "origin", quiet=True)
+        over_https = re.sub(r"^(?:ssh://)?git@([^:/]+)[:/]", r"https://\1/", remote)
+        fetched = over_https != remote and git("fetch", "--quiet", over_https, "main:refs/remotes/origin/main")[0]
+    if not fetched:
+        print("not updated: neither the remote nor its HTTPS address could be reached")
         return
     _, before = git("rev-parse", "HEAD", quiet=True)
     moved, _ = git("merge", "--ff-only", "--quiet", "origin/main")
@@ -68,7 +77,9 @@ def refresh():
     _, after = git("rev-parse", "HEAD", quiet=True)
     if after == before:
         return
-    print(f"updated to {after[:9]}, restarting")
+    # Flushed before the exec, which replaces the process: buffered on a pipe, the one word about why the desk restarted
+    # would never leave it.
+    print(f"updated to {after[:9]}, restarting", flush=True)
     os.execv(sys.executable, [sys.executable, *sys.argv])
 
 

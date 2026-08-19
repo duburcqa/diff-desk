@@ -2,6 +2,10 @@
 
 import concurrent.futures
 import json
+import os
+import shutil
+import subprocess
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -10,7 +14,7 @@ import urllib.request
 import pytest
 
 import gen_diff_data
-from conftest import FILE_LINES, SECOND_EDIT
+from conftest import FILE_LINES, ROOT, SECOND_EDIT
 from serve_diff import is_refusal
 
 
@@ -1298,3 +1302,39 @@ def test_watching_hears_everything_said_not_only_the_first(desk):
     heard = desk.cli("watch", "--once", "--every", "0.2", "--timeout", "20").communicate(timeout=40)[0]
     assert "and a third word" in heard
     assert heard.count("comment(s) with news") == 1
+
+
+def test_the_desk_updates_itself_over_https_when_ssh_cannot_be_reached(tmp_path):
+    # A published copy of the desk to update from, and a checkout of it whose remote is an address SSH cannot reach.
+    published, here = tmp_path / "published", tmp_path / "here"
+    published.mkdir()
+    gen_diff_data.run(published, "init", "--quiet", "--initial-branch=main")
+    gen_diff_data.run(published, "config", "user.email", "desk@test")
+    gen_diff_data.run(published, "config", "user.name", "Desk")
+    for name in ("desk.py", "gen_diff_data.py", "serve_diff.py", "diff_desk_template.html", ".gitignore"):
+        shutil.copy(ROOT / name, published / name)
+    gen_diff_data.run(published, "add", "-A")
+    gen_diff_data.run(published, "commit", "--quiet", "-m", "the desk as published")
+    gen_diff_data.run(tmp_path, "clone", "--quiet", str(published), str(here))
+    (published / "README.md").write_text("published since\n")
+    gen_diff_data.run(published, "add", "-A")
+    gen_diff_data.run(published, "commit", "--quiet", "-m", "published since")
+    ahead = gen_diff_data.run(published, "rev-parse", "HEAD").strip()
+
+    # An SSH address that resolves nowhere, and its HTTPS form pointed back at the copy on disk: the fallback stops
+    # asking the address that cannot answer and asks the one that can.
+    gen_diff_data.run(here, "remote", "set-url", "origin", "git@nowhere.invalid:published/desk.git")
+    gen_diff_data.run(
+        here, "config", f"url.{published.as_uri()}.insteadOf", "https://nowhere.invalid/published/desk.git"
+    )
+    said = subprocess.run(
+        [sys.executable, "-c", "import desk; desk.refresh()"],
+        cwd=here,
+        env={k: v for k, v in os.environ.items() if k != "DIFF_DESK_UPDATED"} | {"PYTHONPATH": str(here)},
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert gen_diff_data.run(here, "rev-parse", "HEAD").strip() == ahead, said.stdout + said.stderr
+    assert "updated to" in said.stdout
