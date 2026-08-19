@@ -17,7 +17,9 @@ if os.environ.get("FAKE_GH_LOG"):
     # that never ends and reading it would wait for good.
     given = sys.stdin.read() if "--input" in sys.argv else ""
     with pathlib.Path(os.environ["FAKE_GH_LOG"]).open("a") as told:
-        told.write(asking + (f" <<< {given}" if given else "") + "\n")
+        # One call, one line, whatever it was given: a GraphQL document runs over several lines and a test counting the
+        # calls would read one invocation as a dozen. What was piped in is left as it came, since a test reads it back.
+        told.write(" ".join(asking.split()) + (f" <<< {given}" if given else "") + "\n")
 wanted = next((rule for rule in asked.get("rules", []) if rule["match"] in asking), asked)
 # Whatever is being piped in is left unread: only a posted review is given anything, and the calls that resolve a
 # repository inherit a standard input that never ends, which reading would wait on for good.

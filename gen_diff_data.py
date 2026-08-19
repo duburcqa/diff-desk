@@ -28,8 +28,18 @@ def run(root, *args):
     return subprocess.run(["git", *args], capture_output=True, text=True, cwd=root, check=False).stdout
 
 
+# What GitHub answered about each slug read off a remote, since asking is a request every time.
+SLUGS = {}
+
+
 def canonical_repo(root):
-    """The slug pull requests live under, followed through renames so the API does not answer with a redirect."""
+    """The slug pull requests live under, followed through renames so the API does not answer with a redirect.
+
+    The rename is followed once and remembered for the rest of the process: no repository is renamed under a desk while
+    it is serving, while every page load and every scan would otherwise spend a request on the question - and one of
+    them failing is the page losing its links to the pull requests. Which remotes a repository has is still read from
+    disk each time, so one added or removed under the desk is noticed.
+    """
     for remote in ("upstream", "origin"):
         url = run(root, "remote", "get-url", remote).strip()
         if not url:
@@ -37,14 +47,17 @@ def canonical_repo(root):
         match = re.search(r"github\.com[:/](.+?)(?:\.git)?$", url)
         if not match:
             continue
-        slug = subprocess.run(
-            [*github(), "api", f"repos/{match.group(1)}", "--jq", ".full_name"],
-            capture_output=True,
-            text=True,
-            timeout=40,
-            check=False,
-        ).stdout.strip()
-        return slug or match.group(1)
+        named = match.group(1)
+        if named not in SLUGS:
+            told = subprocess.run(
+                [*github(), "api", f"repos/{named}", "--jq", ".full_name"],
+                capture_output=True,
+                text=True,
+                timeout=40,
+                check=False,
+            ).stdout.strip()
+            SLUGS[named] = told or named
+        return SLUGS[named]
     return ""
 
 

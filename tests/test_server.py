@@ -580,6 +580,73 @@ def test_syncing_resolves_there_what_was_closed_here(desk):
     assert {row["seq"]: row for row in desk.get("/comments")}[seq]["prResolve"] == "done"
 
 
+def test_a_sync_asks_for_every_resolution_in_one_request_and_answers_for_each(desk):
+    texts = ["one of a batch", "another of it", "the last of it"]
+    made = desk.post(
+        "/comments",
+        {
+            "comments": [
+                {"branch": "feature", "path": "sample.py", "line": 30 + number, "side": "new", "text": text}
+                for number, text in enumerate(texts)
+            ],
+            "github": True,
+        },
+    )
+    seqs = made["seqs"]
+    desk.github_answers(out=json.dumps({"html_url": "https://github.com/x/y/pull/21#review-1"}))
+    assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 21, "seq": seqs})["ok"]
+    desk.post("/reply", {"seq": seqs[0], "text": "packed with the resolutions", "who": "session"})
+    desk.post("/resolve", {"seq": seqs, "who": "you"})
+
+    nodes = [
+        {
+            "id": f"T_pack{number}",
+            "isResolved": False,
+            "comments": {
+                "nodes": [
+                    {"databaseId": 900 + number, "body": text, "path": "sample.py", "author": {"login": "duburcqa"}}
+                ]
+            },
+        }
+        for number, text in enumerate(texts)
+    ]
+    # The reply of the first comment, then the three resolutions. The middle thread has gone from under the sync, and
+    # GitHub says so naming the alias that asked about it.
+    answered = {
+        "data": {
+            "m0": {"comment": {"id": "C_packed"}},
+            "m1": {"thread": {"isResolved": True}},
+            "m2": None,
+            "m3": {"thread": {"isResolved": True}},
+        },
+        "errors": [{"path": ["m2"], "message": "Could not resolve to a node with the global id of 'T_pack1'"}],
+    }
+    desk.github_answers(
+        rules=[
+            {
+                "match": "reviewThreads",
+                "out": json.dumps({"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": nodes}}}}}),
+            },
+            {"match": "resolveReviewThread", "out": json.dumps(answered), "code": 1},
+        ]
+    )
+    before = len(desk.github_calls())
+    outcome = desk.post("/sync", {"repo": "someone/somewhere", "pr": 21, "resolved": True})
+    calls = desk.github_calls()[before:]
+    # The threads read, then one request carrying everything the sync owes, however many comments owe it.
+    assert len(calls) == 2
+    assert all(f"T_pack{number}" in calls[1] for number in range(3))
+    assert "packed with the resolutions" in calls[1]
+    assert (outcome["sent"], outcome["resolved"]) == (1, 2)
+
+    rows = {row["seq"]: row for row in desk.get("/comments")}
+    # Each comment is told the fate of its own mutation rather than of the batch it was asked for in.
+    assert [rows[seq]["prResolve"] for seq in seqs] == ["done", "failed", "done"]
+    assert "global id" in rows[seqs[1]]["prResolveError"]
+    assert "prResolveError" not in rows[seqs[0]]
+    assert rows[seqs[0]]["replies"][0]["posted"] is True
+
+
 def test_closing_a_comment_that_never_reached_the_pull_request_owes_it_nothing(desk):
     made = desk.post(
         "/comments", [{"branch": "feature", "path": "sample.py", "line": 17, "side": "new", "text": "here only"}]

@@ -120,6 +120,21 @@ query($owner: String!, $name: String!, $number: Int!) {
 
 RESOLVE = "mutation($thread: ID!) { resolveReviewThread(input: {threadId: $thread}) { thread { isResolved } } }"
 
+# A comment whose thread is nowhere on the pull request, which is the one failure decided without asking GitHub.
+NOWHERE = "its thread could not be found on the pull request"
+
+
+class Owing(NamedTuple):
+    """One thing a pull request is owed: a reply to add to a review thread, or that thread resolved.
+
+    A reply carries the text and the comment that opened the thread, which is what a reply sent on its own is posted
+    against; a resolution carries neither.
+    """
+
+    thread: str
+    comment: int
+    body: str
+
 
 def review_threads(repo, number):
     """Every review thread of a pull request, or nothing and the reason it could not be read."""
@@ -157,8 +172,6 @@ def resolve_thread(thread):
     Judged on the answer rather than on the exit status: a query can come back carrying errors and still be a successful
     request, and this desk must never report a resolution the pull request does not have.
     """
-    if thread is None:
-        return "failed", "its thread could not be found on the pull request"
     done = subprocess.run(
         [*gen_diff_data.github(), "api", "graphql", "-f", f"query={RESOLVE}", "-F", f"thread={thread}"],
         capture_output=True,
@@ -167,16 +180,112 @@ def resolve_thread(thread):
         check=False,
     )
     if done.returncode != 0:
-        return "failed", " ".join((done.stderr or done.stdout).split())[:300]
+        return False, " ".join((done.stderr or done.stdout).split())[:300]
     try:
         answer = json.loads(done.stdout)
     except json.JSONDecodeError:
-        return "failed", f"GitHub answered with something other than an answer: {done.stdout[:120]}"
+        return False, f"GitHub answered with something other than an answer: {done.stdout[:120]}"
     if answer.get("errors"):
-        return "failed", " ".join(str(answer["errors"])[:300].split())
+        return False, " ".join(str(answer["errors"])[:300].split())
     if answer.get("data", {}).get("resolveReviewThread", {}).get("thread", {}).get("isResolved") is True:
-        return "done", ""
-    return "failed", "GitHub did not report the thread as resolved"
+        return True, ""
+    return False, "GitHub did not report the thread as resolved"
+
+
+def packed_mutations(wanted):
+    """Ask for every mutation at once, under an alias apiece, and read each answer back against the item that asked.
+
+    GraphQL carries as many mutations as a document is given aliases for, and answers them one by one - naming, when one
+    of them fails, the alias it failed for. That is what lets a sync spend a single request on everything it owes while
+    each comment still learns the fate of its own reply or resolution.
+    """
+    names, fields, arguments = [], [], []
+    for index, item in enumerate(wanted):
+        names.append(f"$t{index}: ID!")
+        # Passed as variables rather than written into the document, so no comment text can be read as part of it.
+        arguments += ["-f", f"t{index}={item.thread}"]
+        if item.body:
+            names.append(f"$b{index}: String!")
+            arguments += ["-f", f"b{index}={item.body}"]
+            fields.append(
+                f"  m{index}: addPullRequestReviewThreadReply"
+                f"(input: {{pullRequestReviewThreadId: $t{index}, body: $b{index}}}) {{ comment {{ id }} }}"
+            )
+        else:
+            fields.append(
+                f"  m{index}: resolveReviewThread(input: {{threadId: $t{index}}}) {{ thread {{ isResolved }} }}"
+            )
+    document = "mutation({}) {{\n{}\n}}".format(", ".join(names), "\n".join(fields))
+    done = subprocess.run(
+        [*gen_diff_data.github(), "api", "graphql", "-f", f"query={document}", *arguments],
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+    )
+    try:
+        answer = json.loads(done.stdout)
+    except json.JSONDecodeError:
+        # No answer at all is the only failure the whole document shares: nothing in it can be told apart.
+        told = " ".join((done.stderr or done.stdout).split())[:300] or "GitHub gave no answer"
+        return [(False, told)] * len(wanted)
+    blamed = {}
+    for trouble in answer.get("errors") or []:
+        named = (trouble.get("path") or [""])[0]
+        blamed[named] = " ".join(str(trouble.get("message") or trouble).split())[:300]
+    # An error naming no alias is the document's own, so it stands as the reason for whatever came back empty.
+    whole = blamed.get("") or "GitHub did not answer for it"
+    data = answer.get("data") or {}
+    outcome = []
+    for index, item in enumerate(wanted):
+        held = data.get(f"m{index}")
+        went = bool(held) if item.body else ((held or {}).get("thread") or {}).get("isResolved") is True
+        outcome.append((True, "") if went else (False, blamed.get(f"m{index}") or whole))
+    return outcome
+
+
+def carry_out(repo, number, wanted):
+    """Everything owed to a pull request, asked in one request, and what became of each item in the order it was given.
+
+    A lone item keeps the plain spelling it has always had, so the simple case is exactly the call it always was.
+    """
+    if not wanted:
+        return []
+    if len(wanted) == 1:
+        one = wanted[0]
+        outcome = [reply_on_pull(repo, number, one.comment, one.body) if one.body else resolve_thread(one.thread)]
+    else:
+        outcome = packed_mutations(wanted)
+    for item, (went, trouble) in zip(wanted, outcome, strict=True):
+        if not went:
+            print(f"{'REPLY' if item.body else 'RESOLVE'} REFUSED {trouble}", flush=True)
+    return outcome
+
+
+def close_threads(repo, number, owed, threads):
+    """Resolve at once the thread of every comment closed here, and say for each of them how that went.
+
+    Split by what the pull request says: a thread it already holds as resolved is settled, one it holds as open is
+    resolved now, and a comment matching neither is left owed. Assuming the last case settled would report a resolution
+    the pull request does not have, which is the one thing this must never do.
+    """
+    opened, settled = {}, set()
+    for thread in threads:
+        said = thread["comments"]["nodes"]
+        if not said:
+            continue
+        if thread["isResolved"]:
+            settled.add(said[0]["body"])
+        else:
+            opened[said[0]["body"]] = thread["id"]
+    outcome = {row["seq"]: ("done", "") for row in owed if row["text"] in settled}
+    asking = [row for row in owed if row["seq"] not in outcome and row["text"] in opened]
+    wanted = [Owing(opened[row["text"]], 0, "") for row in asking]
+    for row, (went, trouble) in zip(asking, carry_out(repo, number, wanted), strict=True):
+        outcome[row["seq"]] = ("done", "") if went else ("failed", trouble)
+    for row in owed:
+        outcome.setdefault(row["seq"], ("failed", NOWHERE))
+    return outcome
 
 
 def rebuild():
@@ -217,8 +326,18 @@ def delete_comment(repo, comment):
     return True, ""
 
 
+class Owed(NamedTuple):
+    """What one comment and its thread owe each other, worked out before any of it is asked of GitHub."""
+
+    landed: list
+    incoming: list
+    settled: bool
+    given: tuple | None
+    wanted: list
+
+
 class Reconciled(NamedTuple):
-    """What one comment and its thread owe each other: replies each way, and where resolution stands."""
+    """What one comment's sync came to: replies each way, how many went out, and where resolution stands."""
 
     landed: list
     sent: int
@@ -227,35 +346,49 @@ class Reconciled(NamedTuple):
     given: tuple | None
 
 
-def reconcile(repo, number, row, thread, carry=True):
-    """Carry replies both ways for one comment, and settle its resolution against the thread.
+def reconcile(row, thread, carry=True):
+    """What one comment owes its thread and is owed by it, including every mutation that has to be asked for.
 
+    Nothing is asked here: a sync collects the mutations of all its comments so it can ask for them in one request.
     `carry` withholds the replies written here; whatever the pull request holds is always brought back.
     """
     if thread is None:
         # Nothing on the pull request answers to this comment, so whatever was believed about it stands
         # uncorroborated: it is owed again rather than left claiming a resolution nobody can see.
-        owed = (
-            ("failed", "its thread could not be found on the pull request") if row.get("state") == "resolved" else None
-        )
-        return Reconciled([], 0, [], False, owed)
+        owed = ("failed", NOWHERE) if row.get("state") == "resolved" else None
+        return Owed([], [], False, owed, [])
     said = thread["comments"]["nodes"]
-    landed, going = carry_replies(repo, number, row, said) if carry else ([], 0)
-    settled, given = agree(thread, row)
-    return Reconciled(landed, going, incoming(row, said), settled, given)
+    landed, sending = carry_replies(row, said) if carry else ([], [])
+    settled, resolving = agree(thread, row)
+    wanted = [Owing(thread["id"], said[0]["databaseId"], text) for text in sending]
+    if resolving:
+        wanted.append(Owing(resolving, 0, ""))
+    return Owed(landed, incoming(row, said), settled, None, wanted)
+
+
+def reconciled(plan, answers):
+    """One comment's sync once GitHub has answered: what it asked for, read back in the order it asked."""
+    landed, sent, given = list(plan.landed), 0, plan.given
+    for item, (went, trouble) in zip(plan.wanted, answers, strict=True):
+        if not item.body:
+            given = ("done", "") if went else ("failed", trouble)
+        elif went:
+            landed.append(item.body)
+            sent += 1
+    return Reconciled(landed, sent, plan.incoming, plan.settled, given)
 
 
 def agree(thread, row):
-    """What a sync should make of one thread: whether to close the comment here, and what resolving it there gave.
+    """What a sync should make of one thread: whether to close the comment here, and which thread to resolve there.
 
     Decided on what the pull request says rather than on what this desk recorded, which is what repairs a comment
     wrongly believed resolved there - trusting the record is how such a belief survives a sync.
     """
     if thread["isResolved"]:
-        return True, None
+        return True, ""
     if row.get("state") == "resolved":
-        return False, resolve_thread(thread["id"])
-    return False, None
+        return False, thread["id"]
+    return False, ""
 
 
 def under_review(row, order):
@@ -306,17 +439,16 @@ def settle(row, landed, incoming, resolved):
         row["prResolve"] = "done"
 
 
-def carry_replies(repo, number, row, said):
-    """Post the replies written here that the thread does not hold yet. Returns what it holds now, and how many went."""
+def carry_replies(row, said):
+    """The replies written here, split into those the thread already holds and those still to go out."""
     spoken = {answer["body"] for answer in said}
-    landed, going = [], 0
+    landed, sending = [], []
     for answer in row.get("replies", []):
         if answer.get("posted") or answer["text"] in spoken:
             landed.append(answer["text"])
-        elif reply_on_pull(repo, number, said[0]["databaseId"], answer["text"]):
-            landed.append(answer["text"])
-            going += 1
-    return landed, going
+        else:
+            sending.append(answer["text"])
+    return landed, sending
 
 
 def incoming(row, said):
@@ -330,7 +462,7 @@ def incoming(row, said):
 
 
 def reply_on_pull(repo, number, comment, text):
-    """Answer a pull request's review comment in its own thread. True when it went out."""
+    """Answer a pull request's review comment in its own thread. Says whether it went out, and why it did not."""
     done = subprocess.run(
         [
             *gen_diff_data.github(),
@@ -347,8 +479,8 @@ def reply_on_pull(repo, number, comment, text):
         check=False,
     )
     if done.returncode != 0:
-        print(f"REPLY REFUSED {' '.join((done.stderr or done.stdout).split())[:200]}", flush=True)
-    return done.returncode == 0
+        return False, " ".join((done.stderr or done.stdout).split())[:300]
+    return True, ""
 
 
 def is_refusal(error):
@@ -824,22 +956,7 @@ class Handler(BaseHTTPRequestHandler):
             print(f"CLOSE FAILED {trouble}", flush=True)
             self._json({"ok": False, "error": trouble, "closed": 0, "owed": len(owed)})
             return
-        # Split by what the pull request says: a thread it already holds as resolved is settled, one it holds as open is
-        # resolved now, and a comment matching neither is left owed. Assuming the last case settled would report a
-        # resolution the pull request does not have, which is the one thing this must never do.
-        opened, settled = {}, set()
-        for thread in threads:
-            said = thread["comments"]["nodes"]
-            if not said:
-                continue
-            if thread["isResolved"]:
-                settled.add(said[0]["body"])
-            else:
-                opened[said[0]["body"]] = thread["id"]
-        outcome = {
-            row["seq"]: ("done", "") if row["text"] in settled else resolve_thread(opened.get(row["text"]))
-            for row in owed
-        }
+        outcome = close_threads(order["repo"], order["pr"], owed, threads)
         closed = len([seq for seq, (state, _) in outcome.items() if state == "done"])
         with changing() as fresh:
             for row in fresh:
@@ -881,16 +998,19 @@ class Handler(BaseHTTPRequestHandler):
                 theirs[said[0]["body"]] = thread
         # A remark settled here withholds its replies unless asked for, but its resolution is still agreed with the pull
         # request either way: agreeing on what is resolved is the point of a sync.
-        found = {
+        plans = {
             seq: reconcile(
-                order["repo"],
-                order["pr"],
-                row,
-                theirs.get(row["text"]),
-                carry=bool(order.get("resolved")) or row.get("state") != "resolved",
+                row, theirs.get(row["text"]), carry=bool(order.get("resolved")) or row.get("state") != "resolved"
             )
             for seq, row in posted.items()
         }
+        # Every comment's replies and resolutions in one request, then handed back to the comment that asked for them.
+        wanted, spans = [], {}
+        for seq, plan in plans.items():
+            spans[seq] = slice(len(wanted), len(wanted) + len(plan.wanted))
+            wanted += plan.wanted
+        answers = carry_out(order["repo"], order["pr"], wanted)
+        found = {seq: reconciled(plan, answers[spans[seq]]) for seq, plan in plans.items()}
         sent = sum(step.sent for step in found.values())
         brought = sum(len(step.incoming) for step in found.values())
         closed = len([seq for seq, step in found.items() if step.settled and posted[seq].get("state") != "resolved"])
