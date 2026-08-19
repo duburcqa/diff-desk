@@ -158,6 +158,11 @@
   .toggle[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
   select:focus-visible, .toggle:focus-visible, input:focus-visible, .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
+  /* Sized to the label beside them and never resized, so the bar holds still whether or not there is anywhere to go. */
+  .step { flex: none; width: 22px; padding: 0; display: grid; place-items: center; cursor: pointer; }
+  .step svg { width: 12px; height: 12px; }
+  .step:disabled { color: var(--faint); cursor: default; }
+
   .totals { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 12px; }
   .totals .plus { color: var(--add-ink); }
   .totals .minus { color: var(--del-ink); }
@@ -709,6 +714,16 @@
     <div class="progress" title="Files marked reviewed">
       <span class="track"><i id="pfill" style="width:0%"></i></span>
       <span class="label num" id="ptext"></span>
+      <button class="step" id="pback" disabled title="The file left to review above this one">
+        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+          <path d="M2.5 7.5 6 4l3.5 3.5" />
+        </svg>
+      </button>
+      <button class="step" id="pnext" disabled title="The file left to review below this one">
+        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+          <path d="M2.5 4.5 6 8l3.5-3.5" />
+        </svg>
+      </button>
     </div>
     <div class="totals">
       <span class="plus num" id="tplus"></span>
@@ -813,7 +828,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "ctx", "hidedone", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logretry", "logbind", "logsync", "logclose", "logresult", "logresolved", "brand", "repo", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
+  for (const id of ["tabs", "scope", "q", "ctx", "hidedone", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logretry", "logbind", "logsync", "logclose", "logresult", "logresolved", "brand", "repo", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -2277,6 +2292,7 @@
       ? `${staleCount} file(s) changed since they were reviewed, so their ticks were dropped`
       : "Files marked reviewed";
     els.pfill.style.width = files.length ? `${Math.round((done / files.length) * 100)}%` : "0%";
+    sayWhereToStep();
     showStatus(staleCount);
 
     els.filelist.innerHTML = "";
@@ -2653,6 +2669,30 @@
     for (const node of entries()) node.setAttribute("data-current", String(Number(node.dataset.index) === state.current));
   }
 
+  function leftToReview(down) {
+    // Counted from the file the reader is on, which is the last one whose head has passed the line a stepped-to file
+    // comes to rest at - the header plus the breathing space the card's own scroll margin asks for, read off the style
+    // so the two cannot drift apart. Measuring against the header alone would offer them the file they are reading.
+    const cards = [...document.querySelectorAll("section.file")];
+    if (!cards.length) return undefined;
+    const covered = document.querySelector("header").getBoundingClientRect().bottom;
+    const resting = Math.max(covered, parseFloat(getComputedStyle(cards[0]).scrollMarginTop) || covered) + 1;
+    const below = cards.findIndex((card) => card.getBoundingClientRect().top > resting);
+    const here = below === -1 ? cards.length - 1 : below - 1;
+    const ahead = down ? cards.slice(here + 1) : cards.slice(0, Math.max(0, here)).reverse();
+    return ahead.find((card) => card.dataset.done !== "true");
+  }
+
+  function stepThroughWhatIsLeft(down) {
+    const card = leftToReview(down);
+    if (card) jump(Number(card.id.slice(1)));
+  }
+
+  function sayWhereToStep() {
+    els.pback.disabled = !leftToReview(false);
+    els.pnext.disabled = !leftToReview(true);
+  }
+
   function jump(index) {
     const target = document.getElementById(`f${index}`);
     if (!target) return;
@@ -2664,6 +2704,18 @@
     markCurrent();
     target.scrollIntoView({ behavior: "smooth", block: "start" });
   }
+
+  els.pback.addEventListener("click", () => stepThroughWhatIsLeft(false));
+  els.pnext.addEventListener("click", () => stepThroughWhatIsLeft(true));
+  // What lies either side of the reader changes as they move, and a smooth scroll keeps moving after the press.
+  let stepping = null;
+  window.addEventListener("scroll", () => {
+    if (stepping) return;
+    stepping = requestAnimationFrame(() => {
+      stepping = null;
+      sayWhereToStep();
+    });
+  });
 
   els.scope.addEventListener("change", (event) => {
     state.scope = event.target.value;

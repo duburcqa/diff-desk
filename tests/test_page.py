@@ -595,6 +595,47 @@ def test_a_file_opened_by_hand_stays_open_when_the_page_redraws(page):
     page.evaluate("() => localStorage.clear()")
 
 
+def test_stepping_lands_on_the_file_left_to_review_nearest_the_reader(page):
+    page.set_viewport_size({"width": 1200, "height": 500})
+    paths = page.evaluate("() => [...document.querySelectorAll('section.file')].map((card) => card.dataset.path)")
+    reading = """() => {
+      const covered = document.querySelector('header').getBoundingClientRect().bottom;
+      const cards = [...document.querySelectorAll('section.file')];
+      const near = cards.map((card) => Math.abs(card.getBoundingClientRect().top - covered));
+      return cards[near.indexOf(Math.min(...near))].dataset.path;
+    }"""
+    # The first one dealt with, so stepping down from the top has to pass over it.
+    page.locator(f"section.file[data-path='{paths[0]}'] input[type=checkbox]").check()
+    page.evaluate("() => window.scrollTo(0, 0)")
+    page.wait_for_timeout(200)
+
+    # Nothing above the top of the page, and what lies below it is what is left to review.
+    assert page.locator("#pback").is_disabled()
+    assert page.locator("#pnext").is_enabled()
+    page.locator("#pnext").click()
+    page.wait_for_timeout(600)
+    assert page.evaluate(reading) == paths[1]
+
+    # Stepping down again passes to the one after it, and stepping back up returns to where it came from.
+    page.locator("#pnext").click()
+    page.wait_for_timeout(600)
+    assert page.evaluate(reading) == paths[2]
+    assert page.locator("#pback").is_enabled()
+    page.locator("#pback").click()
+    page.wait_for_timeout(600)
+    assert page.evaluate(reading) == paths[1]
+
+    # Everything dealt with leaves nowhere to step, in either direction.
+    for path in paths:
+        page.locator(f"section.file[data-path='{path}'] input[type=checkbox]").check()
+    page.wait_for_timeout(200)
+    assert page.locator("#pnext").is_disabled()
+    assert page.locator("#pback").is_disabled()
+    for path in paths:
+        page.locator(f"section.file[data-path='{path}'] input[type=checkbox]").uncheck()
+    page.evaluate("() => localStorage.clear()")
+
+
 def test_a_file_changed_since_it_was_reviewed_opens_itself(page, desk):
     branch = page.evaluate("() => data.branches[0].ref")
     card = page.locator("section.file[data-path='added.py']")
