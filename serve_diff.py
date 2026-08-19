@@ -667,6 +667,8 @@ class Handler(BaseHTTPRequestHandler):
             for gone in order.get("drop") or []:
                 marks.pop(gone, None)
             write_ticks(marks)
+        set_marks = order.get("marks") or {}
+        print(f"REVIEWED {len(set_marks)} set, {len(order.get('drop') or [])} dropped, {len(marks)} held", flush=True)
         self._json({"ok": True, "marks": marks})
 
     def _scan(self):

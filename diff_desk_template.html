@@ -209,9 +209,12 @@
   .toggle[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
   select:focus-visible, .toggle:focus-visible, input:focus-visible, .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-  /* Sized to the label beside them and never resized, so the bar holds still whether or not there is anywhere to go. */
-  .step { flex: none; width: 22px; padding: 0; display: grid; place-items: center; cursor: pointer; }
-  .step svg { width: 12px; height: 12px; }
+  /* Sized to the label beside them and never resized, so the bar holds still whether or not there is anywhere to go.
+     One above the other rather than side by side: the pair then costs a single control's width, in a bar that has none
+     to spare, and the two together stand as tall as everything around them. */
+  .steps { display: grid; gap: 2px; }
+  .step { flex: none; width: 20px; height: 12px; padding: 0; display: grid; place-items: center; cursor: pointer; }
+  .step svg { width: 9px; height: 9px; }
   .step:disabled { color: var(--faint); cursor: default; }
 
   .totals { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 12px; }
@@ -222,6 +225,9 @@
   .progress { display: flex; align-items: center; gap: 7px; }
   .progress .track { width: 74px; height: 5px; border-radius: 3px; background: var(--rule); overflow: hidden; }
   .progress .track i { display: block; height: 100%; background: var(--add-ink); }
+  /* What has been read and what has come back to be read again, one line each: side by side they spend width the bar
+     needs elsewhere. */
+  .progress .label { white-space: pre-line; line-height: 1.25; text-align: right; }
   .progress .label[data-stale="true"] { color: var(--stale); }
 
   .shell { display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); align-items: start; }
@@ -470,8 +476,9 @@
     border-color: inherit;
     filter: none;
   }
-  /* Coloured like a file whose diff has moved on, which is the same news: what is on screen is behind what is on disk. */
-  #moved { background: var(--stale-bg); color: var(--stale); border-color: var(--stale); }
+  /* Coloured like a file whose diff has moved on, which is the same news: what is on screen is behind what is on disk.
+     Held off the edge of the window, which a bar that scrolls sideways does not do on its own. */
+  #moved { margin-right: 4px; background: var(--stale-bg); color: var(--stale); border-color: var(--stale); }
   #moved:hover { border-color: var(--stale); filter: brightness(1.06); }
   #moved[data-busy] { animation: working 0.9s ease-in-out infinite; cursor: progress; }
   #moved:disabled { background: var(--surface); color: var(--muted); border-color: var(--rule-strong); }
@@ -778,16 +785,18 @@
     <div class="progress" title="Files marked reviewed">
       <span class="track"><i id="pfill" style="width:0%"></i></span>
       <span class="label num" id="ptext"></span>
-      <button class="step" id="pback" disabled title="The file left to review above this one">
-        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-          <path d="M2.5 7.5 6 4l3.5 3.5" />
-        </svg>
-      </button>
-      <button class="step" id="pnext" disabled title="The file left to review below this one">
-        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-          <path d="M2.5 4.5 6 8l3.5-3.5" />
-        </svg>
-      </button>
+      <span class="steps">
+        <button class="step" id="pback" disabled title="The file left to review above this one">
+          <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+            <path d="M2.5 7.5 6 4l3.5 3.5" />
+          </svg>
+        </button>
+        <button class="step" id="pnext" disabled title="The file left to review below this one">
+          <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+            <path d="M2.5 4.5 6 8l3.5-3.5" />
+          </svg>
+        </button>
+      </span>
     </div>
     <div class="totals">
       <span class="plus num" id="tplus"></span>
@@ -2521,7 +2530,7 @@
     els.tplus.textContent = `+${added.toLocaleString()}`;
     els.tminus.textContent = `−${removed.toLocaleString()}`;
     els.ptext.textContent = staleCount
-      ? `${done}/${files.length} reviewed \u00b7 ${staleCount} reopened`
+      ? `${done}/${files.length} reviewed\n${staleCount} reopened`
       : `${done}/${files.length} reviewed`;
     els.ptext.dataset.stale = String(Boolean(staleCount));
     els.ptext.title = staleCount
