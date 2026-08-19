@@ -474,6 +474,10 @@ def test_code_and_comments_stay_legible_in_every_theme(page, desk):
         edge: style.borderTopColor,
         band: getComputedStyle(row.querySelector("td")).backgroundColor,
         codeFill: getComputedStyle(document.querySelector("tr.a td.code")).backgroundColor,
+        changed: ["a", "d"].map((kind) => {
+          const said = getComputedStyle(document.querySelector(`tr.${kind} td.code`));
+          return against(said.color, said.backgroundColor);
+        }),
         leftGap: Math.round(box.left - view.left),
         rightGap: Math.round(view.right - box.right),
         codeSpread: Math.max(...code) - Math.min(...code),
@@ -506,6 +510,9 @@ def test_code_and_comments_stay_legible_in_every_theme(page, desk):
         assert seen["delTint"] >= 1.05
 
     for seen in arms.values():
+        # An added or removed line is read like any other, so it is printed in the page's own ink over its tint rather
+        # than in a shade of it.
+        assert min(seen["changed"]) >= 7
         # The box a reply is written in is dressed by the page like every other, or it paints the browser's own white
         # over a dark thread - the one patch a reader cannot read at all.
         assert seen["reply"]["ink"] == seen["tokens"]["--ink"]
