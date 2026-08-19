@@ -10,7 +10,8 @@ Endpoints, all on 127.0.0.1 so nothing is exposed off the machine:
   GET  /comments?event=N      every comment touched past that event, which is how a session hears about replies
   POST /comments              {comments: [...], github: bool} - a batch as submitted, or a bare list of comments
   POST /bind                  {seq: [...], github} - mark comments as bound for the pull request, or keep them local
-  POST /edit                  {seq, text} - rewrite a comment, keeping what it said before
+  POST /edit                  {seq, text, reply} - rewrite a comment, or the reply at that place in its thread,
+                              keeping what it said before
   POST /reply                 {seq, text, who} - add a reply to a comment, from the session or from the reviewer
   POST /resolve               {seq: [...], answer, resolved, who} - close comments, or reopen them
   POST /drop                  {seq, reply, repo, pr} - delete a comment, or only its last reply, here and there
@@ -29,9 +30,9 @@ different matter, and always proceeds.
 
 A comment is a thread: the reviewer's remark plus replies from either side, each stamped with who wrote it. A reply
 leaves the thread open; only resolving closes it, either side may do so, and a resolved thread keeps its text and every
-reply - closing it hides nothing and deletes nothing. Rewriting a comment keeps every earlier wording under `edits`,
-and one already posted is flagged as having moved on from what the pull request holds rather than silently disagreeing
-with it.
+reply - closing it hides nothing and deletes nothing. Rewriting a comment, or any reply written here, keeps every
+earlier wording under `edits`, and one already posted is flagged as having moved on from what the pull request holds
+rather than silently disagreeing with it. A reply brought back from the pull request is left as its author wrote it.
 
 Closing a comment here closes it there too, when it was posted: its thread on the pull request is resolved, tracked
 apart under `prResolve` - `pending` until it is done, `done` once it is, `failed` when the attempt did not happen. A
@@ -683,25 +684,47 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": True, "bound": turned})
 
     def _edit(self):
-        """Rewrite a comment, keeping every earlier wording."""
+        """Rewrite a comment, or one of its replies, keeping every earlier wording.
+
+        A reply is named by its place in the thread, which is how the page and a drop already address one, so `reply` 0
+        is the first answer and no `reply` at all is the remark that opened the thread. Only what was written here can
+        be reworded: a reply carried back from the pull request is somebody else's word, and rewriting it would put
+        words in their mouth on the one copy everyone reads.
+        """
         order = self._body()
         text = (order.get("text") or "").strip()
         if not text:
             self._json({"ok": False, "error": "an empty comment says nothing"})
             return
+        index = order.get("reply")
+        said, refused = None, None
         with changing() as rows:
             found = next((row for row in rows if row["seq"] == order.get("seq")), None)
-            if found is not None:
-                found["edits"].append({"at": time.strftime("%H:%M:%S"), "text": found["text"]})
-                found["text"] = text
-                if found.get("github") == "posted":
-                    found["editedAfterPost"] = True
+            replies = found["replies"] if found is not None else []
+            if found is None:
+                refused = f"no comment numbered {order.get('seq')}"
+            elif index is None:
+                said = found
+            elif not 0 <= index < len(replies):
+                refused = f"comment {found['seq']} has no reply {index}"
+            elif replies[index]["who"] not in ("you", "session"):
+                refused = f"reply {index} of comment {found['seq']} is {replies[index]['who']}'s word, not this desk's"
+            else:
+                said = replies[index]
+            if said is not None:
+                said.setdefault("edits", []).append({"at": time.strftime("%H:%M:%S"), "text": said["text"]})
+                said["text"] = text
+                # Rewriting is never carried to the pull request, so its copy is marked as having been moved on from.
+                landed = said.get("posted") if index is not None else found.get("github") == "posted"
+                if landed:
+                    said["editedAfterPost"] = True
                 touched(rows, found, "you")
-        if found is None:
-            self._json({"ok": False, "error": f"no comment numbered {order.get('seq')}"})
+        if refused is not None:
+            self._json({"ok": False, "error": refused})
             return
-        print(f"EDIT [{found['seq']}] {' '.join(text.split())}", flush=True)
-        self._json({"ok": True, "seq": found["seq"], "edits": len(found["edits"])})
+        named = "" if index is None else f" reply {index}"
+        print(f"EDIT [{found['seq']}]{named} {' '.join(text.split())}", flush=True)
+        self._json({"ok": True, "seq": found["seq"], "reply": index, "edits": len(said["edits"])})
 
     def _reply(self):
         """Add a reply to a comment, from whichever side wrote it. A reply leaves the thread open."""

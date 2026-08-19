@@ -197,7 +197,7 @@ def test_a_thread_can_be_answered_rewritten_closed_and_reopened_from_the_page(pa
     assert [(reply["who"], reply["text"]) for reply in said["replies"]] == [("you", "a reply from the reviewer")]
 
     thread = page.locator(f"#note-{seq}")
-    thread.locator("button.tiny").filter(has_text="Edit").click()
+    thread.locator(".line:not(.reply) button.tiny").filter(has_text="Edit").click()
     thread.locator("textarea").first.fill("the remark, rewritten")
     thread.locator("button.solid").filter(has_text="Save").click()
     page.wait_for_timeout(400)
@@ -1276,7 +1276,7 @@ def test_marking_a_file_reviewed_is_remembered_across_reloads(page):
     page.evaluate("() => localStorage.clear()")
 
 
-def test_a_comment_and_its_last_reply_can_be_deleted_from_the_page(page, desk):
+def test_a_reply_can_be_rewritten_and_a_comment_and_its_last_reply_deleted_from_the_page(page, desk):
     card = sample(page)
     line = card.locator("tr.a[data-line]").first
     line.locator("td.code").first.hover()
@@ -1298,6 +1298,20 @@ def test_a_comment_and_its_last_reply_can_be_deleted_from_the_page(page, desk):
     page.wait_for_function("(seq) => document.querySelectorAll(`#note-${seq} .line.reply`).length === 1", arg=made)
     kept = {row["seq"]: row for row in desk.get("/comments")}[made]
     assert [answer["text"] for answer in kept["replies"]] == ["first answer"]
+
+    # A reply carries the same Edit as the remark it answers, and rewriting it keeps what it said before as its own.
+    thread.locator(".line.reply button.tiny").filter(has_text="Edit").click()
+    thread.locator(".line.reply textarea").first.fill("better worded")
+    thread.locator(".line.reply button.solid").filter(has_text="Save").click()
+    # The line being written into holds no said text at all, so the wait outlives it rather than tripping over it.
+    page.wait_for_function(
+        "(seq) => document.querySelector(`#note-${seq} .line.reply .said`)?.textContent === 'better worded'", arg=made
+    )
+    reworded = {row["seq"]: row for row in desk.get("/comments")}[made]
+    assert [answer["text"] for answer in reworded["replies"]] == ["better worded"]
+    assert [earlier["text"] for earlier in reworded["replies"][0]["edits"]] == ["first answer"]
+    # The remark it answers is left as it was written: the two are rewritten apart.
+    assert reworded["text"] == saying
 
     # Dropping the comment itself takes it off the page and out of the panel, and the log says it is gone.
     thread.locator(".thread > .line button.drop").first.click()

@@ -163,7 +163,7 @@ def test_either_side_can_reply_without_closing_the_thread(desk):
     assert desk.post("/reply", {"seq": 99999, "text": "nowhere"})["ok"] is False
 
 
-def test_rewriting_a_comment_keeps_what_it_said_before(desk):
+def test_rewriting_a_comment_or_one_of_its_replies_keeps_what_it_said_before(desk):
     made = desk.post(
         "/comments", {"branch": "feature", "path": "sample.py", "line": 12, "side": "new", "text": "first"}
     )
@@ -173,6 +173,28 @@ def test_rewriting_a_comment_keeps_what_it_said_before(desk):
     assert row["text"] == "third"
     assert [earlier["text"] for earlier in row["edits"]] == ["first", "second"]
     assert desk.post("/edit", {"seq": made["seq"], "text": " "})["ok"] is False
+
+    desk.post("/reply", {"seq": made["seq"], "text": "the plain answer", "who": "session"})
+    desk.post("/reply", {"seq": made["seq"], "text": "a second answer", "who": "you"})
+    heard = {row["seq"]: row for row in desk.get("/comments")}[made["seq"]]["event"]
+    # A reply is named by its place in the thread, which is how dropping one already names it.
+    assert desk.post("/edit", {"seq": made["seq"], "reply": 0, "text": "the answer, better worded"})["edits"] == 1
+    threaded = {row["seq"]: row for row in desk.get("/comments")}[made["seq"]]
+    assert [answer["text"] for answer in threaded["replies"]] == ["the answer, better worded", "a second answer"]
+    # Every wording is kept where it was said: the reply's own history, and the remark's left as it stood.
+    assert [earlier["text"] for earlier in threaded["replies"][0]["edits"]] == ["the plain answer"]
+    assert [earlier["text"] for earlier in threaded["edits"]] == ["first", "second"]
+    assert threaded["text"] == "third"
+    # Stamped as the latest news, so a session watching the thread hears the rewording as it hears a reply.
+    assert threaded["event"] > heard
+    assert desk.post("/edit", {"seq": made["seq"], "reply": 2, "text": "no such reply"})["ok"] is False
+    assert desk.post("/edit", {"seq": made["seq"], "reply": 0, "text": " "})["ok"] is False
+
+    printed = desk.cli("comments", "--all").communicate(timeout=60)[0]
+    assert "[0] session" in printed
+    assert "the answer, better worded" in printed
+    # What it said before, under the reply that said it.
+    assert "the plain answer" in printed
 
 
 def test_a_refusal_is_told_apart_from_a_failure_worth_retrying():
@@ -871,7 +893,22 @@ def test_syncing_carries_replies_both_ways_and_takes_the_pull_request_word(desk)
     assert row["state"] == "resolved"
     assert row["prResolve"] == "done"
 
-    # Syncing again sends nothing twice and brings nothing back twice.
+    # A reply carried back is its author's word, said on the copy everyone reads, so it is not this desk's to reword.
+    assert desk.post("/edit", {"seq": seq, "reply": 1, "text": "words in their mouth"})["ok"] is False
+    asked = len(desk.github_calls())
+    reworded = desk.post("/edit", {"seq": seq, "reply": 0, "text": "written here, better worded"})
+    assert (reworded["ok"], reworded["edits"]) == (True, 1)
+    kept = {row["seq"]: row for row in desk.get("/comments")}[seq]
+    assert [(reply["who"], reply["text"]) for reply in kept["replies"]] == [
+        ("session", "written here, better worded"),
+        ("someone", "said on the PR"),
+    ]
+    assert [earlier["text"] for earlier in kept["replies"][0]["edits"]] == ["written here, not there yet"]
+    # Nothing is asked of GitHub for it: the wording the pull request holds stands, marked as moved on from here.
+    assert len(desk.github_calls()) == asked
+    assert kept["replies"][0]["editedAfterPost"] is True
+
+    # Syncing again sends nothing twice and brings nothing back twice, a reply reworded here included.
     again = desk.post("/sync", {"repo": "someone/somewhere", "pr": 4})
     assert (again["sent"], again["brought"]) == (0, 0)
     assert len({row["seq"]: row for row in desk.get("/comments")}[seq]["replies"]) == 2

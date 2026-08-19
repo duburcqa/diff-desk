@@ -4,7 +4,8 @@ desk.py serve --dir <repo> --base <ref> [refs ...]   collect the diffs and serve
 desk.py watch [--since N] [--once]                   print whatever the reviewer says, as they say it
 desk.py comments [--all]                             what has been submitted, unresolved unless --all
 desk.py reply 3 "why it happens ..."                 answer a comment without closing it
-desk.py edit 3 "what I actually meant ..."            rewrite a comment, keeping what it said before
+desk.py edit 3 "what I actually meant ..."           rewrite a comment, keeping what it said before
+desk.py edit 3 --reply 0 "worded better ..."         rewrite one reply of a comment, by its place in the thread
 desk.py bind 3 4 [--local]                           aim comments at the pull request, or keep them local
 desk.py sync                                         carry replies both ways with the pull request
 desk.py resolve 3 4 --answer "fixed in abc1234"      answer and close; --reopen puts them back
@@ -106,8 +107,11 @@ def show(note):
         f"[{note['seq']}] {note.get('branch', '?')} {note['path']}:{span(note)} ({note.get('side')}) {text}", flush=True
     )
     print(f"      {' | '.join(marks)}", flush=True)
-    for answer in note.get("replies") or []:
-        print(f"      {answer['who']} {answer['at']}: {' '.join(answer['text'].split())}", flush=True)
+    for index, answer in enumerate(note.get("replies") or []):
+        # Numbered as the desk addresses it, so the reply to reword is named by what is printed here.
+        print(f"      [{index}] {answer['who']} {answer['at']}: {' '.join(answer['text'].split())}", flush=True)
+        for earlier in answer.get("edits") or []:
+            print(f"          was {earlier['at']}: {' '.join(earlier['text'].split())[:80]}", flush=True)
     for earlier in note.get("edits") or []:
         print(f"      was {earlier['at']}: {' '.join(earlier['text'].split())[:80]}", flush=True)
 
@@ -224,12 +228,13 @@ def bind(args):
 
 
 def edit(args):
-    outcome = ask("/edit", {"seq": args.seq, "text": " ".join(args.text)})
+    outcome = ask("/edit", {"seq": args.seq, "text": " ".join(args.text), "reply": args.reply})
     if outcome is None:
         sys.exit("nothing is serving")
     if not outcome.get("ok"):
         sys.exit(outcome.get("error", "the edit was refused"))
-    print(f"rewrote [{outcome['seq']}], {outcome['edits']} earlier wording(s) kept")
+    named = f"[{outcome['seq']}]" if args.reply is None else f"reply {args.reply} of [{outcome['seq']}]"
+    print(f"rewrote {named}, {outcome['edits']} earlier wording(s) kept")
 
 
 def reply(args):
@@ -297,9 +302,12 @@ job.add_argument("seq", nargs="+", type=int)
 job.add_argument("--local", action="store_true", help="keep them out of the pull request instead")
 job.set_defaults(run=bind)
 
-job = jobs.add_parser("edit", help="rewrite a comment, keeping what it said before")
+job = jobs.add_parser("edit", help="rewrite a comment or one of its replies, keeping what it said before")
 job.add_argument("seq", type=int)
 job.add_argument("text", nargs="+")
+job.add_argument(
+    "--reply", type=int, default=None, help="rewrite this reply of the comment instead, by its place in the thread"
+)
 job.set_defaults(run=edit)
 
 job = jobs.add_parser("reply", help="answer a comment without closing it")

@@ -50,13 +50,15 @@ waiting for is never confused with what it just did.
 looking is to arm `watch --once` in the background, answer what it reports, and arm it again: the same reply never wakes
 a session twice, and nothing said while it was answering is lost. `--since N` overrides where it resumes from.
 
-Each comment prints as `[seq] branch path:line-endLine (side) text`, followed by its state and any replies. Answer in
-the thread, and close what is done - the page shows both without a reload:
+Each comment prints as `[seq] branch path:line-endLine (side) text`, followed by its state and any replies, each
+numbered `[0]`, `[1]` ... by its place in the thread. Answer in the thread, and close what is done - the page shows both
+without a reload:
 
     python3 ~/.claude/skills/diff-desk/desk.py reply 3 "it happens because ..."
     python3 ~/.claude/skills/diff-desk/desk.py resolve 3 4 --answer "fixed in abc1234"
     python3 ~/.claude/skills/diff-desk/desk.py resolve 3 --reopen
     python3 ~/.claude/skills/diff-desk/desk.py edit 3 "what I actually meant ..."
+    python3 ~/.claude/skills/diff-desk/desk.py edit 3 --reply 0 "worded better ..."
 
 Reply when the answer needs discussing, resolve when it is settled - a resolved thread keeps its remark and every
 reply, and the reviewer can reopen it. Resolving a comment that was posted to a pull request also resolves its thread

@@ -76,8 +76,9 @@ On the page:
   lifted out of a diff pastes straight into an editor. A selection inside a single line copies as the browser made it.
 - **Code stays code.** A fenced block keeps its indentation as a code block, backticks stay inline code, and line
   breaks stay where you put them. Pasted text is only ever text, never markup the page acts on.
-- **Edit** rewrites a comment and keeps what it said before. One already posted to a pull request is marked as having
-  moved on from what the pull request holds.
+- **Edit** rewrites a comment, or any reply written here, and keeps what it said before. One already posted to a pull
+  request is marked as having moved on from what the pull request holds. A reply carried back from a pull request is
+  shown as its author wrote it and carries no Edit.
 - **Comments** in the header opens the log: every comment on the branch, whether it is open or resolved, whether it is
   waiting for GitHub, already on the pull request, or local only. Clicking one jumps to it.
 - **The standing of a comment is a control, not a label.** Click "local only" on a comment to send that one to the pull
@@ -118,12 +119,13 @@ arrived in. A session waits for one with:
     python3 desk.py watch
 
 which blocks until a batch lands, prints each comment as `[seq] branch path:line-endLine (side) text` with its state
-and any replies, and exits. A session then answers, closes, or rewrites them:
+and any replies, each numbered by its place in the thread, and exits. A session then answers, closes, or rewrites them:
 
     python3 desk.py reply 3 "it happens because ..."          # answer, leaving it open
     python3 desk.py resolve 3 4 --answer "fixed in abc1234"   # answer and close
     python3 desk.py resolve 3 --reopen                        # put one back
     python3 desk.py edit 3 "what I actually meant ..."        # rewrite, keeping the earlier wording
+    python3 desk.py edit 3 --reply 0 "worded better ..."      # rewrite one reply, by its place in the thread
 
 The page picks all of that up on its own, threading the replies under the comment. `desk.py comments` lists what is
 still outstanding, with each thread's replies and where it stands with GitHub.

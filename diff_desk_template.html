@@ -1639,6 +1639,46 @@
       body.className = "said";
       written(body, answer.text);
       said.append(from, body);
+      // Only what was written here can be reworded: a reply carried back from the pull request is its author's word,
+      // said on the copy everyone else reads, so this desk shows it and leaves it alone.
+      if (!note.pending && notes.live && (answer.who === "you" || answer.who === "session")) {
+        const change = document.createElement("button");
+        change.className = "tiny";
+        change.textContent = "Edit";
+        change.title = answer.edits && answer.edits.length ? `rewritten ${answer.edits.length} time(s)` : "Rewrite this reply";
+        change.addEventListener("click", () => {
+          const written = document.createElement("textarea");
+          written.rows = 2;
+          written.value = answer.text;
+          grows(written);
+          const keep = document.createElement("button");
+          keep.className = "solid";
+          keep.textContent = "Save";
+          const drop = document.createElement("button");
+          drop.className = "ghost";
+          drop.textContent = "Cancel";
+          const editing = document.createElement("div");
+          editing.className = "line reply actions";
+          editing.append(written, keep, drop);
+          said.replaceWith(editing);
+          written.focus();
+          drop.addEventListener("click", render);
+          keep.addEventListener("click", async () => {
+            const wanted = written.value.trim();
+            if (!wanted || wanted === answer.text) return render();
+            await post("edit", { seq: note.seq, reply: index, text: wanted });
+            await loadNotes();
+            render();
+          });
+        });
+        said.append(change);
+      }
+      if (answer.editedAfterPost) {
+        const mark = document.createElement("span");
+        mark.className = "mark outdated";
+        mark.textContent = "rewritten after posting";
+        said.append(mark);
+      }
       // Only the last one can go: deleting further up would leave the answers below it standing against nothing.
       if (!note.pending && notes.live && index === answers.length - 1) {
         const undo = document.createElement("button");
