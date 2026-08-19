@@ -599,20 +599,24 @@ def test_the_path_filter_lists_what_it_matches_for_picking_by_name(page):
     page.set_viewport_size({"width": 1200, "height": 600})
     page.locator("#q").click()
     page.wait_for_selector("#palette:not([hidden])")
-    listed = page.locator("#palette .pick")
+    listed = page.locator("#picks .pick")
+    # One panel, centred, carrying the box being typed in: the caret is there rather than in the bar.
+    assert page.evaluate("() => document.activeElement.id") == "pq"
+    box = page.locator("#palette").bounding_box()
+    assert abs((box["x"] + box["width"] / 2) - 1200 / 2) < 2
     paths = page.evaluate("() => [...document.querySelectorAll('section.file')].map((card) => card.dataset.path)")
     assert listed.count() == len(paths)
     # The name stands on its own and the directory beside it, which is how a file is recognised in a list of many.
     assert listed.first.locator("b").inner_text() == paths[0].split("/")[-1]
 
     # Typing narrows the list to what it matches, and the first match is the one waiting to be taken.
-    page.locator("#q").fill("deep")
-    page.wait_for_function("() => document.querySelectorAll('#palette .pick').length === 1")
+    page.locator("#pq").fill("deep")
+    page.wait_for_function("() => document.querySelectorAll('#picks .pick').length === 1")
     assert listed.first.get_attribute("data-on") == "true"
     assert "pkg/sub" in listed.first.locator(".where").inner_text()
 
     # Taken with the keyboard: the list closes and the file it named is what the reader is brought to.
-    page.locator("#q").press("Enter")
+    page.locator("#pq").press("Enter")
     page.wait_for_selector("#palette", state="hidden")
     page.wait_for_timeout(500)
     assert (
@@ -627,13 +631,14 @@ def test_the_path_filter_lists_what_it_matches_for_picking_by_name(page):
         == "pkg/sub/deep.py"
     )
 
-    # Reopened, stepped through with the arrows, and taken by a press on the row itself.
-    page.locator("#q").fill("")
-    page.locator("#q").click()
+    # Reopened with the shortcut, stepped through with the arrows, and taken by a press on the row itself.
+    page.keyboard.press("/")
     page.wait_for_selector("#palette:not([hidden])")
-    page.locator("#q").press("ArrowDown")
+    page.locator("#pq").fill("")
+    page.wait_for_function("() => document.querySelectorAll('#picks .pick').length > 2")
+    page.locator("#pq").press("ArrowDown")
     assert listed.nth(1).get_attribute("data-on") == "true"
-    page.locator("#q").press("ArrowUp")
+    page.locator("#pq").press("ArrowUp")
     assert listed.first.get_attribute("data-on") == "true"
     wanted = listed.nth(2).get_attribute("data-path")
     listed.nth(2).click()
@@ -652,9 +657,9 @@ def test_the_path_filter_lists_what_it_matches_for_picking_by_name(page):
     )
 
     # Escape closes the list and leaves the review as it was.
-    page.locator("#q").click()
+    page.keyboard.press("/")
     page.wait_for_selector("#palette:not([hidden])")
-    page.locator("#q").press("Escape")
+    page.locator("#pq").press("Escape")
     page.wait_for_selector("#palette", state="hidden")
     assert page.locator("section.file").count() == len(paths)
 

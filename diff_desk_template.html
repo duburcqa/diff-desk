@@ -153,20 +153,27 @@
      than by scrolling. The list floats rather than the box growing, since a box that grew would move every control
      beside it in the bar. */
   #veil { position: fixed; inset: 0; z-index: 44; background: rgb(0 0 0 / 30%); }
-  /* The whole bar is lifted over the veil while the list is open - the box the reader is typing in lives inside the
-     bar's own stacking context, so raising it alone leaves it underneath, and a press on it would put the list away. */
-  body.picking header { z-index: 46; }
+  /* The bar stays under the veil: while the list is open, the box being typed in is the one inside the overlay, so the
+     one in the bar is dimmed with everything else it belongs to. */
+  body.picking #q { color: transparent; text-shadow: none; }
   #palette {
     position: fixed;
     z-index: 45;
-    max-height: min(60vh, 520px);
-    overflow-y: auto;
-    padding: 4px;
+    left: 50%;
+    top: 11vh;
+    transform: translateX(-50%);
+    width: min(720px, calc(100vw - 32px));
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
     border: 1px solid var(--rule-strong);
     border-radius: 8px;
     background: var(--surface);
-    box-shadow: 0 14px 40px rgb(0 0 0 / 32%);
+    box-shadow: 0 18px 48px rgb(0 0 0 / 38%);
   }
+  #palette .search { flex: none; width: 100%; margin: 0; }
+  #picks { max-height: min(56vh, 480px); overflow-y: auto; }
   #veil[hidden], #palette[hidden] { display: none; }
   .pick {
     display: flex;
@@ -790,7 +797,13 @@
 </div>
 
 <div id="veil" hidden></div>
-<div id="palette" role="listbox" aria-label="Files matching the filter" hidden></div>
+<div id="palette" hidden>
+  <label class="search">
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2 14 14"/></svg>
+    <input id="pq" type="search" placeholder="Filter paths" aria-label="Filter paths" />
+  </label>
+  <div id="picks" role="listbox" aria-label="Files matching the filter"></div>
+</div>
 
 <div class="logrow toast" id="toast" data-open="false" role="status" aria-live="polite">
   <svg class="warn" viewBox="0 0 14 14" aria-hidden="true">
@@ -872,7 +885,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "ctx", "hidedone", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logretry", "logbind", "logsync", "logclose", "logresult", "logresolved", "brand", "repo", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
+  for (const id of ["tabs", "scope", "q", "ctx", "hidedone", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logretry", "logbind", "logsync", "logclose", "logresult", "logresolved", "brand", "repo", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -2380,12 +2393,12 @@
   function drawPicks() {
     const shown = visible(view().files);
     picked = Math.min(picked, Math.max(0, shown.length - 1));
-    els.palette.innerHTML = "";
+    els.picks.innerHTML = "";
     if (!shown.length) {
       const none = document.createElement("div");
       none.className = "picknone";
       none.textContent = "No file matches";
-      els.palette.append(none);
+      els.picks.append(none);
       return;
     }
     shown.forEach((file, order) => {
@@ -2408,35 +2421,36 @@
         drawPicks();
       });
       row.addEventListener("click", () => takePick(order));
-      els.palette.append(row);
+      els.picks.append(row);
     });
-    const on = els.palette.querySelector('.pick[data-on="true"]');
+    const on = els.picks.querySelector('.pick[data-on="true"]');
     if (on) on.scrollIntoView({ block: "nearest" });
   }
 
   function openPicker() {
-    // Anchored under the box it belongs to and kept inside the window, so a filter typed at the right edge of a narrow
-    // window still shows its matches.
-    const box = els.q.getBoundingClientRect();
-    const wide = Math.min(720, window.innerWidth - 24);
-    els.palette.style.width = `${wide}px`;
-    els.palette.style.left = `${Math.max(12, Math.min(box.left, window.innerWidth - wide - 12))}px`;
-    els.palette.style.top = `${box.bottom + 6}px`;
+    // The overlay carries the box being typed in, so what the reader looks at while picking is one panel rather than a
+    // list hanging off the bar. The filter already typed comes with it, and goes back to the bar when it closes.
+    if (!els.palette.hidden) return;
+    els.pq.value = els.q.value;
     els.veil.hidden = false;
     els.palette.hidden = false;
     document.body.classList.add("picking");
     picked = 0;
     drawPicks();
+    els.pq.focus();
+    els.pq.select();
   }
 
   function closePicker() {
+    if (els.palette.hidden) return;
     els.veil.hidden = true;
     els.palette.hidden = true;
     document.body.classList.remove("picking");
+    els.q.value = els.pq.value;
   }
 
   function movePick(step) {
-    const rows = els.palette.querySelectorAll(".pick");
+    const rows = els.picks.querySelectorAll(".pick");
     if (!rows.length) return;
     picked = (picked + step + rows.length) % rows.length;
     drawPicks();
@@ -2447,7 +2461,6 @@
     const file = shown[order === undefined ? picked : order];
     if (!file) return;
     closePicker();
-    els.q.blur();
     const card = document.querySelector(`section.file[data-path="${CSS.escape(file.path)}"]`);
     if (card) jump(Number(card.id.slice(1)));
   }
@@ -2928,13 +2941,20 @@
     state.query = event.target.value;
     state.current = 0;
     render();
-    if (!els.palette.hidden) {
-      picked = 0;
-      drawPicks();
-    }
   });
-  els.q.addEventListener("focus", openPicker);
-  els.q.addEventListener("keydown", (event) => {
+  // Pressing the box in the bar is what asks for the overlay; the caret belongs to the box inside it.
+  els.q.addEventListener("focus", () => {
+    openPicker();
+    els.q.blur();
+  });
+  els.pq.addEventListener("input", (event) => {
+    state.query = event.target.value;
+    state.current = 0;
+    picked = 0;
+    render();
+    drawPicks();
+  });
+  els.pq.addEventListener("keydown", (event) => {
     if (els.palette.hidden) return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
@@ -2950,10 +2970,7 @@
       closePicker();
     }
   });
-  els.veil.addEventListener("click", () => {
-    closePicker();
-    els.q.blur();
-  });
+  els.veil.addEventListener("click", closePicker);
   els.ctx.addEventListener("click", () => {
     const on = els.ctx.getAttribute("aria-pressed") !== "true";
     els.ctx.setAttribute("aria-pressed", String(on));
