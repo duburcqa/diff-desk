@@ -185,6 +185,23 @@ def test_a_refusal_is_told_apart_from_a_failure_worth_retrying():
     assert not is_refusal("context deadline exceeded")
 
 
+def test_only_a_call_that_never_reached_github_is_worth_making_again():
+    again = gen_diff_data.worth_asking_again
+    # A call that never left the machine, which GitHub cannot have acted on however the caller means to use it.
+    assert again("error connecting to api.github.com check your internet connection", repeatable=False)
+    assert again("dial tcp: lookup api.github.com: no such host", repeatable=False)
+    assert again("net/http: TLS handshake timeout", repeatable=False)
+    # An answer lost on the way back says nothing of what GitHub did with the call, so only a call that can be made
+    # twice without leaving a second mark is made again.
+    assert again("read tcp 10.0.0.2:443: connection reset by peer", repeatable=True)
+    assert not again("read tcp 10.0.0.2:443: connection reset by peer", repeatable=False)
+    assert not again('Post "https://api.github.com/graphql": context deadline exceeded', repeatable=False)
+    # What GitHub answered, which says the same however often it is asked.
+    assert not again("gh: Not Found (HTTP 404)", repeatable=True)
+    assert not again("gh: Bad credentials (HTTP 401)", repeatable=True)
+    assert not again("gh: Unprocessable Entity (HTTP 422)", repeatable=True)
+
+
 def test_a_comment_bound_for_github_waits_rather_than_being_lost(desk):
     made = desk.post(
         "/comments",
@@ -645,6 +662,133 @@ def test_a_sync_asks_for_every_resolution_in_one_request_and_answers_for_each(de
     assert "global id" in rows[seqs[1]]["prResolveError"]
     assert "prResolveError" not in rows[seqs[0]]
     assert rows[seqs[0]]["replies"][0]["posted"] is True
+
+
+def test_a_sync_whose_first_attempt_never_reached_github_says_nothing_of_it(desk):
+    made = desk.post(
+        "/comments",
+        {
+            "comments": [
+                {"branch": "feature", "path": "sample.py", "line": 36, "side": "new", "text": "worth a second try"}
+            ],
+            "github": True,
+        },
+    )
+    seq = made["seqs"][0]
+    desk.github_answers(out=json.dumps({"html_url": "https://github.com/x/y/pull/22#review-1"}))
+    assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 22, "seq": [seq]})["ok"]
+    desk.post("/resolve", {"seq": [seq], "who": "you"})
+
+    thread = {
+        "id": "T_again",
+        "isResolved": False,
+        "comments": {
+            "nodes": [
+                {"databaseId": 950, "body": "worth a second try", "path": "sample.py", "author": {"login": "duburcqa"}}
+            ]
+        },
+    }
+    desk.github_answers(
+        rules=[
+            # The first look at the threads never leaves the machine, the second is answered.
+            {"match": "reviewThreads", "code": 1, "err": "error connecting to api.github.com", "times": 1},
+            {
+                "match": "reviewThreads",
+                "out": json.dumps({"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": [thread]}}}}}),
+            },
+            {
+                "match": "resolveReviewThread",
+                "out": json.dumps({"data": {"resolveReviewThread": {"thread": {"isResolved": True}}}}),
+            },
+        ]
+    )
+    before = len(desk.github_calls())
+    outcome = desk.post("/sync", {"repo": "someone/somewhere", "pr": 22})
+    calls = desk.github_calls()[before:]
+    assert len([call for call in calls if "reviewThreads" in call]) == 2
+    # A blip gone by the second attempt is nobody's business: the sync reads as one that simply worked.
+    assert outcome == {"ok": True, "sent": 0, "brought": 0, "closed": 0, "resolved": 1}
+    assert {row["seq"]: row for row in desk.get("/comments")}[seq]["prResolve"] == "done"
+
+
+def test_a_lost_answer_is_asked_again_only_where_asking_twice_is_harmless(desk):
+    made = desk.post(
+        "/comments",
+        {
+            "comments": [
+                {"branch": "feature", "path": "sample.py", "line": 37, "side": "new", "text": "said once and once only"}
+            ],
+            "github": True,
+        },
+    )
+    seq = made["seqs"][0]
+    desk.github_answers(out=json.dumps({"html_url": "https://github.com/x/y/pull/23#review-1"}))
+    assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 23, "seq": [seq]})["ok"]
+    desk.post("/reply", {"seq": seq, "text": "one copy of this is enough", "who": "session"})
+
+    thread = {
+        "id": "T_once",
+        "isResolved": False,
+        "comments": {
+            "nodes": [
+                {
+                    "databaseId": 970,
+                    "body": "said once and once only",
+                    "path": "sample.py",
+                    "author": {"login": "duburcqa"},
+                }
+            ]
+        },
+    }
+    threads = {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": [thread]}}}}}
+    reset = {"code": 1, "err": "read tcp 10.0.0.2:443: connection reset by peer", "times": 1}
+    desk.github_answers(
+        rules=[
+            {"match": "reviewThreads", **reset},
+            {"match": "reviewThreads", "out": json.dumps(threads)},
+            # Answered on a second attempt, so a reply that was repeated would be seen to have gone out.
+            {"match": "/replies", **reset},
+            {"match": "/replies", "out": json.dumps({"id": 971})},
+        ]
+    )
+    before = len(desk.github_calls())
+    outcome = desk.post("/sync", {"repo": "someone/somewhere", "pr": 23})
+    calls = desk.github_calls()[before:]
+    # Reading the threads again can only be told the same thing, so it is asked again and the sync proceeds.
+    assert len([call for call in calls if "reviewThreads" in call]) == 2
+    # GitHub may have added the reply before the answer went missing, so it is left owed rather than said twice.
+    assert len([call for call in calls if "/replies" in call]) == 1
+    assert outcome["sent"] == 0
+    assert "posted" not in {row["seq"]: row for row in desk.get("/comments")}[seq]["replies"][0]
+
+    # A document carrying that reply is no more repeatable than the reply was.
+    desk.post("/resolve", {"seq": [seq], "who": "you"})
+    desk.github_answers(
+        rules=[
+            {"match": "reviewThreads", "out": json.dumps(threads)},
+            {"match": "addPullRequestReviewThreadReply", **reset},
+            {"match": "addPullRequestReviewThreadReply", "out": json.dumps({"data": {"m0": {}, "m1": {}}})},
+        ]
+    )
+    before = len(desk.github_calls())
+    assert desk.post("/sync", {"repo": "someone/somewhere", "pr": 23, "resolved": True})["sent"] == 0
+    calls = desk.github_calls()[before:]
+    assert len([call for call in calls if "addPullRequestReviewThreadReply" in call]) == 1
+    row = {row["seq"]: row for row in desk.get("/comments")}[seq]
+    assert "posted" not in row["replies"][0]
+    # Both halves of the document are reported to the comment that asked for them, with what came back.
+    assert row["prResolve"] == "failed"
+    assert "connection reset" in row["prResolveError"]
+
+
+def test_a_refusal_from_github_is_taken_at_its_first_word(desk):
+    desk.github_answers(code=1, err="gh: Not Found (HTTP 404)")
+    before = len(desk.github_calls())
+    outcome = desk.post("/sync", {"repo": "someone/nowhere", "pr": 99})
+    assert outcome["ok"] is False
+    assert "404" in outcome["error"]
+    # GitHub having answered, asking again would only be told the same thing, so it is asked once.
+    assert len(desk.github_calls()[before:]) == 1
 
 
 def test_closing_a_comment_that_never_reached_the_pull_request_owes_it_nothing(desk):

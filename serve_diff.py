@@ -47,7 +47,6 @@ import contextlib
 import json
 import os
 import pathlib
-import subprocess
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -139,25 +138,8 @@ class Owing(NamedTuple):
 def review_threads(repo, number):
     """Every review thread of a pull request, or nothing and the reason it could not be read."""
     owner, _, name = repo.partition("/")
-    done = subprocess.run(
-        [
-            *gen_diff_data.github(),
-            "api",
-            "graphql",
-            "-f",
-            f"query={THREADS}",
-            "-F",
-            f"owner={owner}",
-            "-F",
-            f"name={name}",
-            "-F",
-            f"number={number}",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=90,
-        check=False,
-    )
+    variables = ["-F", f"owner={owner}", "-F", f"name={name}", "-F", f"number={number}"]
+    done = gen_diff_data.gh("api", "graphql", "-f", f"query={THREADS}", *variables, repeatable=True)
     if done.returncode != 0:
         return None, " ".join((done.stderr or done.stdout).split())[:300]
     try:
@@ -172,13 +154,8 @@ def resolve_thread(thread):
     Judged on the answer rather than on the exit status: a query can come back carrying errors and still be a successful
     request, and this desk must never report a resolution the pull request does not have.
     """
-    done = subprocess.run(
-        [*gen_diff_data.github(), "api", "graphql", "-f", f"query={RESOLVE}", "-F", f"thread={thread}"],
-        capture_output=True,
-        text=True,
-        timeout=90,
-        check=False,
-    )
+    # A thread already resolved resolves again to the same thing, so a lost answer costs nothing to ask for twice.
+    done = gen_diff_data.gh("api", "graphql", "-f", f"query={RESOLVE}", "-F", f"thread={thread}", repeatable=True)
     if done.returncode != 0:
         return False, " ".join((done.stderr or done.stdout).split())[:300]
     try:
@@ -216,13 +193,10 @@ def packed_mutations(wanted):
                 f"  m{index}: resolveReviewThread(input: {{threadId: $t{index}}}) {{ thread {{ isResolved }} }}"
             )
     document = "mutation({}) {{\n{}\n}}".format(", ".join(names), "\n".join(fields))
-    done = subprocess.run(
-        [*gen_diff_data.github(), "api", "graphql", "-f", f"query={document}", *arguments],
-        capture_output=True,
-        text=True,
-        timeout=180,
-        check=False,
-    )
+    # A document that adds a reply must not be sent twice on a lost answer, since GitHub may have added it already.
+    # One of nothing but resolutions can be, each of them landing on the same resolved thread it would have anyway.
+    carries_reply = any(item.body for item in wanted)
+    done = gen_diff_data.gh("api", "graphql", "-f", f"query={document}", *arguments, repeatable=not carries_reply)
     try:
         answer = json.loads(done.stdout)
     except json.JSONDecodeError:
@@ -314,13 +288,7 @@ def rebuild():
 
 def delete_comment(repo, comment):
     """Delete one review comment from a pull request, and say why it did not go when it did not."""
-    done = subprocess.run(
-        [*gen_diff_data.github(), "api", "-X", "DELETE", f"/repos/{repo}/pulls/comments/{comment}"],
-        capture_output=True,
-        text=True,
-        timeout=90,
-        check=False,
-    )
+    done = gen_diff_data.gh("api", "-X", "DELETE", f"/repos/{repo}/pulls/comments/{comment}", repeatable=True)
     if done.returncode != 0:
         return False, " ".join((done.stderr or done.stdout).split())[:300]
     return True, ""
@@ -463,21 +431,8 @@ def incoming(row, said):
 
 def reply_on_pull(repo, number, comment, text):
     """Answer a pull request's review comment in its own thread. Says whether it went out, and why it did not."""
-    done = subprocess.run(
-        [
-            *gen_diff_data.github(),
-            "api",
-            "--method",
-            "POST",
-            f"repos/{repo}/pulls/{number}/comments/{comment}/replies",
-            "-f",
-            f"body={text}",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=90,
-        check=False,
-    )
+    where = f"repos/{repo}/pulls/{number}/comments/{comment}/replies"
+    done = gen_diff_data.gh("api", "--method", "POST", where, "-f", f"body={text}", repeatable=False)
     if done.returncode != 0:
         return False, " ".join((done.stderr or done.stdout).split())[:300]
     return True, ""
@@ -900,13 +855,8 @@ class Handler(BaseHTTPRequestHandler):
             review["comments"].append(comment)
         target = f"repos/{order['repo']}/pulls/{order['pr']}/reviews"
         print(f"PUBLISH {len(review['comments'])} comment(s) -> {target}", flush=True)
-        done = subprocess.run(
-            [*gen_diff_data.github(), "api", "--method", "POST", target, "--input", "-"],
-            input=json.dumps(review),
-            capture_output=True,
-            text=True,
-            timeout=90,
-            check=False,
+        done = gen_diff_data.gh(
+            "api", "--method", "POST", target, "--input", "-", repeatable=False, given=json.dumps(review)
         )
         landed = done.returncode == 0
         url = json.loads(done.stdout or "{}").get("html_url", "") if landed else ""

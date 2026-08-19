@@ -87,9 +87,11 @@ class Desk:
         """What the stand-in for gh replies to the next call, so every arm of a post can be exercised in place.
 
         A rule is `{"match": <text found in the arguments>, "out"/"err"/"code": ...}`, for a run where resolving a
-        repository, listing its pull requests and posting a review must be answered differently.
+        repository, listing its pull requests and posting a review must be answered differently. It may also carry
+        `"times": N` to answer only its first N matches, which is how a call is made to fail once and then succeed.
         """
         reply = {"code": code, "out": out, "err": err, "rules": list(rules)}
+        (self.home / "fake_gh.spent").unlink(missing_ok=True)
         (self.home / "fake_gh.json").write_text(json.dumps(reply))
 
     def github_calls(self):

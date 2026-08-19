@@ -28,6 +28,62 @@ def run(root, *args):
     return subprocess.run(["git", *args], capture_output=True, text=True, cwd=root, check=False).stdout
 
 
+# What gh says when the call never left this machine: nothing resolved, nothing connected, no handshake made. GitHub
+# cannot have acted on any of these, so repeating them costs nothing whatever the call was.
+UNREACHED = ("error connecting", "no such host", "connection refused", "tls handshake")
+# What gh says when the answer went missing on the way back, which says nothing about what GitHub did with the call
+# first: it may have received it, acted on it, and lost only the answer.
+UNANSWERED = ("connection reset", "timeout", "timed out", "deadline exceeded")
+# What GitHub itself answered, which says the same however often it is asked.
+ANSWERED = ("http 401", "http 403", "http 404", "http 422", "not found", "bad credentials")
+
+
+def worth_asking_again(told, *, repeatable):
+    """Whether a failed gh call is worth making again - and safe to.
+
+    Judged on what gh said, since its exit status is the same whatever went wrong. A call that never left the machine is
+    always worth repeating. A call whose answer went missing is repeated only when the caller says asking twice cannot
+    be told from asking once: GitHub may have acted on it already, and a second reply or a second review landing on a
+    pull request is a mess no failure justifies. A refusal is an answer, and an answer does not change for being asked
+    again.
+    """
+    said = " ".join(told.lower().split())
+    if any(phrase in said for phrase in ANSWERED):
+        return False
+    if any(phrase in said for phrase in UNREACHED):
+        return True
+    return repeatable and any(phrase in said for phrase in UNANSWERED)
+
+
+def gh(*args, repeatable, given=None, cwd=None, budget=120):
+    """Ask GitHub something, and ask again when what came back was a stumble rather than an answer.
+
+    `repeatable` is the caller's word on whether asking twice can be told from asking once. A read, a resolution and a
+    deletion can be repeated whatever went wrong, since asking again is told the same thing. Anything that posts - a
+    reply, a review - can only be repeated when the call provably never left the machine.
+
+    Three attempts a fraction of a second apart, all of them inside one budget: a reader is waiting in front of the
+    page, so the whole call answers within it however many attempts it takes, and the last attempt is the one that
+    reports. Nothing is said to the reader while an earlier attempt is being made good.
+    """
+    told = None
+    ends = time.monotonic() + budget
+    for pause in (0.4, 1.2, None):
+        # Never nothing, so a budget already spent still leaves the attempt that reports a moment to answer in.
+        left = max(1.0, ends - time.monotonic())
+        told = subprocess.run(
+            [*github(), *args], input=given, capture_output=True, text=True, cwd=cwd, timeout=left, check=False
+        )
+        if told.returncode == 0 or pause is None:
+            break
+        if not worth_asking_again(told.stderr or told.stdout, repeatable=repeatable):
+            break
+        blip = " ".join((told.stderr or told.stdout).split())[:120]
+        print(f"gh stumbled ({blip}); asking again", flush=True)
+        time.sleep(pause)
+    return told
+
+
 # What GitHub answered about each slug read off a remote, since asking is a request every time.
 SLUGS = {}
 
@@ -49,13 +105,7 @@ def canonical_repo(root):
             continue
         named = match.group(1)
         if named not in SLUGS:
-            told = subprocess.run(
-                [*github(), "api", f"repos/{named}", "--jq", ".full_name"],
-                capture_output=True,
-                text=True,
-                timeout=40,
-                check=False,
-            ).stdout.strip()
+            told = gh("api", f"repos/{named}", "--jq", ".full_name", repeatable=True, budget=40).stdout.strip()
             SLUGS[named] = told or named
         return SLUGS[named]
     return ""
@@ -87,14 +137,7 @@ def fetch_pull(root, upstream, number):
             return local, fetched
         raise RuntimeError(f"#{number} needs a GitHub remote to resolve against, and this repository has none")
     wanted = "number,title,url,headRefName,baseRefName"
-    seen = subprocess.run(
-        [*github(), "pr", "view", str(number), "--repo", upstream, "--json", wanted],
-        capture_output=True,
-        text=True,
-        cwd=root,
-        timeout=60,
-        check=False,
-    )
+    seen = gh("pr", "view", str(number), "--repo", upstream, "--json", wanted, repeatable=True, cwd=root, budget=60)
     read = None
     if seen.returncode == 0:
         try:
@@ -187,26 +230,8 @@ def parse(diff):
 def pull_requests(root, upstream):
     """Every open pull request, keyed by the ref it is opened from. One listing, matched locally: asking per ref costs
     a request each and a single hiccup silently drops that branch's link."""
-    out = subprocess.run(
-        [
-            *github(),
-            "pr",
-            "list",
-            "--repo",
-            upstream,
-            "--state",
-            "open",
-            "--limit",
-            "200",
-            "--json",
-            "number,url,title,headRefName",
-        ],
-        capture_output=True,
-        text=True,
-        cwd=root,
-        timeout=60,
-        check=False,
-    ).stdout
+    listing = ("pr", "list", "--repo", upstream, "--state", "open", "--limit", "200")
+    out = gh(*listing, "--json", "number,url,title,headRefName", repeatable=True, cwd=root, budget=60).stdout
     try:
         rows = json.loads(out or "[]")
     except json.JSONDecodeError:

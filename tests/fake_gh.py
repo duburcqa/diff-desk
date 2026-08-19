@@ -20,7 +20,21 @@ if os.environ.get("FAKE_GH_LOG"):
         # One call, one line, whatever it was given: a GraphQL document runs over several lines and a test counting the
         # calls would read one invocation as a dozen. What was piped in is left as it came, since a test reads it back.
         told.write(" ".join(asking.split()) + (f" <<< {given}" if given else "") + "\n")
-wanted = next((rule for rule in asked.get("rules", []) if rule["match"] in asking), asked)
+# A rule carrying `times` answers only that many of the calls it matches, which is how a call is made to fail once and
+# then succeed. What each rule has already answered is tallied beside the script, and cleared when a test writes a new
+# one, so one test's failures are not spent by the next.
+spent = pathlib.Path(os.environ["FAKE_GH_SCRIPT"]).with_suffix(".spent")
+kept = json.loads(spent.read_text()) if spent.exists() else {}
+wanted = asked
+for index, rule in enumerate(asked.get("rules", [])):
+    if rule["match"] not in asking:
+        continue
+    if rule.get("times") and kept.get(str(index), 0) >= rule["times"]:
+        continue
+    kept[str(index)] = kept.get(str(index), 0) + 1
+    wanted = rule
+    break
+spent.write_text(json.dumps(kept))
 # Whatever is being piped in is left unread: only a posted review is given anything, and the calls that resolve a
 # repository inherit a standard input that never ends, which reading would wait on for good.
 sys.stdout.write(wanted.get("out", ""))
