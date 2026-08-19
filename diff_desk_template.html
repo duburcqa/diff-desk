@@ -479,13 +479,22 @@
     #moved[data-busy] { animation: none; opacity: 0.6; }
   }
 
+  /* Words about the code, not another line of it, so a thread is drawn as a card lying over the diff: an outline all
+     round, rounded corners, a lift, and the row's own ground showing above and below it. That air is vertical only -
+     the row spans every column, so its height is its own business, while an inset of its sides would pull the box off
+     the edges of the view it is held flush with. The lift and the outline are what carry the separation on a tinted
+     thread, where its background is the news rather than the delimiter. */
   .thread {
     display: flex;
     flex-direction: column;
     gap: 4px;
+    margin: 5px 0;
     padding: 7px 10px;
     background: var(--accent-soft);
+    border: 1px solid var(--rule-strong);
     border-left: 3px solid var(--accent);
+    border-radius: 7px;
+    box-shadow: var(--shadow);
     font-family: var(--sans);
     font-size: 12.5px;
     white-space: normal;
@@ -509,7 +518,7 @@
     background: var(--surface-sunk);
     border-radius: 3px;
   }
-  .thread.draft { background: transparent; border-left-style: dashed; }
+  .thread.draft { background: transparent; border-style: dashed; }
   .thread.draft .who { color: var(--accent); }
   .thread.done { background: var(--add-bg); border-left-color: var(--add-gutter); }
   .thread.folded { padding: 4px 10px; }
@@ -558,7 +567,7 @@
     color: var(--muted);
     white-space: pre-wrap;
   }
-  .thread.stale { border-left-style: dotted; background: var(--stale-bg); }
+  .thread.stale { border-style: dotted; background: var(--stale-bg); }
   .thread.found { outline: 2px solid var(--accent); outline-offset: 1px; }
   body.hide-done .file[data-done="true"][data-reveal="true"] { display: block; }
 
