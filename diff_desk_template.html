@@ -390,6 +390,9 @@
     );
   }
   tr.sel td.ln:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+  body.hide-closed .noterow[data-done="true"], body.hide-closed .filenote[data-done="true"] { display: none; }
+  body.hide-closed .noterow[data-done="true"][data-reveal="true"] { display: table-row; }
+  body.hide-closed .filenote[data-done="true"][data-reveal="true"] { display: block; }
   body.hide-context tr.c { display: none; }
   body.dragging { user-select: none; cursor: ns-resize; }
 
@@ -791,6 +794,7 @@
       <span class="minus num" id="tminus"></span>
     </div>
   </div>
+  <button class="toggle" id="hideclosed" aria-pressed="false" title="Hide the comments already resolved">Hide resolved</button>
   <button class="toggle" id="logopen" title="Every comment recorded, and where each one stands">Comments<i class="dot" id="logdot" aria-hidden="true"></i></button>
   <button class="solid" id="moved" disabled title="Refresh the diffs once the branch has moved on">Refresh</button>
 </header>
@@ -898,7 +902,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "ctx", "hidedone", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logretry", "logbind", "logsync", "logclose", "logresult", "logresolved", "brand", "repo", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
+  for (const id of ["tabs", "scope", "q", "ctx", "hidedone", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logretry", "logbind", "logsync", "logclose", "logresult", "logresolved", "brand", "repo", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -1179,7 +1183,14 @@
     card.dataset.reveal = "true";
     folds.set(note.path, { digest: card.dataset.digest, open: true, upTo: latest() });
     els.log.dataset.open = "false";
-    const thread = document.getElementById(`note-${note.seq}`) || card;
+    // A remark about the file as a whole hangs under its header rather than on a row, so it is found by the seq it
+    // carries either way.
+    const thread =
+      document.getElementById(`note-${note.seq}`) ||
+      document.querySelector(`.filenote[data-seq="${note.seq}"]`) ||
+      card;
+    // Resolved and hidden away, it is still the thread being reached for, so it is shown, as a folded file is opened.
+    if (thread !== card) thread.dataset.reveal = "true";
     for (const found of document.querySelectorAll(".thread.found")) found.classList.remove("found");
     const box = thread.querySelector ? thread.querySelector(".thread") : null;
     if (box) {
@@ -1590,6 +1601,7 @@
     }
     if (note.outdated) box.classList.add("stale");
     if (settled) box.classList.add("folded");
+    if (note.state === "resolved") row.dataset.done = "true";
 
     const head = document.createElement("div");
     head.className = "line";
@@ -2657,7 +2669,10 @@
       note.source = notes.drafts.find((draft) => draft.text === note.text && draft.path === note.path);
       const holder = document.createElement("div");
       holder.className = "filenote";
-      holder.append(noteRow(note).querySelector(".thread"));
+      holder.dataset.seq = note.seq;
+      const built = noteRow(note);
+      if (built.dataset.done) holder.dataset.done = built.dataset.done;
+      holder.append(built.querySelector(".thread"));
       wrap.append(holder);
     }
 
@@ -2999,6 +3014,14 @@
     holdPlace(staying && staying.path, () => {
       els.hidedone.setAttribute("aria-pressed", String(on));
       document.body.classList.toggle("hide-done", on);
+    });
+  });
+  els.hideclosed.addEventListener("click", () => {
+    const on = els.hideclosed.getAttribute("aria-pressed") !== "true";
+    const staying = visible(view().files)[0];
+    holdPlace(staying && staying.path, () => {
+      els.hideclosed.setAttribute("aria-pressed", String(on));
+      document.body.classList.toggle("hide-closed", on);
     });
   });
   els.sourceopen.addEventListener("click", () => {

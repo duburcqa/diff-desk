@@ -1167,6 +1167,21 @@ def test_the_log_reaches_a_comment_and_leaves_what_is_settled_out(page, desk):
     page.locator("#logresolved").check()
     page.locator("#logrows .logrow").filter(has_text=saying).first.wait_for()
     assert page.locator("#logrows .logrow").filter(has_text=saying).count() >= 1
+
+    # Settled threads pile up as a review goes on, so they can be taken out of the diff altogether. Reaching one from
+    # the listing shows it again, where it hangs, without bringing back the rest.
+    page.locator("#logclose").click()
+    page.locator("#hideclosed").click()
+    page.locator(f"#note-{made}").wait_for(state="hidden")
+    page.locator("#logopen").click()
+    page.wait_for_selector("#log[data-open='true']")
+    page.locator("#logresolved").check()
+    page.locator("#logrows .logrow").filter(has_text=saying).first.click()
+    page.locator(f"#note-{made}").wait_for(state="visible")
+    assert page.locator("#hideclosed").get_attribute("aria-pressed") == "true"
+    page.locator("#hideclosed").click()
+    page.locator("#logopen").click()
+    page.wait_for_selector("#log[data-open='true']")
     page.locator("#logresolved").uncheck()
     page.locator("#logclose").click()
     page.evaluate("() => localStorage.clear()")
