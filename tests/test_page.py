@@ -1095,19 +1095,58 @@ def test_a_comment_follows_the_line_it_was_written_against(page, desk):
 
 def test_a_comment_whose_line_left_the_diff_is_kept_and_marked(page, desk):
     branch = page.evaluate("() => data.branches[0].ref")
-    desk.post(
+    gone = desk.post(
         "/comments",
         [{"branch": branch, "path": "sample.py", "line": 9999, "side": "new", "text": "anchored to a vanished line"}],
-    )
+    )["seqs"][0]
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
     page.wait_for_function("() => document.querySelectorAll('.thread.stale').length > 0")
-    stale = page.locator(".thread.stale").first
+    stale = page.locator(f"#note-{gone} .thread.stale")
     # Kept with its file and marked, never dropped from the page and never resolved on its behalf.
     assert "anchored to a vanished line" in stale.inner_text()
     assert stale.locator(".mark.outdated").first.inner_text() == "code moved on"
     kept = next(row for row in desk.get("/comments") if row["line"] == 9999)
     assert kept["state"] == "open"
+
+    # A comment written against a line the diff still numbers, whose text has since gone, is left behind just the same:
+    # the number alone cannot tell, and unmarked it would read as a remark about whatever took that place.
+    held = page.evaluate(
+        "() => {"
+        "  const file = data.branches[0].files.find((entry) => entry.path === 'sample.py');"
+        "  const row = file.lines.find((entry) => entry[0] === 'c');"
+        "  return {line: row[2], text: row[3]};"
+        "}"
+    )
+    made = desk.post(
+        "/comments",
+        [
+            {
+                "branch": branch,
+                "path": "sample.py",
+                "line": held["line"],
+                "side": "new",
+                "text": "written against a line since rewritten",
+                "anchor": "a line this diff never held",
+            }
+        ],
+    )["seqs"][0]
+    page.reload(wait_until="load")
+    page.wait_for_selector("section.file")
+    lost = page.locator(f"#note-{made}")
+    assert lost.locator(".mark.outdated").first.inner_text() == "code moved on"
+    # Left where it was written rather than packed at the foot of the file, so it keeps the place it was about.
+    placed = page.evaluate(
+        "(seq) => {"
+        "  const note = document.getElementById(`note-${seq}`);"
+        "  const rows = [...note.closest('tbody').querySelectorAll('tr')];"
+        "  let above = note.previousElementSibling;"
+        "  while (above && !above.dataset.line) above = above.previousElementSibling;"
+        "  return {isLast: rows[rows.length - 1] === note, above: above && above.dataset.line};"
+        "}",
+        made,
+    )
+    assert placed == {"isLast": False, "above": str(held["line"])}
 
 
 def test_a_release_the_page_never_sees_does_not_leave_it_dragging(page):

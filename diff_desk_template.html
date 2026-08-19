@@ -1067,9 +1067,10 @@
     return keys;
   }
 
-  // A remark about a whole file has no line to lose, so it is never left behind by one.
+  // A remark about a whole file has no line to lose, so it is never left behind by one. Otherwise a comment is left
+  // behind when the line it was written against is gone from the diff, whether or not its number still names one.
   const isOutdated = (note, keys) =>
-    note.side !== "file" && !keys.has(`${note.path}|${note.side}|${placed(note)}`);
+    note.side !== "file" && (!keys.has(`${note.path}|${note.side}|${placed(note)}`) || lostItsLine(note));
 
   function mine() {
     return notes.sent.filter((note) => belongs(note) && note.path !== "(review)" && note.state !== "deleted");
@@ -1437,7 +1438,7 @@
 
   // Where a comment now belongs. A diff that changes under a comment leaves its line number pointing at whatever took
   // that place, so the text the comment was written against is what places it: found once, that line is where it goes;
-  // found nowhere, the line number stands and the comment reads as having been left behind.
+  // found several times, the one nearest where it was; found nowhere, its line stands and it is said to have lost it.
   function codeAt(path, line, side) {
     const file = view().files.find((entry) => entry.path === path);
     if (!file) return "";
@@ -1454,10 +1455,26 @@
     if (!file) return wanted;
     const rows = file.lines.filter((row) => row[0] !== "h" && (row[0] === "d" ? "old" : "new") === note.side);
     if (rows.some((row) => (row[0] === "d" ? row[1] : row[2]) === wanted && row[3] === note.anchor)) return wanted;
-    const same = rows.filter((row) => row[3] === note.anchor);
-    if (same.length !== 1) return wanted;
-    return same[0][0] === "d" ? same[0][1] : same[0][2];
+    const same = rows.filter((row) => row[3] === note.anchor).map((row) => (row[0] === "d" ? row[1] : row[2]));
+    if (!same.length) return wanted;
+    // The same line can read the same in several places, and the one the comment was written against is the one it was
+    // nearest to.
+    return same.reduce((best, line) => (Math.abs(line - wanted) < Math.abs(best - wanted) ? line : best));
   }
+
+  // Whether the line a comment was written against is still in the diff. A remark about a whole file has no line to
+  // lose; one whose text is nowhere to be found has lost its place even though its number still names some other line,
+  // which is the case a number alone cannot tell.
+  function lostItsLine(note) {
+    if (note.side === "file") return false;
+    const file = view().files.find((entry) => entry.path === note.path);
+    if (!file) return true;
+    if (!note.anchor) return !file.lines.some((row) => row[0] !== "h" && placedLine(row, note.side) === placed(note));
+    return !file.lines.some((row) => row[0] !== "h" && row[3] === note.anchor && rowSide(row) === note.side);
+  }
+
+  const rowSide = (row) => (row[0] === "d" ? "old" : "new");
+  const placedLine = (row, side) => (side === "old" ? row[1] : row[2]);
 
   const GITHUB_MARK = {
     pending: "waiting for GitHub",
@@ -2630,6 +2647,21 @@
     } else {
       const table = document.createElement("table");
       const tbody = document.createElement("tbody");
+      const keys = present();
+      const stranded = mine().filter((note) => note.path === file.path && isOutdated(note, keys));
+      // Which line each stranded comment hangs under: the last one the diff still shows at or above where it was
+      // written, or the first one shown when it was written above all of them. Kept as `side|line` so the row loop can
+      // recognise its own place without holding on to rows that do not exist yet.
+      const hangs = new Map();
+      for (const note of stranded) {
+        const wanted = placed(note);
+        const lines = file.lines
+          .filter((row) => row[0] !== "h" && rowSide(row) === note.side)
+          .map((row) => placedLine(row, note.side));
+        const above = lines.filter((line) => line <= wanted);
+        const line = above.length ? Math.max(...above) : lines.length ? Math.min(...lines) : null;
+        if (line !== null) hangs.set(note.seq, `${note.side}|${line}`);
+      }
       for (let order = 0; order < file.lines.length; order += 1) {
         const [kind, oldNo, newNo, text] = file.lines[order];
         const row = document.createElement("tr");
@@ -2723,9 +2755,15 @@
           note.source = notes.drafts.find((draft) => draft.text === note.text && draft.line === note.line && draft.path === note.path);
           tbody.append(noteRow(note));
         }
+        // A comment whose line is gone is shown against the nearest line still in the diff, so it keeps the place that
+        // gave it its meaning: packed at the foot of the file it is neither noticed nor recognisable.
+        for (const note of stranded.filter((note) => hangs.get(note.seq) === `${side}|${line}`)) {
+          tbody.append(noteRow({ ...note, outdated: true }));
+        }
       }
-      const keys = present();
-      for (const note of mine().filter((note) => note.path === file.path && isOutdated(note, keys))) {
+      // A file whose diff shows nothing on the side a comment was written against has nowhere to hang it, and a comment
+      // is never dropped: those go last, which is where every stranded comment used to go.
+      for (const note of stranded.filter((note) => !hangs.has(note.seq))) {
         tbody.append(noteRow({ ...note, outdated: true }));
       }
       if (notes.live && lastNumbered(file.lines)) {
