@@ -290,6 +290,30 @@ def test_one_comment_can_be_sent_without_a_batch(page, desk):
     assert page.locator("#tray[data-open='true']").count() == 0
 
 
+def test_a_file_hands_its_path_to_the_clipboard(page):
+    # What the page hands the clipboard is recorded rather than read back from it: a clipboard is the one thing on the
+    # page that belongs to the machine, and every engine guards it differently.
+    page.evaluate("""() => {
+      window.copied = [];
+      navigator.clipboard.writeText = (text) => {
+        window.copied.push(text);
+        return Promise.resolve();
+      };
+    }""")
+    card = sample(page)
+    button = card.locator(".filehead .copy")
+    card.locator(".filehead").hover()
+    button.click()
+    # Said on the button for a moment, which is how the reader knows the path was taken.
+    page.wait_for_selector(".filehead .copy[data-copied]")
+    assert page.evaluate("() => window.copied") == ["sample.py"]
+    # Each icon says in words what it is, which is what the page shows under the cursor.
+    tips = card.locator(".filehead .icon").evaluate_all("(icons) => icons.map((icon) => icon.dataset.tip)")
+    assert tips == ["Copy this path", "Show every line of this file", "Comment on this file"]
+    # Copying is not folding: the card is left as it was found.
+    assert card.get_attribute("data-open") == "true"
+
+
 def test_the_file_list_follows_the_folders(page):
     folders = page.locator("#filelist .folder")
     assert folders.count() >= 1
@@ -1024,7 +1048,7 @@ def test_a_file_can_be_commented_on_as_a_whole(page, desk):
     card = sample(page)
     path = card.locator(".path").first.inner_text()
     before = len(desk.get("/comments"))
-    card.locator("button.tiny").filter(has_text="Comment on the file").click()
+    card.locator(".filehead button[data-tip='Comment on this file']").click()
     page.locator(".filenote.writing textarea").fill("this file wants splitting in two")
     page.locator(".filenote.writing button.solid.direct").click()
     page.wait_for_function("() => document.querySelectorAll('.filenote.writing').length === 0")
@@ -1421,6 +1445,20 @@ def test_expanding_every_gap_reaches_the_whole_file(page):
     }""")
     assert shown["first"] == 1
     assert shown["lines"] >= SECOND_EDIT
+
+    # One click asks for the same thing the walk above spelled out gap by gap, so the file reads whole either way.
+    page.reload(wait_until="load")
+    page.wait_for_selector("section.file")
+    again = page.locator("section.file").filter(has=page.locator("text=sample.py")).first
+    again.locator(".filehead button[data-tip='Show every line of this file']").click()
+    page.wait_for_function(
+        """(wanted) => {
+          const cards = [...document.querySelectorAll('section.file')];
+          const card = cards.find((node) => node.textContent.includes('sample.py'));
+          return card.querySelectorAll('tr[data-side="new"]').length >= wanted;
+        }""",
+        arg=shown["lines"],
+    )
 
 
 def test_a_branch_with_a_pull_request_says_which_and_opens_it(page, desk):
@@ -1905,7 +1943,7 @@ def test_a_recorded_comment_shows_the_number_it_is_referred_to_by(page, desk):
 
 def test_a_file_comment_being_written_outlives_the_poll(page, desk):
     card = sample(page)
-    card.locator(".filehead button.tiny", has_text="Comment on the file").first.click()
+    card.locator(".filehead button[data-tip='Comment on this file']").first.click()
     page.wait_for_selector(".filenote.writing")
     page.locator(".filenote.writing textarea").fill("about the file as a whole")
 
