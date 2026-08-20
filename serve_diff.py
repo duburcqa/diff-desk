@@ -659,13 +659,16 @@ class Handler(BaseHTTPRequestHandler):
 
         Marks arrive as `<review> <path>` against the digest of the diff they were read at, and dropped keys as a list.
         A page that has been reading offline sends whatever it kept, which is how a browser's own copy is carried up.
+
+        Dropped first and set second, so a page settling which name a file's tick is filed under can name every key it
+        is replacing and the one it wants kept in the same request.
         """
         order = self._body()
         with CHANGING:
             marks = read_ticks()
-            marks.update(order.get("marks") or {})
             for gone in order.get("drop") or []:
                 marks.pop(gone, None)
+            marks.update(order.get("marks") or {})
             write_ticks(marks)
         self._json({"ok": True, "marks": marks})
 

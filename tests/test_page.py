@@ -1100,13 +1100,21 @@ def test_a_review_keeps_its_comments_and_ticks_however_it_is_opened(page, desk):
         page.locator("#logclose").click()
 
         # GitHub stops answering, which is also what a merged pull request leaves behind: the listing no longer names
-        # one for this ref. The desk holds on to the number it was told, so the same work is still the same review.
+        # one for this ref. The desk holds on to the number it was told, so the same work is still the same review. A
+        # tick left under the branch name meanwhile - by a session that ran before the pull request was known - is older
+        # news than the review's own, so the file still reads as read, and ticking it settles it under one name.
+        desk.post("/reviewed", {"marks": {f"{branch} {name}": "0000stale0000"}})
         desk.github_answers(code=1, err="gh: Not Found (HTTP 404)")
         assert desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})["ok"]
         page.reload(wait_until="load")
         page.wait_for_selector("section.file")
         unanswered = page.locator("section.file").filter(has=page.locator(f"text={name}")).first
         assert unanswered.get_attribute("data-done") == "true"
+        unanswered.locator("input[type=checkbox]").uncheck()
+        page.wait_for_selector(f"section.file[data-path='{name}'][data-done='false']")
+        unanswered.locator("input[type=checkbox]").check()
+        page.wait_for_selector(f"section.file[data-path='{name}'][data-done='true']")
+        assert [held for held in desk.get("/reviewed")["marks"] if held.endswith(name)] == [f"#21 {name}"]
     finally:
         gen_diff_data.run(desk.repo, "update-ref", "-d", "refs/diffdesk/pull/21")
         gen_diff_data.run(desk.repo, "remote", "remove", "origin")

@@ -931,6 +931,11 @@
 
   const key = (path) => `${review()} ${path}`;
 
+  // Every name this review's ticks may be filed under, its own first. Read under another name earlier - a bare ref,
+  // before the pull request was known - a file leaves a tick there, and that older tick must not outrank what the
+  // reader has done since, or the file reads as changed since review however often they tick it.
+  const marksFor = (path) => [key(path), ...aliases().map((name) => `${name} ${path}`)];
+
   /* ---------- reviewed state, remembered and invalidated by digest ---------- */
 
   function loadFolded() {
@@ -971,18 +976,21 @@
   }
 
   function seenState(file) {
-    const mark = aliases()
-      .map((name) => seen[`${name} ${file.path}`])
+    const mark = marksFor(file.path)
+      .map((name) => seen[name])
       .find(Boolean);
     if (!mark) return "open";
     return mark === file.digest ? "done" : "stale";
   }
 
   function setSeen(file, done) {
+    // Whatever name the file was ticked under before, this settles it: the older ones go and the review's own is what
+    // is written, so the tick the reader just made is the one that answers for the file.
+    const held = marksFor(file.path);
+    for (const name of held) delete seen[name];
     if (done) seen[key(file.path)] = file.digest;
-    else delete seen[key(file.path)];
     saveSeen();
-    post("reviewed", done ? { marks: { [key(file.path)]: file.digest } } : { drop: [key(file.path)] });
+    post("reviewed", { drop: held, marks: done ? { [key(file.path)]: file.digest } : {} });
   }
 
   function countStale(files) {
