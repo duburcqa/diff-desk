@@ -1529,30 +1529,36 @@ def test_a_file_changed_since_it_was_reviewed_says_so_where_the_count_is(page, d
     card.locator("input[type=checkbox]").uncheck()
 
 
-@pytest.mark.parametrize("width", [1900, 1400, 1100, 900])
-def test_the_top_bar_holds_one_line(page, width):
+@pytest.mark.parametrize("width", [1900, 1400, 1100, 900, 760])
+def test_the_top_bar_keeps_every_control_in_the_window(page, width):
     page.set_viewport_size({"width": width, "height": 900})
     settle(page)
     bar = page.evaluate("""() => {
       const head = document.querySelector('header');
+      const box = head.getBoundingClientRect();
       const kids = [...head.children].filter((node) => node.offsetParent !== null);
       return {
-        height: Math.round(head.getBoundingClientRect().height),
+        height: Math.round(box.height),
         tallest: Math.max(...kids.map((node) => Math.round(node.getBoundingClientRect().height))),
         items: kids.length,
         overflowing: head.scrollWidth > head.clientWidth,
-        scrolls: getComputedStyle(head).overflowX,
-        cut: kids.filter((node) => node.getBoundingClientRect().right > head.scrollWidth + 1).length,
+        outside: kids.filter((node) => node.getBoundingClientRect().right > box.right + 1).length,
+        headVar: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--head')),
       };
     }""")
-    # A bar as tall as its tallest control is a bar on one line; anything folded onto a second row makes it taller.
-    assert bar["height"] <= bar["tallest"] + 22
+    # Every control is in the window at every width: nothing sits off the right edge, and there is nothing to scroll
+    # sideways to reach - what does not fit folds onto another line instead.
     assert bar["items"] >= 6
-    # Whatever a window cannot fit is reached by scrolling the bar, never cut off: font metrics differ between machines,
-    # so which widths need that scrolling is not something to pin down - that none of it is unreachable is.
-    assert bar["cut"] == 0
-    if bar["overflowing"]:
-        assert bar["scrolls"] in ("auto", "scroll")
+    assert bar["outside"] == 0
+    assert not bar["overflowing"]
+    # What the page shifts its sticky heads by is what the bar actually measures, however many lines it took.
+    assert bar["headVar"] == bar["height"]
+    # A bar as tall as its tallest control is a bar on one line. Font metrics differ between machines, so only the two
+    # ends are pinned: the widest window here holds one line, and the narrowest cannot hold these controls in one.
+    if width >= 1900:
+        assert bar["height"] <= bar["tallest"] + 22
+    if width <= 760:
+        assert bar["height"] > bar["tallest"] + 22
     page.set_viewport_size({"width": 1500, "height": 900})
 
 

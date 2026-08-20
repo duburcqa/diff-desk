@@ -98,16 +98,13 @@
     top: 0;
     z-index: 30;
     display: flex;
-    /* One line, in three groups: what is being reviewed, how it is being looked at, what has come of it. Wrapping is
-       what made this messy, so the parts that can give way shrink or step aside instead. */
-    flex-wrap: nowrap;
+    /* Three groups: what is being reviewed, how it is being looked at, what has come of it. The parts that can give
+       way shrink first, and what still does not fit folds onto another line - so every control stays in the window at
+       any width, rather than sitting off the edge of a bar that scrolls. */
+    flex-wrap: wrap;
     align-items: center;
     gap: 10px;
     padding: 10px 20px;
-    /* Sideways rather than clipped, so nothing in the bar is ever out of reach however narrow the window. */
-    overflow-x: auto;
-    overflow-y: hidden;
-    scrollbar-width: none;
     background: color-mix(in srgb, var(--surface) 88%, transparent);
     backdrop-filter: blur(10px);
     border-bottom: 1px solid var(--rule);
@@ -752,14 +749,10 @@
   button.expand:hover { color: var(--accent); border-color: var(--accent); }
   tr.h .at { color: var(--faint); }
 
-  /* Narrower views drop what can be read elsewhere, rather than folding the bar onto a second line: the totals are in
-     each file's header, the tally in the file list, and what is being reviewed in the Source panel. */
-  @media (max-width: 1380px) { .totals { display: none; } }
-  @media (max-width: 1180px) { .tally { display: none; } }
+  /* Narrow views keep every control and fold the bar instead, so the one thing that gives way is the base ref, which
+     the Source panel says in full. */
   @media (max-width: 1020px) { .brand .base { display: none; } }
-  @media (max-width: 900px) { .brand h1 { display: none; } }
 
-  header::-webkit-scrollbar { display: none; }
 
   .empty { padding: 40px 8px; color: var(--muted); text-align: center; }
   kbd { font-family: var(--mono); font-size: 10.5px; padding: 1px 5px; border: 1px solid var(--rule-strong); border-bottom-width: 2px; border-radius: 4px; background: var(--surface); color: var(--muted); }
