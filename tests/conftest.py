@@ -74,8 +74,10 @@ def repo(tmp_path_factory):
     body[SECOND_EDIT - 1] = f"line {SECOND_EDIT} rewritten"
     (root / "sample.py").write_text("\n".join(body) + "\n")
     # Written as code rather than as a line of prose, so a test can tell whether the page reads it as code: a comment,
-    # a string, a number and a word of the language's own.
-    (root / "added.py").write_text('# said about the file\nname = "brand new"\ncount = 42\n')
+    # a string, a number, and a docstring whose second line holds nothing that says it is one.
+    (root / "added.py").write_text(
+        '"""What it is for,\nsaid over two lines."""\n# said about the file\nname = "brand new"\ncount = 42\n'
+    )
     wide = [f"wide {number}" for number in range(1, 41)]
     # A block of lines rather than one, so its single hunk holds rows enough for a drag to cross several of them.
     for number in range(18, 25):

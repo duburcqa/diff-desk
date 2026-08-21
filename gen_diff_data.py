@@ -169,10 +169,15 @@ def fetch_pull(root, upstream, number):
 
 
 def render_page(template, payload):
-    """The page as served: the payload inlined, stamped with the moment it was built so a stale tab is obvious."""
+    """The page as served: the payload and the grammar inlined, stamped with the moment it was built.
+
+    The grammar is the vendored highlight.js, written into the page rather than fetched by it: the desk serves one file
+    and a review reads the same with the network gone.
+    """
     body = json.dumps(payload, separators=(",", ":")).replace("</script", "<\\/script")
     stamp = time.strftime("built %H:%M:%S")
-    return template.replace("__DIFF_DATA__", body).replace("__BUILD__", stamp)
+    grammar = (pathlib.Path(__file__).parent / "vendor" / "highlight.min.js").read_text()
+    return template.replace("__DIFF_DATA__", body).replace("__HIGHLIGHT__", grammar).replace("__BUILD__", stamp)
 
 
 def parse(diff):

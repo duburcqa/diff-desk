@@ -416,10 +416,15 @@
   }
   td.mark { width: 1%; padding: 0 4px 0 6px; color: var(--faint); user-select: none; }
   td.gut { width: 21px; min-width: 21px; padding: 0 3px; user-select: none; }
-  td.code .com { color: var(--faint); font-style: italic; }
-  td.code .str { color: var(--str); }
-  td.code .num { color: var(--num); }
-  td.code .key { color: var(--key); }
+  td.code .hljs-comment, td.code .hljs-quote { color: var(--faint); font-style: italic; }
+  td.code .hljs-string, td.code .hljs-regexp, td.code .hljs-char.escape_, td.code .hljs-subst { color: var(--str); }
+  td.code .hljs-number, td.code .hljs-literal { color: var(--num); }
+  td.code .hljs-keyword, td.code .hljs-built_in, td.code .hljs-type, td.code .hljs-meta { color: var(--key); }
+  td.code .hljs-title, td.code .hljs-title.class_, td.code .hljs-title.function_ { color: var(--accent); }
+  td.code .hljs-attr, td.code .hljs-attribute, td.code .hljs-property, td.code .hljs-variable { color: var(--muted); }
+  td.code .hljs-section, td.code .hljs-name, td.code .hljs-selector-tag { color: var(--key); }
+  td.code .hljs-deletion { color: var(--del-ink); }
+  td.code .hljs-addition { color: var(--add-ink); }
   tr.a td.code, tr.a td.mark { background: var(--add-bg); color: var(--ink); }
   tr.a td.ln { background: color-mix(in srgb, var(--add-bg) 70%, var(--surface-sunk)); }
   tr.d td.code, tr.d td.mark { background: var(--del-bg); color: var(--ink); }
@@ -919,6 +924,8 @@
 </div>
 
 <script id="data" type="application/json">__DIFF_DATA__</script>
+<!-- Highlight.js, inlined by the desk: the page is one file, and a review reads the same with the network gone. -->
+<script>__HIGHLIGHT__</script>
 <script>
   let data = JSON.parse(document.getElementById("data").textContent);
   const state = { branch: 0, scope: "all", query: "", current: 0 };
@@ -1042,128 +1049,88 @@
 
   /* ---------- code, read as code ---------- */
 
-  // What a line of each language is made of: where a comment starts, what quotes a string, and the words that are the
-  // language's own. Enough to tell those three apart, which is what carries a diff; anything finer wants a parser, and
-  // a parser wants the whole file rather than the lines a hunk shows.
-  const TONGUES = {
-    py: {
-      line: "#",
-      quotes: ['"""', "'''", '"', "'"],
-      words: `False None True and as assert async await break class continue def del elif else except finally for from
-        global if import in is lambda nonlocal not or pass raise return try while with yield self cls`,
-    },
-    js: {
-      line: "//",
-      quotes: ['"', "'", "`"],
-      words: `async await break case catch class const continue default delete do else export extends false finally for
-        function if import in instanceof let new null of return static super switch this throw true try typeof var void
-        while yield`,
-    },
-    c: {
-      line: "//",
-      quotes: ['"', "'"],
-      words: `auto bool break case char class const constexpr continue default delete do double else enum explicit
-        extern false float for friend if inline int long namespace new nullptr operator private protected public return
-        short signed sizeof static struct switch template this throw true try typedef typename union unsigned using
-        virtual void volatile while`,
-    },
-    sh: {
-      line: "#",
-      quotes: ['"', "'"],
-      words: `case do done elif else esac export fi for function if in local return source then until while`,
-    },
-    yaml: { line: "#", quotes: ['"', "'"], words: "true false null yes no on off" },
-    json: { quotes: ['"'], words: "true false null" },
-  };
-
-  // A file is read as the language its name gives it, and as nothing at all when the name gives none: a diff of
-  // something this page cannot read is better plain than wrongly coloured.
+  // The language a file is read as, by the name it carries. Highlight.js knows a great many; these are the ones a
+  // review of this kind holds, and a name that names none is left alone - a diff coloured as the wrong language reads
+  // worse than a diff not coloured at all.
   const TONGUE_OF = {
-    py: "py", pyi: "py", js: "js", mjs: "js", cjs: "js", ts: "js", tsx: "js", jsx: "js",
-    c: "c", h: "c", cc: "c", cpp: "c", cxx: "c", hpp: "c", cu: "c", cuh: "c", m: "c", mm: "c", rs: "c", go: "c",
-    java: "c", kt: "c", swift: "c", glsl: "c", metal: "c",
-    sh: "sh", bash: "sh", zsh: "sh", fish: "sh",
-    yml: "yaml", yaml: "yaml", toml: "yaml", cfg: "yaml", ini: "yaml", conf: "yaml",
-    json: "json",
+    py: "python", pyi: "python", pyx: "python",
+    js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "javascript",
+    ts: "typescript", tsx: "typescript",
+    c: "c", h: "c", cc: "cpp", cpp: "cpp", cxx: "cpp", hpp: "cpp", cu: "cpp", cuh: "cpp", metal: "cpp", glsl: "cpp",
+    m: "objectivec", mm: "objectivec", rs: "rust", go: "go", java: "java", kt: "kotlin", swift: "swift", cs: "csharp",
+    rb: "ruby", php: "php", lua: "lua", pl: "perl", r: "r", jl: "julia", scala: "scala", dart: "dart",
+    sh: "bash", bash: "bash", zsh: "bash", fish: "bash",
+    yml: "yaml", yaml: "yaml", toml: "ini", ini: "ini", cfg: "ini", conf: "ini",
+    json: "json", xml: "xml", html: "xml", svg: "xml", css: "css", scss: "scss", less: "less",
+    md: "markdown", rst: "plaintext", sql: "sql", dockerfile: "dockerfile", mk: "makefile", cmake: "cmake",
   };
 
   const tongueFor = (path) => {
-    const tongue = TONGUES[TONGUE_OF[path.split(".").pop().toLowerCase()]];
-    if (tongue && !tongue.said) tongue.said = new Set(tongue.words.split(/\s+/).filter(Boolean));
-    return tongue;
+    const name = path.split("/").pop().toLowerCase();
+    if (name === "dockerfile") return "dockerfile";
+    if (name === "makefile") return "makefile";
+    return TONGUE_OF[name.includes(".") ? name.split(".").pop() : ""];
   };
 
-  const WORD = /[A-Za-z_$]/;
-  const DIGIT = /[0-9]/;
+  function splitPainted(html) {
+    // Highlight.js colours a block, and one of its spans may cross a line - a docstring, a comment, a template string.
+    // Each line is closed at its end and whatever was open reopened at the start of the next, so a row can be shown on
+    // its own and still read as part of what it belongs to.
+    const lines = [];
+    const open = [];
+    let line = "";
+    let at = 0;
+    while (at < html.length) {
+      const next = html.indexOf("<", at);
+      const said = html.slice(at, next === -1 ? html.length : next);
+      said.split("\n").forEach((part, index) => {
+        if (index) {
+          lines.push(line + "</span>".repeat(open.length));
+          line = open.join("");
+        }
+        line += part;
+      });
+      if (next === -1) break;
+      const shut = html.indexOf(">", next);
+      const tag = html.slice(next, shut + 1);
+      if (tag.startsWith("</")) open.pop();
+      else open.push(tag);
+      line += tag;
+      at = shut + 1;
+    }
+    lines.push(line + "</span>".repeat(open.length));
+    return lines;
+  }
 
-  function painted(text, tongue) {
-    // What the line is made of, as nodes: a comment, a string and a number carry their own colour, a word of the
-    // language's own carries one too, and everything else is left as it reads. One line at a time, which is what a diff
-    // shows - a string opened on one and closed on another is coloured as far as the line goes and no further.
-    if (!tongue) return [document.createTextNode(text)];
-    const runs = [];
-    let plain = "";
-    const keep = (kind, said) => {
-      if (!kind) {
-        plain += said;
+  function paintFile(file, tongue) {
+    // What each row of the file reads as, by its place in the lines the card holds. One call per side of a hunk rather
+    // than one per row: a string opened on one line and closed on another is then coloured whole. Per hunk, because the
+    // lines a hunk does not show would otherwise carry their state across the gap; per side, because the old lines and
+    // the new ones are two different texts, which is exactly what a unified diff interleaves.
+    const painted = new Map();
+    if (!tongue || !window.hljs) return painted;
+    const sides = [[], []];
+    const flush = () => {
+      for (const rows of sides) {
+        if (rows.length) {
+          const said = rows.map((row) => row.text).join("\n");
+          const parts = splitPainted(hljs.highlight(said, { language: tongue, ignoreIllegals: true }).value);
+          rows.forEach((row, index) => painted.set(row.at, parts[index]));
+          rows.length = 0;
+        }
+      }
+    };
+    file.lines.forEach(([kind, , , text], at) => {
+      if (kind === "h") {
+        flush();
         return;
       }
-      if (plain) runs.push(["", plain]);
-      plain = "";
-      runs.push([kind, said]);
-    };
-    let at = 0;
-    while (at < text.length) {
-      const rest = text.slice(at);
-      if (tongue.line && rest.startsWith(tongue.line)) {
-        keep("com", rest);
-        at = text.length;
-        break;
-      }
-      const quote = tongue.quotes.find((mark) => rest.startsWith(mark));
-      if (quote) {
-        let end = at + quote.length;
-        while (end < text.length) {
-          if (text[end] === "\\") {
-            end += 2;
-            continue;
-          }
-          if (text.startsWith(quote, end)) {
-            end += quote.length;
-            break;
-          }
-          end += 1;
-        }
-        keep("str", text.slice(at, Math.min(end, text.length)));
-        at = Math.min(end, text.length);
-        continue;
-      }
-      if (DIGIT.test(text[at]) && !WORD.test(text[at - 1] || " ")) {
-        let end = at;
-        while (end < text.length && /[0-9A-Fa-fxXoObB._]/.test(text[end])) end += 1;
-        keep("num", text.slice(at, end));
-        at = end;
-        continue;
-      }
-      if (WORD.test(text[at])) {
-        let end = at;
-        while (end < text.length && (WORD.test(text[end]) || DIGIT.test(text[end]))) end += 1;
-        const word = text.slice(at, end);
-        keep(tongue.said.has(word) ? "key" : "", word);
-        at = end;
-        continue;
-      }
-      keep("", text[at]);
-      at += 1;
-    }
-    if (plain) runs.push(["", plain]);
-    return runs.map(([kind, said]) => {
-      if (!kind) return document.createTextNode(said);
-      const span = document.createElement("span");
-      span.className = kind;
-      span.textContent = said;
-      return span;
+      // A context line belongs to both texts, and reads the same in either, so the new side is the one shown.
+      if (kind === "d" || kind === "c") sides[0].push({ at, text });
+      if (kind === "a" || kind === "c") sides[1].push({ at, text });
     });
+    flush();
+    return painted;
   }
 
   /* ---------- comments ---------- */
@@ -2942,8 +2909,8 @@
     } else {
       const table = document.createElement("table");
       const tbody = document.createElement("tbody");
-      // The language of the whole file, settled once: every row of it is read the same way.
-      const tongue = tongueFor(file.path);
+      // What each row reads as, worked out for the whole file at once.
+      const painted = paintFile(file, tongueFor(file.path));
       const keys = present();
       const stranded = mine().filter((note) => note.path === file.path && isOutdated(note, keys));
       // Which line each stranded comment hangs under: the last one the diff still shows at or above where it was
@@ -3033,7 +3000,9 @@
         mark.textContent = kind === "a" ? "+" : kind === "d" ? "−" : " ";
         const code = document.createElement("td");
         code.className = "code";
-        code.append(...painted(text, tongue));
+        const coloured = painted.get(order);
+        if (coloured === undefined) code.textContent = text;
+        else code.innerHTML = coloured;
 
         const select = (event) => pick(row, event.shiftKey);
         for (const cell of [left, right, gut, mark]) cell.addEventListener("click", select);

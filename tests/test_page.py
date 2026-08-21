@@ -323,10 +323,23 @@ def test_code_is_read_as_the_language_a_file_name_gives_it(page):
       }));
     }"""
     rows = page.evaluate(read, "added.py")
-    # A comment, a string, a number and a word of the language's own, each said in its own colour.
-    assert [row["painted"] for row in rows] == [["com:# said about the file"], ['str:"brand new"'], ["num:42"]]
+    # A docstring, a comment, a string and a number, each said in its own colour - and the second line of the docstring
+    # holds nothing that says it is one, so a line coloured on its own would read it as code.
+    assert [row["painted"] for row in rows] == [
+        ['hljs-string:"""What it is for,'],
+        ['hljs-string:said over two lines."""'],
+        ["hljs-comment:# said about the file"],
+        ['hljs-string:"brand new"'],
+        ["hljs-number:42"],
+    ]
     # Colouring a line does not rewrite it, which is what keeps a selection copyable as the code it was.
-    assert [row["said"] for row in rows] == ["# said about the file", 'name = "brand new"', "count = 42"]
+    assert [row["said"] for row in rows] == [
+        '"""What it is for,',
+        'said over two lines."""',
+        "# said about the file",
+        'name = "brand new"',
+        "count = 42",
+    ]
 
     # A name that gives no language leaves the lines as they read: 'def' there is a word like any other.
     assert page.evaluate(read, "notes.txt") == [
