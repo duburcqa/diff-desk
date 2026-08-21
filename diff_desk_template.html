@@ -19,6 +19,9 @@
     --del-gutter: #f0c6bb;
     --stale: #8a5a12;
     --stale-bg: #fbf1de;
+    --key: #cf222e;
+    --str: #0a3069;
+    --num: #0550ae;
     --shadow: 0 1px 2px rgba(21, 26, 33, 0.06), 0 8px 24px -16px rgba(21, 26, 33, 0.24);
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
     --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -47,6 +50,9 @@
       --del-gutter: #5c332a;
       --stale: #e0b567;
       --stale-bg: #2a2113;
+      --key: #ff7b72;
+      --str: #a5d6ff;
+      --num: #79c0ff;
       --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px -16px rgba(0, 0, 0, 0.7);
     }
   }
@@ -70,6 +76,9 @@
     --del-gutter: #5c332a;
     --stale: #e0b567;
     --stale-bg: #2a2113;
+    --key: #ff7b72;
+    --str: #a5d6ff;
+    --num: #79c0ff;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px -16px rgba(0, 0, 0, 0.7);
   }
 
@@ -407,6 +416,10 @@
   }
   td.mark { width: 1%; padding: 0 4px 0 6px; color: var(--faint); user-select: none; }
   td.gut { width: 21px; min-width: 21px; padding: 0 3px; user-select: none; }
+  td.code .com { color: var(--faint); font-style: italic; }
+  td.code .str { color: var(--str); }
+  td.code .num { color: var(--num); }
+  td.code .key { color: var(--key); }
   tr.a td.code, tr.a td.mark { background: var(--add-bg); color: var(--ink); }
   tr.a td.ln { background: color-mix(in srgb, var(--add-bg) 70%, var(--surface-sunk)); }
   tr.d td.code, tr.d td.mark { background: var(--del-bg); color: var(--ink); }
@@ -1025,6 +1038,132 @@
     // The tick is kept, not dropped: it is the record that this file was read once, and the reader is the one who
     // decides it has been read again. Deleting it made the whole review look untouched the moment a diff moved on.
     return files.filter((file) => seenState(file) === "stale").length;
+  }
+
+  /* ---------- code, read as code ---------- */
+
+  // What a line of each language is made of: where a comment starts, what quotes a string, and the words that are the
+  // language's own. Enough to tell those three apart, which is what carries a diff; anything finer wants a parser, and
+  // a parser wants the whole file rather than the lines a hunk shows.
+  const TONGUES = {
+    py: {
+      line: "#",
+      quotes: ['"""', "'''", '"', "'"],
+      words: `False None True and as assert async await break class continue def del elif else except finally for from
+        global if import in is lambda nonlocal not or pass raise return try while with yield self cls`,
+    },
+    js: {
+      line: "//",
+      quotes: ['"', "'", "`"],
+      words: `async await break case catch class const continue default delete do else export extends false finally for
+        function if import in instanceof let new null of return static super switch this throw true try typeof var void
+        while yield`,
+    },
+    c: {
+      line: "//",
+      quotes: ['"', "'"],
+      words: `auto bool break case char class const constexpr continue default delete do double else enum explicit
+        extern false float for friend if inline int long namespace new nullptr operator private protected public return
+        short signed sizeof static struct switch template this throw true try typedef typename union unsigned using
+        virtual void volatile while`,
+    },
+    sh: {
+      line: "#",
+      quotes: ['"', "'"],
+      words: `case do done elif else esac export fi for function if in local return source then until while`,
+    },
+    yaml: { line: "#", quotes: ['"', "'"], words: "true false null yes no on off" },
+    json: { quotes: ['"'], words: "true false null" },
+  };
+
+  // A file is read as the language its name gives it, and as nothing at all when the name gives none: a diff of
+  // something this page cannot read is better plain than wrongly coloured.
+  const TONGUE_OF = {
+    py: "py", pyi: "py", js: "js", mjs: "js", cjs: "js", ts: "js", tsx: "js", jsx: "js",
+    c: "c", h: "c", cc: "c", cpp: "c", cxx: "c", hpp: "c", cu: "c", cuh: "c", m: "c", mm: "c", rs: "c", go: "c",
+    java: "c", kt: "c", swift: "c", glsl: "c", metal: "c",
+    sh: "sh", bash: "sh", zsh: "sh", fish: "sh",
+    yml: "yaml", yaml: "yaml", toml: "yaml", cfg: "yaml", ini: "yaml", conf: "yaml",
+    json: "json",
+  };
+
+  const tongueFor = (path) => {
+    const tongue = TONGUES[TONGUE_OF[path.split(".").pop().toLowerCase()]];
+    if (tongue && !tongue.said) tongue.said = new Set(tongue.words.split(/\s+/).filter(Boolean));
+    return tongue;
+  };
+
+  const WORD = /[A-Za-z_$]/;
+  const DIGIT = /[0-9]/;
+
+  function painted(text, tongue) {
+    // What the line is made of, as nodes: a comment, a string and a number carry their own colour, a word of the
+    // language's own carries one too, and everything else is left as it reads. One line at a time, which is what a diff
+    // shows - a string opened on one and closed on another is coloured as far as the line goes and no further.
+    if (!tongue) return [document.createTextNode(text)];
+    const runs = [];
+    let plain = "";
+    const keep = (kind, said) => {
+      if (!kind) {
+        plain += said;
+        return;
+      }
+      if (plain) runs.push(["", plain]);
+      plain = "";
+      runs.push([kind, said]);
+    };
+    let at = 0;
+    while (at < text.length) {
+      const rest = text.slice(at);
+      if (tongue.line && rest.startsWith(tongue.line)) {
+        keep("com", rest);
+        at = text.length;
+        break;
+      }
+      const quote = tongue.quotes.find((mark) => rest.startsWith(mark));
+      if (quote) {
+        let end = at + quote.length;
+        while (end < text.length) {
+          if (text[end] === "\\") {
+            end += 2;
+            continue;
+          }
+          if (text.startsWith(quote, end)) {
+            end += quote.length;
+            break;
+          }
+          end += 1;
+        }
+        keep("str", text.slice(at, Math.min(end, text.length)));
+        at = Math.min(end, text.length);
+        continue;
+      }
+      if (DIGIT.test(text[at]) && !WORD.test(text[at - 1] || " ")) {
+        let end = at;
+        while (end < text.length && /[0-9A-Fa-fxXoObB._]/.test(text[end])) end += 1;
+        keep("num", text.slice(at, end));
+        at = end;
+        continue;
+      }
+      if (WORD.test(text[at])) {
+        let end = at;
+        while (end < text.length && (WORD.test(text[end]) || DIGIT.test(text[end]))) end += 1;
+        const word = text.slice(at, end);
+        keep(tongue.said.has(word) ? "key" : "", word);
+        at = end;
+        continue;
+      }
+      keep("", text[at]);
+      at += 1;
+    }
+    if (plain) runs.push(["", plain]);
+    return runs.map(([kind, said]) => {
+      if (!kind) return document.createTextNode(said);
+      const span = document.createElement("span");
+      span.className = kind;
+      span.textContent = said;
+      return span;
+    });
   }
 
   /* ---------- comments ---------- */
@@ -2803,6 +2942,8 @@
     } else {
       const table = document.createElement("table");
       const tbody = document.createElement("tbody");
+      // The language of the whole file, settled once: every row of it is read the same way.
+      const tongue = tongueFor(file.path);
       const keys = present();
       const stranded = mine().filter((note) => note.path === file.path && isOutdated(note, keys));
       // Which line each stranded comment hangs under: the last one the diff still shows at or above where it was
@@ -2892,7 +3033,7 @@
         mark.textContent = kind === "a" ? "+" : kind === "d" ? "−" : " ";
         const code = document.createElement("td");
         code.className = "code";
-        code.textContent = text;
+        code.append(...painted(text, tongue));
 
         const select = (event) => pick(row, event.shiftKey);
         for (const cell of [left, right, gut, mark]) cell.addEventListener("click", select);

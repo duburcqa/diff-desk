@@ -314,6 +314,27 @@ def test_a_file_hands_its_path_to_the_clipboard(page):
     assert card.get_attribute("data-open") == "true"
 
 
+def test_code_is_read_as_the_language_a_file_name_gives_it(page):
+    read = """(path) => {
+      const card = [...document.querySelectorAll('section.file')].find((node) => node.dataset.path === path);
+      return [...card.querySelectorAll('tr[data-line] td.code')].map((cell) => ({
+        said: cell.textContent,
+        painted: [...cell.querySelectorAll('span')].map((span) => `${span.className}:${span.textContent}`),
+      }));
+    }"""
+    rows = page.evaluate(read, "added.py")
+    # A comment, a string, a number and a word of the language's own, each said in its own colour.
+    assert [row["painted"] for row in rows] == [["com:# said about the file"], ['str:"brand new"'], ["num:42"]]
+    # Colouring a line does not rewrite it, which is what keeps a selection copyable as the code it was.
+    assert [row["said"] for row in rows] == ["# said about the file", 'name = "brand new"', "count = 42"]
+
+    # A name that gives no language leaves the lines as they read: 'def' there is a word like any other.
+    assert page.evaluate(read, "notes.txt") == [
+        {"said": "def not_code", "painted": []},
+        {"said": "def not_code either", "painted": []},
+    ]
+
+
 def test_the_file_list_follows_the_folders(page):
     folders = page.locator("#filelist .folder")
     assert folders.count() >= 1
@@ -1016,10 +1037,10 @@ def test_a_letter_held_with_a_modifier_is_left_to_the_browser(page):
       document.addEventListener('keydown', (event) => {
         window.__taken[event.key] = event.defaultPrevented;
       });
+      // The whole of one line, since a cell holds a node per coloured run rather than one stretch of text.
       const cell = document.querySelector('section.file .body tr[data-line] td.code');
       const range = document.createRange();
-      range.setStart(cell.firstChild, 0);
-      range.setEnd(cell.firstChild, Math.min(10, cell.textContent.length));
+      range.selectNodeContents(cell);
       const selection = window.getSelection();
       selection.removeAllRanges();
       selection.addRange(range);

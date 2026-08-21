@@ -83,7 +83,13 @@ def test_a_pull_request_fetched_earlier_is_reviewable_while_github_is_unreachabl
         assert branch["ref"] == "refs/diffdesk/pull/77"
         assert branch["blurb"] == "#77"
         assert branch["pr"]["number"] == 77
-        assert [entry["path"] for entry in branch["files"]] == ["added.py", "pkg/sub/deep.py", "sample.py", "wide.py"]
+        assert [entry["path"] for entry in branch["files"]] == [
+            "added.py",
+            "notes.txt",
+            "pkg/sub/deep.py",
+            "sample.py",
+            "wide.py",
+        ]
     finally:
         gen_diff_data.run(repo, "update-ref", "-d", "refs/diffdesk/pull/77")
 

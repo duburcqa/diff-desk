@@ -58,6 +58,8 @@ def repo(tmp_path_factory):
     body = [f"line {number}" for number in range(1, FILE_LINES + 1)]
     (root / "sample.py").write_text("\n".join(body) + "\n")
     (root / "kept.py").write_text("untouched\n")
+    # A file whose name gives no language, which the page has nothing to read it as.
+    (root / "notes.txt").write_text("def not_code\n")
     # A second long file, which no test comments on: a drag needs a stretch of rows with nothing hanging between them,
     # and comments accumulate in this desk by design - the file they are written on runs out of clean stretches.
     (root / "wide.py").write_text("\n".join(f"wide {number}" for number in range(1, 41)) + "\n")
@@ -71,13 +73,16 @@ def repo(tmp_path_factory):
     body[FIRST_EDIT - 1] = f"line {FIRST_EDIT} rewritten"
     body[SECOND_EDIT - 1] = f"line {SECOND_EDIT} rewritten"
     (root / "sample.py").write_text("\n".join(body) + "\n")
-    (root / "added.py").write_text("brand new\n")
+    # Written as code rather than as a line of prose, so a test can tell whether the page reads it as code: a comment,
+    # a string, a number and a word of the language's own.
+    (root / "added.py").write_text('# said about the file\nname = "brand new"\ncount = 42\n')
     wide = [f"wide {number}" for number in range(1, 41)]
     # A block of lines rather than one, so its single hunk holds rows enough for a drag to cross several of them.
     for number in range(18, 25):
         wide[number - 1] = f"wide {number} rewritten"
     (root / "wide.py").write_text("\n".join(wide) + "\n")
     (root / "pkg" / "sub" / "deep.py").write_text("def area(r):\n    return 2\nthree\n")
+    (root / "notes.txt").write_text("def not_code either\n")
     git(root, "add", "-A")
     git(root, "commit", "-m", "rewrite two lines and add a file")
     git(root, "checkout", "-q", "main")
