@@ -292,7 +292,12 @@ job.add_argument("--dir", default=".", help="the repository to read")
 job.add_argument("--base", default="upstream/main", help="the ref to diff against")
 job.set_defaults(run=serve)
 
-job = jobs.add_parser("watch", help="block until a review batch is submitted")
+job = jobs.add_parser(
+    "watch",
+    help="block until a review batch is submitted",
+    description="Reports to stdout, so a session has to be reading that stream: redirected to a file, the watch runs "
+    "and reports to nobody.",
+)
 job.add_argument(
     "--since", type=int, default=None, help="event to resume from; where the last watch stopped by default"
 )

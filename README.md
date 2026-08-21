@@ -121,7 +121,8 @@ arrived in. A session waits for one with:
     python3 desk.py watch
 
 which blocks until a batch lands, prints each comment as `[seq] branch path:line-endLine (side) text` with its state
-and any replies, each numbered by its place in the thread, and exits. A session then answers, closes, or rewrites them:
+and any replies, each numbered by its place in the thread, and exits. It reports to stdout and nowhere else: sent to a
+file, the watch keeps watching and reports to nobody. A session then answers, closes, or rewrites them:
 
     python3 desk.py reply 3 "it happens because ..."          # answer, leaving it open
     python3 desk.py resolve 3 4 --answer "fixed in abc1234"   # answer and close
