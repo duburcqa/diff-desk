@@ -1668,3 +1668,116 @@ def test_the_sync_command_says_what_it_brought_back(desk):
         desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": ["feature"]})
     assert "brought 1 reply(ies) back" in told
     assert "took 1 comment(s) in" in told
+
+
+def test_a_thread_brought_in_is_placed_by_one_numbering_or_the_other(desk):
+    # As GitHub reports a thread the diff still holds: a line of its own, and the older numbering it was written at.
+    moved = {
+        "id": "T_moved",
+        "isResolved": False,
+        "path": "sample.py",
+        "line": 2295,
+        "startLine": None,
+        "originalLine": 2304,
+        "originalStartLine": 2300,
+        "diffSide": "RIGHT",
+        "comments": {
+            "nodes": [
+                {
+                    "databaseId": 310,
+                    "body": "still in the diff, at a line of its own",
+                    "path": "sample.py",
+                    "createdAt": "2026-08-22T09:00:00Z",
+                    "author": {"login": "someone"},
+                }
+            ]
+        },
+    }
+    # And as it reports one the diff has moved past: no line of its own, and a range in the older numbering.
+    gone = {
+        "id": "T_gone",
+        "isResolved": False,
+        "path": "sample.py",
+        "line": None,
+        "startLine": None,
+        "originalLine": 44,
+        "originalStartLine": 40,
+        "diffSide": "RIGHT",
+        "comments": {
+            "nodes": [
+                {
+                    "databaseId": 311,
+                    "body": "written against lines the diff has moved past",
+                    "path": "sample.py",
+                    "createdAt": "2026-08-22T09:05:00Z",
+                    "author": {"login": "someone"},
+                }
+            ]
+        },
+    }
+    desk.github_answers(
+        rules=[
+            {
+                "match": "reviewThreads",
+                "out": json.dumps(
+                    {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": [moved, gone]}}}}}
+                ),
+            }
+        ]
+    )
+    assert desk.post("/sync", {"repo": "someone/somewhere", "pr": 51})["took"] == 2
+    rows = {row["text"]: row for row in desk.get("/comments")}
+    # A line of its own is where it sits now, and the range it was written at belongs to the other numbering: taking
+    # one from each says a comment runs from 2300 to 2295, which is no range at all.
+    here = rows["still in the diff, at a line of its own"]
+    assert (here["line"], here["endLine"]) == (2295, 2295)
+    there = rows["written against lines the diff has moved past"]
+    assert (there["line"], there["endLine"]) == (40, 44)
+
+
+def test_the_reader_own_words_on_the_pull_request_are_theirs_to_reword(desk):
+    thread = {
+        "id": "T_mine",
+        "isResolved": False,
+        "path": "sample.py",
+        "line": 52,
+        "startLine": None,
+        "originalLine": 52,
+        "originalStartLine": None,
+        "diffSide": "RIGHT",
+        "comments": {
+            "nodes": [
+                {
+                    "databaseId": 320,
+                    "body": "written over there, by the reader",
+                    "path": "sample.py",
+                    "createdAt": "2026-08-22T09:00:00Z",
+                    "author": {"login": "duburcqa"},
+                },
+                {
+                    "databaseId": 321,
+                    "body": "and answered over there, by them too",
+                    "path": "sample.py",
+                    "createdAt": "2026-08-22T09:05:00Z",
+                    "author": {"login": "duburcqa"},
+                },
+            ]
+        },
+    }
+    desk.github_answers(
+        rules=[
+            {"match": "api user", "out": "duburcqa"},
+            {
+                "match": "reviewThreads",
+                "out": json.dumps({"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": [thread]}}}}}),
+            },
+        ]
+    )
+    # Who the reader is, learned where everything else about the review is: collecting the diffs.
+    assert desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": ["feature"]})["ok"]
+    assert desk.post("/sync", {"repo": "someone/somewhere", "pr": 61})["took"] == 1
+    seq = {row["text"]: row for row in desk.get("/comments")}["written over there, by the reader"]["seq"]
+
+    # Their own words, wherever they wrote them: rewording is theirs, and so is taking them down.
+    assert desk.post("/edit", {"seq": seq, "reply": 0, "text": "better worded"})["ok"]
+    assert desk.post("/edit", {"seq": seq, "text": "the remark, better worded"})["ok"]

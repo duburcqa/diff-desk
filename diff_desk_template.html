@@ -551,8 +551,17 @@
     white-space: normal;
   }
   .thread .line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-  .thread .who { flex: none; font-family: var(--mono); font-size: 11px; color: var(--muted); }
-  .thread .said { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+  /* Read as the opening of what is said rather than as a column beside it: a column takes the width of the longest
+     line of it from every line, and what is said is what the reader came for. */
+  .thread .who { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-right: 7px; }
+  /* Three things are said in one line: which thread it is, where it sits, and what it says. Colour alone was not enough
+     to tell the first two apart, so the number reads as a reference - lighter and italic - and the place as a place. */
+  .thread .who .seq { color: var(--faint); font-weight: 600; }
+  .thread .who .at { font-style: italic; letter-spacing: 0.2px; }
+  /* Whose it is, in the voice their replies are read in: the reader's own, or somebody else's from the pull request. */
+  .thread .who .by.you { color: var(--add-ink); }
+  .thread .who .by.them { color: var(--stale); }
+  .thread .said { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; color: var(--ink); }
   .thread .said pre {
     margin: 4px 0;
     padding: 6px 8px;
@@ -575,12 +584,12 @@
   .thread.folded { padding: 4px 10px; }
   .thread.folded .said { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
   .thread.done > .line:first-child .said { color: var(--muted); }
-  .thread .reply { padding-left: 10px; border-left: 1px solid var(--rule-strong); }
-  /* The number a thread is referred to by is not the place it sits at, so the two are not said in one voice. */
-  .thread .who .seq { color: var(--faint); }
-  .thread .reply.session .who { color: var(--accent); }
-  .thread .reply.you .who { color: var(--add-ink); }
-  .thread .reply:not(.you):not(.session) .who { color: var(--stale); }
+  .thread .reply { padding-left: 10px; border-left: 1px solid currentColor; }
+  .thread .reply.session { color: var(--accent); }
+  .thread .reply.you { color: var(--add-ink); }
+  .thread .reply:not(.you):not(.session) { color: var(--stale); }
+  .thread .reply .who { color: inherit; }
+  .thread .reply .said { color: var(--ink); }
   .thread .mark { flex: none; font-family: var(--mono); font-size: 10.5px; padding: 0 6px; border-radius: 999px; }
   .thread .mark.pending { color: var(--stale); background: var(--stale-bg); }
   .thread .mark.failed { color: var(--del-ink); background: var(--del-bg); }
@@ -1230,6 +1239,11 @@
 
   const OWED = ["pending", "failed"];
 
+  // Who GitHub takes the reader for, so a remark or a reply they wrote over there is not read back at them as a login.
+  const mine_ = () => data.viewer || "";
+  const isReader = (who) => who === "you" || (Boolean(mine_()) && who === mine_());
+  const spokenBy = (who) => (isReader(who) ? "you" : who === "session" ? "claude" : who);
+
   function owedThere(note) {
     if (note.pending || !notes.live) return "";
     const said = (note.replies || []).filter((answer) => answer.github !== "posted").length;
@@ -1385,12 +1399,24 @@
     // Unfolding the card moves everything below it, so the scroll waits for that layout: aiming before it lands with
     // the thread off screen. Where it is aimed is worked out here rather than left to the browser, which centres on the
     // whole window and so can leave the thread under the page header - and answers differently from engine to engine.
+    //
+    // Aimed again until it lands: going there brings other files within reach, and a file built on arrival stands at
+    // what its lines measure rather than at what was reserved for them, which moves the thread from under the aim.
+    aim(thread, 6);
+  }
+
+  function aim(thread, tries) {
     requestAnimationFrame(() => requestAnimationFrame(() => {
       const box = thread.getBoundingClientRect();
       const covered = document.querySelector("header").getBoundingClientRect().bottom;
       const room = window.innerHeight - covered;
       const middle = Math.max(0, (room - box.height) / 2);
-      window.scrollTo({ top: Math.max(0, window.scrollY + box.top - covered - middle), behavior: "smooth" });
+      const off = box.top - covered - middle;
+      if (Math.abs(off) < 2 || tries <= 0) return;
+      // Told to go there outright once the first aim has been taken: a smooth scroll still on its way answers with
+      // where it is rather than where it is going, and every aim after the first would read that as a miss.
+      window.scrollTo({ top: Math.max(0, window.scrollY + off), behavior: tries === 6 ? "smooth" : "auto" });
+      aim(thread, tries - 1);
     }));
   }
 
@@ -1754,7 +1780,8 @@
   const outline = (text) =>
     spoken(text)
       .replace(/```[a-z0-9+#-]*/gi, " ")
-      .replace(/!?\[([^\]\n]*)\]\([^)\s]+\)/g, "$1")
+      .replace(/!\[([^\]\n]*)\]\([^)\s]+\)/g, (whole, alt) => alt.replace(/\s*badge$/i, ""))
+      .replace(/\[([^\]\n]*)\]\([^)\s]+\)/g, "$1")
       .replace(/\*\*/g, "")
       .replace(/`/g, "")
       .replace(/\s+/g, " ")
@@ -1812,6 +1839,12 @@
     return host;
   }
 
+  const spoke = () => {
+    const said = document.createElement("span");
+    said.className = "text";
+    return said;
+  };
+
   function noteRow(note) {
     const row = document.createElement("tr");
     row.className = "noterow";
@@ -1847,14 +1880,23 @@
       const numbered = document.createElement("span");
       numbered.className = "seq";
       numbered.textContent = `[${note.seq}]`;
-      who.append(numbered, document.createTextNode(` ${span(note)}`));
-      // Who opened a thread is worth having and rarely worth reading, so it is said on hovering rather than in the line.
-      if (note.who) who.title = `${note.who} wrote it on the pull request`;
+      const place = document.createElement("span");
+      place.className = "at";
+      place.textContent = span(note);
+      who.append(numbered, document.createTextNode(" "), place);
+      // Whose remark it is, said where a reply says whose it is. Where it was written is the one thing left to hovering:
+      // a thread reads the same either way, and this desk is where the reader is reading it.
+      const from = document.createElement("span");
+      from.className = `by ${note.who ? (isReader(note.who) ? "you" : "them") : "you"}`;
+      from.textContent = note.who ? spokenBy(note.who) : "you";
+      who.append(document.createTextNode(" "), from);
+      head.title = note.who ? "written on the pull request" : "written here";
     }
     const text = document.createElement("span");
     text.className = "said";
-    written(text, note.text);
-    head.append(who, text);
+    text.append(who);
+    written(text.appendChild(spoke()), note.text);
+    head.append(text);
     if (note.state === "resolved") {
       const turn = document.createElement("button");
       turn.className = "tiny";
@@ -1986,15 +2028,18 @@
 
     (note.replies || []).forEach((answer, index, answers) => {
       const said = document.createElement("div");
-      said.className = `line reply ${answer.who}`;
+      // Read as the reader's own where they wrote it, whichever side of the pull request they were on at the time.
+      said.className = `line reply ${isReader(answer.who) ? "you" : answer.who}`;
       const from = document.createElement("span");
       from.className = "who";
-      const named = { you: "you", session: "claude" }[answer.who] || answer.who;
-      from.textContent = `${named} ${answer.at}`;
+      from.textContent = spokenBy(answer.who);
+      // When it was said, kept for the asking: in the line it says little and takes the room the reply is read in.
+      if (answer.at) from.title = answer.at;
       const body = document.createElement("span");
       body.className = "said";
-      written(body, answer.text);
-      said.append(from, body);
+      body.append(from);
+      written(body.appendChild(spoke()), answer.text);
+      said.append(body);
       // Whether the pull request holds this reply, shown on the reply itself: what a thread still owes is what its own
       // Sync would carry, and a reader deciding whether to press it reads that off the replies.
       if (!note.pending && answer.github !== "none") {
@@ -2006,7 +2051,7 @@
       }
       // Only what was written here can be reworded: a reply carried back from the pull request is its author's word,
       // said on the copy everyone else reads, so this desk shows it and leaves it alone.
-      if (!note.pending && notes.live && (answer.who === "you" || answer.who === "session")) {
+      if (!note.pending && notes.live && (isReader(answer.who) || answer.who === "session")) {
         const change = document.createElement("button");
         change.className = "tiny";
         change.textContent = "Edit";
@@ -2846,6 +2891,8 @@
   // the height it had, so nothing under the reader moves as they go.
   const drawn = new WeakMap();
   const NEAR = 1.5;
+  // Whether a change is holding the reader's place as it happens, so the settling it causes leaves that to it.
+  let holding = false;
   // What a file's lines take up, so a card whose lines are not built still stands as tall as it will: without it the
   // page grows under the reader as they go, and the scrollbar means nothing until they have been everywhere.
   const heights = new Map();
@@ -2860,7 +2907,26 @@
     return rowRoom || 18;
   }
 
-  const roomForLines = (file) => Math.round(file.lines.length * roomPerRow());
+  function roomForLines(file) {
+    // The lines, and the comments hanging among them: a file carrying a long remark stands a good deal taller than its
+    // rows, and a reservation that forgets them leaves the page shorter than it turns out to be.
+    const rows = file.lines.length * roomPerRow();
+    const said = mine()
+      .filter((note) => note.path === file.path)
+      .reduce((sum, note) => sum + roomForThread(note), 0);
+    return Math.round(rows + said);
+  }
+
+  function roomForThread(note) {
+    // Read off what it says: its lines, the width the reader has, and its replies, each with a line of its own.
+    const room = Math.max(40, Math.round((window.innerWidth - 320) / 7.4));
+    const lines = (text) =>
+      String(text)
+        .split("\n")
+        .reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / room)), 0);
+    const answers = (note.replies || []).reduce((sum, answer) => sum + lines(answer.text) + 1, 0);
+    return (lines(note.text) + answers + 2) * roomPerRow() + 18;
+  }
 
   const nearby = new IntersectionObserver((entries) => {
     for (const entry of entries) settleBody(entry.target);
@@ -2899,11 +2965,23 @@
     const covered = document.querySelector("header").getBoundingClientRect().bottom;
     const before = at(path);
     const passed = before !== null && before < covered;
-    change();
+    holding = true;
+    try {
+      change();
+    } finally {
+      // Held past the change itself: what it draws is settled a frame or two later, and the place it has just been put
+      // at is the place it should be left at, not a starting point to be compensated away from.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        holding = false;
+      }));
+    }
     const after = at(path);
     if (after === null || before === null) return;
     if (passed) document.querySelector(`section.file[data-path="${CSS.escape(path)}"]`).scrollIntoView({ block: "start" });
     else window.scrollBy(0, after - before);
+    // Landed on a whole pixel: a place held to a fraction leaves a hairline of what came before it showing, and where
+    // that lands is a matter of how each engine rounds a scroll margin.
+    window.scrollTo(0, Math.round(window.scrollY));
   }
 
   function card(file, index) {
@@ -3227,8 +3305,16 @@
   function settleBody(wrap) {
     const held = drawn.get(wrap);
     if (!held) return;
+    // Whatever a card does with its lines, the reader keeps their place: one that changes height entirely above them
+    // would otherwise take the page with it, and a reservation is never exactly what the lines turn out to measure.
+    const before = wrap.getBoundingClientRect();
     if (wrap.dataset.open === "true" && nearReader(wrap)) fillBody(wrap, held.file, held.index);
     else releaseBody(wrap);
+    const after = wrap.getBoundingClientRect();
+    // Whole pixels, and only where it is worth it: a fraction moved on every settle drifts the place it is holding.
+    // Left alone while a change is holding the reader's place itself, which would otherwise be held twice over.
+    const moved = Math.round(after.height - before.height);
+    if (!holding && before.bottom < 0 && Math.abs(moved) > 1) window.scrollBy(0, moved);
   }
 
   function settleNear() {

@@ -62,6 +62,11 @@ On the page:
   resolving that. Until GitHub confirms it, the comment reads "not resolved there yet" beside its own resolution rather
   than claiming agreement it does not have; a resolution that could not be made is retried like a post that did not
   land.
+- **Every remark and every reply says whose it is**, in the ink their words are read in: yours, the session's, or the
+  author who wrote it on the pull request - your own login among them, read back as "you". It opens the line the way a
+  name opens a line of dialogue, so the words run on from it and wrap at the full width; hovering says where it was
+  written, which is the one thing rarely worth the room.
+- **A reply is a comment attached to a thread.**
 - **A thread goes out when you send it, as it reads then.** Each thread carries its own **Sync**, saying what pressing
   it would carry - the remark if the pull request has none of it, the replies it does not hold, its resolution once you
   have closed it. Whatever is written afterwards, by you or by a session, waits for the next press: nothing leaves this

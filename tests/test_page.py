@@ -240,7 +240,8 @@ def test_a_thread_can_be_answered_rewritten_closed_and_reopened_from_the_page(pa
     thread.locator("textarea").first.fill("the remark, rewritten")
     thread.locator("button.solid").filter(has_text="Save").click()
     page.wait_for_function(
-        f"() => document.querySelector('#note-{seq} .thread > .line .said')?.textContent === 'the remark, rewritten'"
+        f"() => document.querySelector('#note-{seq} .thread > .line .said .text')?.textContent"
+        " === 'the remark, rewritten'"
     )
     rewritten = {row["seq"]: row for row in desk.get("/comments")}[seq]
     assert rewritten["text"] == "the remark, rewritten"
@@ -1729,7 +1730,8 @@ def test_a_reply_can_be_rewritten_and_a_comment_and_its_last_reply_deleted_from_
     thread.locator(".line.reply button.solid").filter(has_text="Save").click()
     # The line being written into holds no said text at all, so the wait outlives it rather than tripping over it.
     page.wait_for_function(
-        "(seq) => document.querySelector(`#note-${seq} .line.reply .said`)?.textContent === 'better worded'", arg=made
+        "(seq) => document.querySelector(`#note-${seq} .line.reply .said .text`)?.textContent === 'better worded'",
+        arg=made,
     )
     reworded = {row["seq"]: row for row in desk.get("/comments")}[made]
     assert [answer["text"] for answer in reworded["replies"]] == ["better worded"]
@@ -1964,7 +1966,7 @@ def test_a_reply_quoting_a_passage_shows_it_as_a_quote(page, desk):
     assert quoted.count() == 1
     # One passage, not one quote per line, and the marks that made it are gone.
     assert quoted.inner_text() == "the passage being answered\nand the rest of it"
-    answer = page.locator(f"#note-{made} .line.reply .said").first.inner_text()
+    answer = page.locator(f"#note-{made} .line.reply .said .text").first.inner_text()
     assert "what I make of it" in answer
     assert ">" not in answer
     assert page.locator(f"#note-{made} .line.reply code").first.inner_text() == "code"
@@ -2277,8 +2279,9 @@ def test_a_comment_written_on_the_pull_request_shows_whose_it_is_and_is_answered
         # reads, so the page offers the reply and withholds what would put words in their mouth.
         head = page.locator(f"#note-{seq} .thread > .line").first
         assert head.locator(".who .seq").inner_text() == f"[{seq}]"
-        # Whose remark it is: kept for the asking, since it hardly ever changes what the reader does with it.
-        assert "Milotrince" in head.locator(".who").get_attribute("title")
+        # Whose remark it is stands in the line; where it was written is what hovering says.
+        assert head.locator(".who .by").inner_text() == "Milotrince"
+        assert head.get_attribute("title") == "written on the pull request"
         assert head.locator("button.tiny").filter(has_text="Edit").count() == 0
         assert head.locator("button.drop").count() == 0
         assert page.locator(f"#note-{seq} .actions button.ghost").filter(has_text="Reply").count() == 1

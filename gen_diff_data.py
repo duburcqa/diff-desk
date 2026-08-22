@@ -271,6 +271,15 @@ def stamp(root, base, refs):
     return hashlib.sha1("\x1f".join(marks).encode()).hexdigest()[:16]
 
 
+def viewer():
+    """Who GitHub takes the reader for, so their own words on a pull request read as theirs rather than as a login.
+
+    Nothing is owed if there is nobody to ask: a desk served without `gh` reads every login as a login.
+    """
+    done = gh("api", "user", "--jq", ".login", repeatable=True, budget=20)
+    return done.stdout.strip() if done.returncode == 0 else ""
+
+
 def collect(root, base, refs, upstream=None):
     """The whole reviewable payload: one entry per ref, each with its per-commit breakdown."""
     root = str(pathlib.Path(root).expanduser())
@@ -284,6 +293,7 @@ def collect(root, base, refs, upstream=None):
         "baseRef": base,
         "base": run(root, "rev-parse", "--short", base).strip(),
         "upstream": upstream,
+        "viewer": viewer(),
         "branches": [],
     }
     data["stamp"] = stamp(root, base, refs)

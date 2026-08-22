@@ -108,14 +108,19 @@ def read_notes():
         row.setdefault("replies", [])
         row.setdefault("edits", [])
         row.setdefault("prResolve", "none")
+        if row.get("endLine") and row.get("line") and row["endLine"] < row["line"]:
+            row["line"], row["endLine"] = row["endLine"], row["line"]
         # A row written before the cursor existed is as old as its position says.
         row.setdefault("event", row["seq"])
         row.setdefault("eventBy", "you")
         for answer in row["replies"]:
             # A reply written before it had a standing of its own: one already on the pull request stands as posted, and
-            # one written here stands local, which is what it would have been given had it been written now.
+            # one written here stands local, which is what it would have been given had it been written now. One brought
+            # back before it was stamped says where it is in its standing, so the words that stood for a time go.
             already = answer.pop("posted", False) or answer["at"] == "on the PR"
             answer.setdefault("github", "posted" if already else "none")
+            if answer["at"] == "on the PR":
+                answer["at"] = ""
     return rows
 
 
@@ -516,14 +521,17 @@ def brought_in(thread, order, ref):
     reports no line for at all is a remark on the file.
     """
     said = thread["comments"]["nodes"]
-    line = thread["line"] or thread["originalLine"]
+    if thread["line"]:
+        start, line = thread["startLine"] or thread["line"], thread["line"]
+    else:
+        start, line = thread["originalStartLine"] or thread["originalLine"], thread["originalLine"]
     return {
         "branch": ref,
         "review": f"#{order['pr']}",
         "prRepo": order["repo"],
         "prNumber": order["pr"],
         "path": thread["path"],
-        "line": thread["startLine"] or thread["originalStartLine"] or line,
+        "line": start,
         "endLine": line,
         "side": ("new" if thread["diffSide"] == "RIGHT" else "old") if line else "file",
         "anchor": "",
@@ -564,6 +572,20 @@ def take_in(rows, arriving, order, ref):
 def said_at(said):
     """When one comment of the pull request was written, to the minute, which is as fine as a foreign thread needs."""
     return (said.get("createdAt") or "").replace("T", " ")[:16]
+
+
+def reader():
+    """Who GitHub takes the reader for, read off the payload the page is served from.
+
+    Asked for when the diffs are collected and answered from there afterwards: one question to GitHub per collection,
+    and the desk and the page agree on whose words are the reader's own without asking twice.
+    """
+    if not DATA.exists():
+        return ""
+    try:
+        return json.loads(DATA.read_text()).get("viewer") or ""
+    except json.JSONDecodeError:
+        return ""
 
 
 def author_of(said):
@@ -903,13 +925,13 @@ class Handler(BaseHTTPRequestHandler):
             replies = found["replies"] if found is not None else []
             if found is None:
                 refused = f"no comment numbered {order.get('seq')}"
-            elif index is None and found.get("who"):
+            elif index is None and found.get("who") and found["who"] != reader():
                 refused = f"comment {found['seq']} is {found['who']}'s word, written on the pull request"
             elif index is None:
                 said = found
             elif not 0 <= index < len(replies):
                 refused = f"comment {found['seq']} has no reply {index}"
-            elif replies[index]["who"] not in ("you", "session"):
+            elif replies[index]["who"] not in ("you", "session", reader()):
                 refused = f"reply {index} of comment {found['seq']} is {replies[index]['who']}'s word, not this desk's"
             else:
                 said = replies[index]
@@ -996,7 +1018,7 @@ class Handler(BaseHTTPRequestHandler):
         if last_only and not replies:
             self._json({"ok": False, "error": "nothing has been said in answer to it"})
             return
-        if not last_only and found.get("who"):
+        if not last_only and found.get("who") and found["who"] != reader():
             self._json({"ok": False, "error": f"comment {seq} is {found['who']}'s word, written on the pull request"})
             return
         # Newest first, so the comment that opened the thread is the last to go.
