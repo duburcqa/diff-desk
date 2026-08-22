@@ -106,8 +106,15 @@ def read(page, seq):
 
 
 def wide(page):
-    """The card of the file no test comments on, which is where a drag finds rows with nothing hanging between them."""
-    return page.locator("section.file[data-path='wide.py']")
+    """The card of the file no test comments on, which is where a drag finds rows with nothing hanging between them.
+
+    Brought into view first: the page holds the lines of what the reader is near, so a card far down the review has its
+    header and nothing else until somebody goes to it.
+    """
+    card = page.locator("section.file[data-path='wide.py']")
+    card.scroll_into_view_if_needed()
+    card.locator("tr[data-line]").first.wait_for()
+    return card
 
 
 def submit(page, text):
@@ -1749,9 +1756,11 @@ def test_a_comment_does_not_shift_the_columns_of_the_diff_it_hangs_under(page, d
 
     # The page redraws itself while it is read, and a comment sized to nothing would fill the table and move every
     # column under it.
+    # Read off the card the comment hangs in, since which cards hold their lines at a given moment is the reader's
+    # position rather than the diff's shape.
     widths = page.evaluate(
         """async () => {
-          const gutter = () => Math.round(document.querySelector('section.file[data-open="true"] td.ln')
+          const gutter = () => Math.round(document.querySelector('section.file[data-path="sample.py"] td.ln')
             .getBoundingClientRect().width);
           const seen = [gutter()];
           render();
@@ -1770,10 +1779,12 @@ def test_a_comment_does_not_shift_the_columns_of_the_diff_it_hangs_under(page, d
     # frame by frame, since what this costs the reader is one flash of a diff laid out wrongly.
     folded = page.evaluate(
         """async () => {
-          const card = document.querySelector('section.file[data-open="true"]');
+          const card = document.querySelector('section.file[data-path="sample.py"]');
+          // The card's own shape, since the height of the page also answers for what its neighbours are holding at
+          // the moment it is read, and what is asked here is what this card does with its comment.
           const shape = () => {
             const cell = card.querySelector('td.ln').getBoundingClientRect();
-            return `${Math.round(cell.width)}|${Math.round(document.documentElement.scrollHeight)}`;
+            return `${Math.round(cell.width)}|${Math.round(card.getBoundingClientRect().height)}`;
           };
           const was = shape();
           card.dataset.open = "false";
@@ -2075,11 +2086,17 @@ def test_a_file_holding_an_unread_comment_opens_itself(page, desk):
     assert page.locator(f"#note-{made} .thread.folded").count() == 0
     assert "settled before you saw it" in page.locator(f"#note-{made}").inner_text()
 
-    # Read now, so the file closes again, and the thread stays as wide open as the reader left it: what settled it
-    # was the session, and a resolution they did not make here folds nothing.
+    # Read now, so the file closes again - and it holds its header alone until something asks for its lines.
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
-    assert page.locator("section.file[data-path='added.py']").get_attribute("data-open") == "false"
+    card = page.locator("section.file[data-path='added.py']")
+    assert card.get_attribute("data-open") == "false"
+    assert card.locator(".body table").count() == 0
+
+    # Opened again, the thread is as wide open as the reader left it: what settled it was the session, and a resolution
+    # they did not make here folds nothing.
+    card.locator(".filehead .grow").click()
+    page.wait_for_selector(f"#note-{made} .thread")
     assert page.locator(f"#note-{made} .thread.done").count() == 1
     assert page.locator(f"#note-{made} .thread.folded").count() == 0
     page.locator("section.file[data-path='added.py'] input[type=checkbox]").uncheck()

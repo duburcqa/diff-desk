@@ -86,6 +86,12 @@ On the page:
 
   A resolution is believed only when GitHub reports the thread as resolved, so a send that could not be made says so on
   the thread rather than reading as agreement nobody else can see.
+- **A review is held a screenful at a time.** Every file keeps its header; the lines of one are built when you come
+  within reach of it and let go once you are well past, and a card that has been let go stands at the height its lines
+  measured, so nothing under you moves as you read. A six-thousand-line review is 5,700 nodes rather than 218,000, opens
+  in half a second rather than seven, and redraws in 50 ms rather than two seconds. What it costs: the browser's own
+  search reaches the files you are near rather than every file at once, and a comment reached from the panel builds the
+  file it hangs in on the way.
 - **Copying a selection gives the code alone** - no line numbers, no `+`/`-` markers, indentation intact - so a snippet
   lifted out of a diff pastes straight into an editor. A selection inside a single line copies as the browser made it.
 - **Code stays code.** A fenced block keeps its indentation as a code block, backticks stay inline code, and line

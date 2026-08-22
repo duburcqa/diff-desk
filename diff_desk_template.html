@@ -1366,6 +1366,8 @@
     card.dataset.reveal = "true";
     folds.set(note.path, { digest: card.dataset.digest, open: true, upTo: latest() });
     els.log.dataset.open = "false";
+    // The lines of a file the reader was nowhere near are built for this, since the thread hangs among them.
+    settleBody(card);
     // A remark about the file as a whole hangs under its header rather than on a row, so it is found by the seq it
     // carries either way.
     const thread =
@@ -2454,6 +2456,8 @@
     fresh.dataset.open = old.dataset.open;
     clearSel();
     old.replaceWith(fresh);
+    settleBody(fresh);
+    nearby.observe(fresh);
   }
 
   const lastNumbered = (rows) => [...rows].reverse().find((row) => row[0] !== "h" && row[2] > 0);
@@ -2819,7 +2823,10 @@
       els.main.append(empty);
       return;
     }
+    nearby.disconnect();
     shown.forEach((file, index) => els.main.append(card(file, index)));
+    settleNear();
+    for (const wrap of els.main.querySelectorAll("section.file")) nearby.observe(wrap);
     fitNotes();
     markCurrent();
     paintSel();
@@ -2833,6 +2840,31 @@
       if (room) body.style.setProperty("--seen", `${Math.round(room)}px`);
     }
   }
+
+  // A review is read a screenful at a time, so that is what the page holds: every file keeps its header, and the lines
+  // of one are built when the reader comes within reach of it and let go once they are well past. A card let go keeps
+  // the height it had, so nothing under the reader moves as they go.
+  const drawn = new WeakMap();
+  const NEAR = 1.5;
+  // What a file's lines take up, so a card whose lines are not built still stands as tall as it will: without it the
+  // page grows under the reader as they go, and the scrollbar means nothing until they have been everywhere.
+  const heights = new Map();
+  let rowRoom = 0;
+
+  function roomPerRow() {
+    if (!rowRoom) {
+      const row = document.querySelector("table tr[data-line]");
+      rowRoom = row ? row.getBoundingClientRect().height : 0;
+    }
+    // Before a single row has been built there is nothing to measure, so a row's own line height stands in for it.
+    return rowRoom || 18;
+  }
+
+  const roomForLines = (file) => Math.round(file.lines.length * roomPerRow());
+
+  const nearby = new IntersectionObserver((entries) => {
+    for (const entry of entries) settleBody(entry.target);
+  }, { rootMargin: `${Math.round(NEAR * 100)}% 0px` });
 
   // What each file's body can actually show, and how far it has been scrolled: together they keep every comment on
   // screen whatever the width of the diff it hangs under.
@@ -2912,6 +2944,7 @@
     const fold = () => {
       wrap.dataset.open = wrap.dataset.open === "true" ? "false" : "true";
       folds.set(file.path, { digest: file.digest, open: wrap.dataset.open === "true", upTo: latest() });
+      settleBody(wrap);
       fitNotes();
     };
     grow.addEventListener("click", fold);
@@ -3003,8 +3036,21 @@
 
     const body = document.createElement("div");
     body.className = "body";
+    // As tall as its lines will be, until they are built and it is exactly as tall as they are.
+    if (!file.binary) body.style.minHeight = `${heights.get(file.path) || roomForLines(file)}px`;
     roomFor.observe(body);
     body.addEventListener("scroll", () => follow(body), { passive: true });
+    wrap.append(body);
+    // What this card is of, so the lines can be built into it when the reader comes near and dropped when they leave.
+    drawn.set(wrap, { file, index });
+    return wrap;
+  }
+
+  function fillBody(wrap, file, index) {
+    const body = wrap.querySelector(":scope > .body");
+    if (!body || body.dataset.filled === "true") return;
+    body.dataset.filled = "true";
+    body.style.minHeight = "";
     if (file.binary) {
       const note = document.createElement("div");
       note.className = "empty";
@@ -3155,8 +3201,49 @@
       table.append(tbody);
       body.append(table);
     }
-    wrap.append(body);
-    return wrap;
+  }
+
+  function releaseBody(wrap) {
+    const body = wrap.querySelector(":scope > .body");
+    if (!body || body.dataset.filled !== "true") return;
+    // The height it had stands in for the lines let go of, so the scrollbar says the same thing before and after.
+    const held = Math.round(body.getBoundingClientRect().height);
+    const of = drawn.get(wrap);
+    if (held && of) {
+      // What it measured while it was built, which is what it stands at from now on however often it comes and goes.
+      heights.set(of.file.path, held);
+      body.style.minHeight = `${held}px`;
+    }
+    delete body.dataset.filled;
+    body.replaceChildren();
+  }
+
+  function nearReader(wrap) {
+    const room = window.innerHeight * NEAR;
+    const box = wrap.getBoundingClientRect();
+    return box.bottom > -room && box.top < window.innerHeight + room;
+  }
+
+  function settleBody(wrap) {
+    const held = drawn.get(wrap);
+    if (!held) return;
+    if (wrap.dataset.open === "true" && nearReader(wrap)) fillBody(wrap, held.file, held.index);
+    else releaseBody(wrap);
+  }
+
+  function settleNear() {
+    const cards = [...document.querySelectorAll("section.file")];
+    for (const wrap of cards) settleBody(wrap);
+    // Reserved after the near ones are built, since what a row takes up is read off a row: reserving before there is
+    // one to measure leaves the page taller than it turns out to be, and shrinking under the reader as they go.
+    for (const wrap of cards) reserve(wrap);
+  }
+
+  function reserve(wrap) {
+    const of = drawn.get(wrap);
+    const body = wrap.querySelector(":scope > .body");
+    if (!of || !body || body.dataset.filled === "true" || of.file.binary) return;
+    body.style.minHeight = `${heights.get(of.file.path) || roomForLines(of.file)}px`;
   }
 
   function fileEntry(file, index) {

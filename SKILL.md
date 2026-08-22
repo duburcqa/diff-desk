@@ -86,6 +86,9 @@ after they sent a thread waits for them to send it again - a resolution too: clo
 
 - A comment range may cover removed and added lines together. It is anchored to the added side when the range touches
   it, so `side`/`line`/`endLine` are always expressible as a GitHub line range.
+- The page holds the files the reader is near: a file further off keeps its header and stands at the height its lines
+  will take, and its rows are built when they come within reach. So a query about what is in the DOM is a question about
+  where the reader is standing, and a test reaching into a distant file scrolls to it first.
 - A batch is a submission, not a grouping of comments: it says which review a remark went out in, and a reply belongs to
   its thread and carries no batch at all. The Comments panel therefore reads either way - by batch, or by what moved
   last, which is where an answer written into an old thread is found.
