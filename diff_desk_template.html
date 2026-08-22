@@ -576,6 +576,8 @@
   .thread.folded .said { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
   .thread.done > .line:first-child .said { color: var(--muted); }
   .thread .reply { padding-left: 10px; border-left: 1px solid var(--rule-strong); }
+  /* The number a thread is referred to by is not the place it sits at, so the two are not said in one voice. */
+  .thread .who .seq { color: var(--faint); }
   .thread .reply.session .who { color: var(--accent); }
   .thread .reply.you .who { color: var(--add-ink); }
   .thread .reply:not(.you):not(.session) .who { color: var(--stale); }
@@ -634,7 +636,7 @@
     display: none;
     flex-direction: column;
     gap: 8px;
-    width: min(560px, calc(100vw - 40px));
+    width: min(680px, calc(100vw - 40px));
     max-height: min(70vh, 620px);
     padding: 12px;
     background: var(--surface);
@@ -886,8 +888,8 @@
     <label class="seen" id="logorder" title="Read the list by the submission each remark went out in, or by what moved last">
       <span>Sort</span>
       <select id="logsort">
-        <option value="batch">by batch</option>
-        <option value="recent">by what moved last</option>
+        <option value="batch">batch</option>
+        <option value="recent">recent</option>
       </select>
     </label>
     <label class="seen" id="logshow" title="List what is resolved, and include it when syncing with the pull request">
@@ -898,10 +900,10 @@
   </div>
   <div class="rows" id="logrows"></div>
   <div class="actions">
-    <button class="solid" id="logretry" title="Post the comments bound for the pull request whose post did not land">Retry sync failures</button>
-    <button class="ghost" id="logbind" title="Aim the comments kept local at the pull request, and send them">Send the local ones too</button>
-    <button class="ghost" id="logsend" title="Send again every thread the pull request already holds, as each now reads">Sync the threads on the PR</button>
-    <button class="ghost" id="logsync" title="Bring back what the pull request holds">Sync all with the PR</button>
+    <button class="solid" id="logretry" title="Post again the comments bound for the pull request whose post did not land">Retry failures</button>
+    <button class="ghost" id="logbind" title="Aim the comments kept local at the pull request, and send them">Send local</button>
+    <button class="ghost" id="logsend" title="Send again every thread the pull request already holds, as each now reads">Sync threads</button>
+    <button class="ghost" id="logsync" title="Bring back the replies, resolutions and comments the pull request holds">Bring back</button>
     <span class="status" id="logresult"></span>
   </div>
 </div>
@@ -1420,7 +1422,7 @@
     where.textContent = `${note.path.split("/").pop()} ${span(note)}`;
     const said = document.createElement("span");
     said.className = "said";
-    said.textContent = note.text.split("\n")[0].slice(0, 90);
+    said.textContent = outline(note.text).slice(0, 90);
     item.append(where, said);
     for (const [label, kind] of [
       [note.github === "none" ? "local only" : GITHUB_MARK[note.github], note.github],
@@ -1710,9 +1712,48 @@
     posted: "on the PR",
   };
 
-  const outline = (text) =>
+  // A badge, a subscript, a line break: the little that carries no meaning of its own in what a pull request holds.
+  // Anything else stays as it was typed, since a passage somebody pasted is read as the passage they pasted.
+  const spoken = (text) =>
     String(text)
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<img[^>]*\balt="([^"]*)"[^>]*>/gi, "$1")
+      .replace(/<\/?(?:sub|sup)\s*\/?>/gi, "");
+
+  function phrase(into, text) {
+    // Bold as bold, a link as a link, and a badge as the word it stands for: assembled as nodes, so nothing said on a
+    // pull request can become part of this page.
+    for (const piece of text.split(/(!?\[[^\]\n]*\]\([^)\s]+\)|\*\*[^*\n]+\*\*)/)) {
+      if (!piece) continue;
+      const badge = piece.match(/^!\[([^\]\n]*)\]\([^)\s]+\)$/);
+      const link = piece.match(/^\[([^\]\n]*)\]\(([^)\s]+)\)$/);
+      const bold = piece.match(/^\*\*([^*\n]+)\*\*$/);
+      if (badge) {
+        const word = badge[1].replace(/\s*badge$/i, "").trim();
+        if (word) into.append(document.createTextNode(word));
+      } else if (link) {
+        const anchor = document.createElement("a");
+        anchor.href = /^https?:\/\//i.test(link[2]) ? link[2] : "#";
+        anchor.target = "_blank";
+        anchor.rel = "noopener noreferrer";
+        anchor.textContent = link[1] || link[2];
+        into.append(anchor);
+      } else if (bold) {
+        // Read on: a heading from a pull request carries its badge inside the bold rather than beside it.
+        const strong = document.createElement("strong");
+        phrase(strong, bold[1]);
+        into.append(strong);
+      } else {
+        into.append(document.createTextNode(piece));
+      }
+    }
+  }
+
+  const outline = (text) =>
+    spoken(text)
       .replace(/```[a-z0-9+#-]*/gi, " ")
+      .replace(/!?\[([^\]\n]*)\]\([^)\s]+\)/g, "$1")
+      .replace(/\*\*/g, "")
       .replace(/`/g, "")
       .replace(/\s+/g, " ")
       .trim();
@@ -1752,7 +1793,7 @@
         }
         // A run of quoted lines is what a reply looks like when it answers a passage: shown as the passage it quotes,
         // set apart from the words answering it, rather than as the marks that were typed.
-        for (const [quoted, part] of quotes(chunk)) {
+        for (const [quoted, part] of quotes(spoken(chunk))) {
           const into = quoted ? host.appendChild(document.createElement("blockquote")) : host;
           for (const piece of part.split(/(`[^`\n]+`)/)) {
             if (!piece) continue;
@@ -1761,7 +1802,7 @@
               code.textContent = piece.slice(1, -1);
               into.append(code);
             } else {
-              into.append(document.createTextNode(piece));
+              phrase(into, piece);
             }
           }
         }
@@ -1798,9 +1839,16 @@
     const who = document.createElement("span");
     who.className = "who";
     // The number a session refers to a comment by, right where the comment is: "[58]" in an answer means this thread.
-    // A remark brought in from the pull request says whose it is, since every other one on the page is the reader's.
-    const from = note.who ? ` ${note.who}` : "";
-    who.textContent = note.pending ? `${span(note)} pending` : `[${note.seq}] ${span(note)}${from}`;
+    if (note.pending) {
+      who.textContent = `${span(note)} pending`;
+    } else {
+      const numbered = document.createElement("span");
+      numbered.className = "seq";
+      numbered.textContent = `[${note.seq}]`;
+      who.append(numbered, document.createTextNode(` ${span(note)}`));
+      // Who opened a thread is worth having and rarely worth reading, so it is said on hovering rather than in the line.
+      if (note.who) who.title = `${note.who} wrote it on the pull request`;
+    }
     const text = document.createElement("span");
     text.className = "said";
     written(text, note.text);

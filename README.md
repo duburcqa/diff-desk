@@ -79,14 +79,13 @@ On the page:
   from the bottom of the page carrying the reason, and it stays until dismissed - the panel it happened in is often
   closed. Pressing **Refresh** is acknowledged the same way: the button reports that it is collecting and refuses a
   second press until it is done.
-- **Sync all with the PR** carries replies both ways: what was written here is posted into the thread it belongs to, what
-  was written there is brought back and shown with its author. Resolution travels both ways too - a thread resolved on
-  the pull request is closed here, since that is the copy everyone else reads, and one closed here is resolved there.
-  Syncing twice sends nothing twice.
+- **Bring back** collects what the pull request holds: replies written there, arriving with their author, its word on
+  what is resolved, and the threads opened there that this desk has none of. It asks for nothing in return - a resolution
+  a thread there is holding closes it here, since that is the copy everyone else reads, and one closed here waits to be
+  sent. Bringing back twice brings nothing back twice.
 
-  What the pull request says decides, every time: a comment this desk believed resolved there is resolved for real if
-  its thread is still open, and one whose thread cannot be found is owed a resolution again rather than left claiming
-  one. A resolution is believed only when GitHub reports the thread as resolved.
+  A resolution is believed only when GitHub reports the thread as resolved, so a send that could not be made says so on
+  the thread rather than reading as agreement nobody else can see.
 - **Copying a selection gives the code alone** - no line numbers, no `+`/`-` markers, indentation intact - so a snippet
   lifted out of a diff pastes straight into an editor. A selection inside a single line copies as the browser made it.
 - **Code stays code.** A fenced block keeps its indentation as a code block, backticks stay inline code, and line

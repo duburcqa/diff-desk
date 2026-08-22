@@ -226,8 +226,8 @@ def sync(args):
     if not outcome.get("ok"):
         sys.exit(outcome.get("error", "the sync was refused"))
     print(
-        f"sent {outcome['sent']} reply(ies), brought {outcome['brought']} back, "
-        f"closed {outcome['closed']} here, resolved {outcome['resolved']} there"
+        f"brought {outcome['brought']} reply(ies) back, took {outcome['took']} comment(s) in, "
+        f"closed {outcome['closed']} here"
     )
 
 

@@ -414,6 +414,22 @@ def test_a_comment_keeps_its_code_and_its_line_breaks(page, desk):
     assert page.locator(".thread b").count() == 0
     assert page.locator(".thread .said", has_text="<b>bold</b>").count() >= 1
 
+    # What a pull request holds is read for what it says: a badge for the word it stands for, a heading in bold, and the
+    # subscripts that carried the picture gone. The address it was fetched from is never asked for from this page.
+    reported = (
+        "**<sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow)</sub></sub> Mind the shift**\n\nsaid why."
+    )
+    desk.post(
+        "/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": reported}]
+    )
+    page.reload(wait_until="load")
+    page.wait_for_selector("section.file")
+    told = page.locator(".thread .said", has_text="Mind the shift").first
+    assert told.locator("strong").inner_text() == "P2 Mind the shift"
+    assert page.locator(".thread img").count() == 0
+    for markup in ("<sub>", "![", "shields.io", "**"):
+        assert markup not in told.inner_text()
+
 
 def test_a_local_comment_can_be_turned_towards_the_pull_request(page, desk):
     branch = page.evaluate("() => data.branches[0].ref")
@@ -2240,10 +2256,12 @@ def test_a_comment_written_on_the_pull_request_shows_whose_it_is_and_is_answered
         page.evaluate("() => loadNotes()")
         page.wait_for_selector(f"#note-{seq}")
 
-        # Every other comment on the page is the reader's, so this one says whose it is, and offers the answer rather
-        # than the rewording: the remark is its author's word on the copy everyone reads.
+        # Read like any other, and answered rather than reworded: the remark is its author's word on the copy everyone
+        # reads, so the page offers the reply and withholds what would put words in their mouth.
         head = page.locator(f"#note-{seq} .thread > .line").first
-        assert "Milotrince" in head.locator(".who").inner_text()
+        assert head.locator(".who .seq").inner_text() == f"[{seq}]"
+        # Whose remark it is: kept for the asking, since it hardly ever changes what the reader does with it.
+        assert "Milotrince" in head.locator(".who").get_attribute("title")
         assert head.locator("button.tiny").filter(has_text="Edit").count() == 0
         assert head.locator("button.drop").count() == 0
         assert page.locator(f"#note-{seq} .actions button.ghost").filter(has_text="Reply").count() == 1

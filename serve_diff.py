@@ -529,11 +529,11 @@ def brought_in(thread, order, ref):
         "anchor": "",
         "text": said[0]["body"],
         "who": author_of(said[0]),
-        "at": said[0]["createdAt"],
+        "at": said_at(said[0]),
         "state": "resolved" if thread["isResolved"] else "open",
         "github": "posted",
         "replies": [
-            {"who": author_of(answer), "text": answer["body"], "at": "on the PR", "github": "posted"}
+            {"who": author_of(answer), "text": answer["body"], "at": said_at(answer), "github": "posted"}
             for answer in said[1:]
         ],
         "edits": [],
@@ -561,6 +561,11 @@ def take_in(rows, arriving, order, ref):
     return taken
 
 
+def said_at(said):
+    """When one comment of the pull request was written, to the minute, which is as fine as a foreign thread needs."""
+    return (said.get("createdAt") or "").replace("T", " ")[:16]
+
+
 def author_of(said):
     """Who wrote one comment on the pull request, or that it came from there when GitHub names nobody."""
     return (said.get("author") or {}).get("login") or "github"
@@ -570,7 +575,7 @@ def incoming(row, said):
     """The replies the thread holds that this desk does not, as replies of its own."""
     ours = {answer["text"] for answer in row.get("replies", [])} | {row["text"]}
     return [
-        {"who": author_of(answer), "text": answer["body"], "at": "on the PR", "github": "posted"}
+        {"who": author_of(answer), "text": answer["body"], "at": said_at(answer), "github": "posted"}
         for answer in said[1:]
         if answer["body"] not in ours
     ]

@@ -1580,3 +1580,91 @@ def test_sending_a_thread_carries_what_it_holds_and_leaves_what_comes_after(desk
     assert any("said after the send" in call for call in desk.github_calls())
     row = {row["seq"]: row for row in desk.get("/comments")}[seq]
     assert [answer["github"] for answer in row["replies"]] == ["posted", "posted"]
+
+
+def test_the_sync_command_says_what_it_brought_back(desk):
+    made = desk.post(
+        "/comments",
+        {
+            "comments": [{"branch": "feature", "path": "sample.py", "line": 46, "side": "new", "text": "told at the"}],
+            "github": True,
+        },
+    )
+    seq = made["seqs"][0]
+    desk.github_answers(out=json.dumps({"html_url": "https://github.com/x/y/pull/33#review-1"}))
+    assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 33, "seq": [seq]})["ok"]
+
+    ours = {
+        "id": "T_told",
+        "isResolved": False,
+        "path": "sample.py",
+        "line": 46,
+        "startLine": None,
+        "originalLine": 46,
+        "originalStartLine": None,
+        "diffSide": "RIGHT",
+        "comments": {
+            "nodes": [
+                {
+                    "databaseId": 990,
+                    "body": "told at the",
+                    "path": "sample.py",
+                    "createdAt": "2026-08-22T09:00:00Z",
+                    "author": {"login": "duburcqa"},
+                },
+                {
+                    "databaseId": 991,
+                    "body": "answered there",
+                    "path": "sample.py",
+                    "createdAt": "2026-08-22T09:05:00Z",
+                    "author": {"login": "someone"},
+                },
+            ]
+        },
+    }
+    theirs = {
+        "id": "T_theirs",
+        "isResolved": False,
+        "path": "sample.py",
+        "line": 47,
+        "startLine": None,
+        "originalLine": 47,
+        "originalStartLine": None,
+        "diffSide": "RIGHT",
+        "comments": {
+            "nodes": [
+                {
+                    "databaseId": 992,
+                    "body": "written over there",
+                    "path": "sample.py",
+                    "createdAt": "2026-08-22T09:10:00Z",
+                    "author": {"login": "someone"},
+                }
+            ]
+        },
+    }
+    desk.github_answers(
+        rules=[
+            {"match": "repos/someone/somewhere --jq", "out": "someone/somewhere"},
+            {
+                "match": "pr list",
+                "out": json.dumps([{"number": 33, "url": "u", "title": "t", "headRefName": "feature"}]),
+            },
+            {
+                "match": "reviewThreads",
+                "out": json.dumps(
+                    {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": [ours, theirs]}}}}}
+                ),
+            },
+        ]
+    )
+    gen_diff_data.run(desk.repo, "remote", "add", "origin", "https://github.com/someone/somewhere.git")
+    try:
+        assert desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": ["feature"]})["ok"]
+        told = desk.cli("sync").communicate(timeout=60)[0]
+    finally:
+        gen_diff_data.run(desk.repo, "remote", "remove", "origin")
+        desk.github_answers(code=1, err="gh: Not Found (HTTP 404)")
+        desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": ["feature"]})
+    assert "brought 1 reply(ies) back" in told
+    assert "took 1 comment(s) in" in told
