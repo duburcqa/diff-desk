@@ -1768,7 +1768,9 @@
     const who = document.createElement("span");
     who.className = "who";
     // The number a session refers to a comment by, right where the comment is: "[58]" in an answer means this thread.
-    who.textContent = note.pending ? `${span(note)} pending` : `[${note.seq}] ${span(note)}`;
+    // A remark brought in from the pull request says whose it is, since every other one on the page is the reader's.
+    const from = note.who ? ` ${note.who}` : "";
+    who.textContent = note.pending ? `${span(note)} pending` : `[${note.seq}] ${span(note)}${from}`;
     const text = document.createElement("span");
     text.className = "said";
     written(text, note.text);
@@ -1795,7 +1797,7 @@
       row.append(cell);
       return row;
     }
-    if (note.pending || notes.live) {
+    if ((note.pending || notes.live) && !note.who) {
       const change = document.createElement("button");
       change.className = "tiny";
       change.textContent = "Edit";
@@ -1885,7 +1887,7 @@
         render();
       });
       head.append(drop);
-    } else if (notes.live) {
+    } else if (notes.live && !note.who) {
       const posted = note.github === "posted";
       drop.title = posted ? "Delete this comment, here and on the pull request" : "Delete this comment";
       drop.addEventListener("click", async () => {

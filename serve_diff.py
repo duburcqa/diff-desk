@@ -20,7 +20,8 @@ Endpoints, all on 127.0.0.1 so nothing is exposed off the machine:
   POST /publish               {repo, pr, summary, seq, resolved} - post those comments as one review; everything owed
                               when seq is omitted, which is how a post that did not land is retried
   POST /close                 {repo, pr} - resolve, on the pull request, the threads of comments closed here
-  POST /sync                  {repo, pr} - carry replies both ways and take the pull request's word on what is resolved
+  POST /sync                  {repo, pr} - carry replies both ways, take the pull request's word on what is resolved,
+                              and record the comments written there that this desk has none of
 
 Deleting is the one thing that does discard: a dropped comment leaves the page and every exchange with the pull
 request, and a dropped reply is gone from the thread. What was posted is deleted on the pull request first, so a
@@ -30,7 +31,9 @@ A comment settled here stays here: posting and carrying replies leave it out unl
 remark already answered has no business arriving on the pull request. Resolving a thread that is already there is a
 different matter, and always proceeds.
 
-A comment is a thread: the reviewer's remark plus replies from either side, each stamped with who wrote it. A reply
+A comment is a thread: a remark plus replies from either side, each stamped with who wrote it. The remark is the
+reviewer's own unless a sync brought it in from the pull request, in which case it carries the author who wrote it there
+and stays their word: this desk answers and resolves it, and leaves its wording and its existence to them. A reply
 leaves the thread open; only resolving closes it, either side may do so, and a resolved thread keeps its text and every
 reply - closing it hides nothing and deletes nothing. Rewriting a comment, or any reply written here, keeps every
 earlier wording under `edits`, and one already posted is flagged as having moved on from what the pull request holds
@@ -110,11 +113,18 @@ THREADS = """
 query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
+      headRefName
       reviewThreads(first: 100) {
         nodes {
           id
           isResolved
-          comments(first: 50) { nodes { databaseId body path author { login } } }
+          path
+          line
+          startLine
+          originalLine
+          originalStartLine
+          diffSide
+          comments(first: 50) { nodes { databaseId body path createdAt author { login } } }
         }
       }
     }
@@ -141,14 +151,15 @@ class Owing(NamedTuple):
 
 
 def review_threads(repo, number):
-    """Every review thread of a pull request, or nothing and the reason it could not be read."""
+    """Every review thread of a pull request and the ref it is opened on, or nothing and why it could not be read."""
     owner, _, name = repo.partition("/")
     variables = ["-F", f"owner={owner}", "-F", f"name={name}", "-F", f"number={number}"]
     done = gen_diff_data.gh("api", "graphql", "-f", f"query={THREADS}", *variables, repeatable=True)
     if done.returncode != 0:
         return None, " ".join((done.stderr or done.stdout).split())[:300]
     try:
-        return json.loads(done.stdout)["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"], ""
+        pull = json.loads(done.stdout)["data"]["repository"]["pullRequest"]
+        return Reviewed(pull["reviewThreads"]["nodes"], pull.get("headRefName") or f"#{number}"), ""
     except (KeyError, TypeError, json.JSONDecodeError) as error:
         return None, f"the pull request's threads could not be read: {type(error).__name__}"
 
@@ -305,6 +316,13 @@ def delete_comment(repo, comment):
     return True, ""
 
 
+class Reviewed(NamedTuple):
+    """What a pull request answers about its review: every thread, and the ref they are opened on."""
+
+    threads: list
+    ref: str
+
+
 class Owed(NamedTuple):
     """What one comment and its thread owe each other, worked out before any of it is asked of GitHub."""
 
@@ -430,11 +448,69 @@ def carry_replies(row, said):
     return landed, sending
 
 
+def brought_in(thread, order, ref):
+    """One review thread this desk has no record of, as a comment of its own.
+
+    Recorded as posted, which it is: replies, resolution and deletion all find their thread by the text that opened it,
+    so a comment written on the pull request travels the same way as one written here. It carries its author, which is
+    what tells the reader whose remark it is and keeps this desk from rewriting somebody else's words.
+
+    A thread whose lines the diff no longer holds is placed by the lines it was written against; one the pull request
+    reports no line for at all is a remark on the file.
+    """
+    said = thread["comments"]["nodes"]
+    line = thread["line"] or thread["originalLine"]
+    return {
+        "branch": ref,
+        "review": f"#{order['pr']}",
+        "prRepo": order["repo"],
+        "prNumber": order["pr"],
+        "path": thread["path"],
+        "line": thread["startLine"] or thread["originalStartLine"] or line,
+        "endLine": line,
+        "side": ("new" if thread["diffSide"] == "RIGHT" else "old") if line else "file",
+        "anchor": "",
+        "text": said[0]["body"],
+        "who": author_of(said[0]),
+        "at": said[0]["createdAt"],
+        "state": "resolved" if thread["isResolved"] else "open",
+        "github": "posted",
+        "replies": [{"who": author_of(answer), "text": answer["body"], "at": "on the PR"} for answer in said[1:]],
+        "edits": [],
+        "prResolve": "done" if thread["isResolved"] else "none",
+    }
+
+
+def take_in(rows, arriving, order, ref):
+    """Record every thread of the pull request this desk has no record of, and answer with the comments they became.
+
+    Numbered as any comment written here is, and all of one sync under one batch, which is what groups them as the
+    reading they arrived from.
+    """
+    seq = max((row.get("seq", 0) for row in rows), default=0)
+    group = max((row.get("batch", 0) for row in rows), default=0) + 1
+    taken = []
+    for thread in arriving:
+        seq += 1
+        note = brought_in(thread, order, ref)
+        note["seq"], note["batch"] = seq, group
+        rows.append(note)
+        # Somebody else's remark, so it is news for this side just as a reply brought back from there is.
+        touched(rows, note, "you")
+        taken.append(note)
+    return taken
+
+
+def author_of(said):
+    """Who wrote one comment on the pull request, or that it came from there when GitHub names nobody."""
+    return (said.get("author") or {}).get("login") or "github"
+
+
 def incoming(row, said):
     """The replies the thread holds that this desk does not, as replies of its own."""
     ours = {answer["text"] for answer in row.get("replies", [])} | {row["text"]}
     return [
-        {"who": (answer.get("author") or {}).get("login") or "github", "text": answer["body"], "at": "on the PR"}
+        {"who": author_of(answer), "text": answer["body"], "at": "on the PR"}
         for answer in said[1:]
         if answer["body"] not in ours
     ]
@@ -753,8 +829,8 @@ class Handler(BaseHTTPRequestHandler):
 
         A reply is named by its place in the thread, which is how the page and a drop already address one, so `reply` 0
         is the first answer and no `reply` at all is the remark that opened the thread. Only what was written here can
-        be reworded: a reply carried back from the pull request is somebody else's word, and rewriting it would put
-        words in their mouth on the one copy everyone reads.
+        be reworded: a reply carried back from the pull request, and a remark brought in from it, are somebody else's
+        word, and rewriting either would put words in their mouth on the one copy everyone reads.
         """
         order = self._body()
         text = (order.get("text") or "").strip()
@@ -768,6 +844,8 @@ class Handler(BaseHTTPRequestHandler):
             replies = found["replies"] if found is not None else []
             if found is None:
                 refused = f"no comment numbered {order.get('seq')}"
+            elif index is None and found.get("who"):
+                refused = f"comment {found['seq']} is {found['who']}'s word, written on the pull request"
             elif index is None:
                 said = found
             elif not 0 <= index < len(replies):
@@ -837,7 +915,8 @@ class Handler(BaseHTTPRequestHandler):
 
         GitHub deletes a review comment whether or not anything answered it, and every reply is a comment of its own, so
         what this desk put there is deleted newest first. Replies written on the pull request itself are left alone, and
-        a thread still holding one of them stays there with what remains.
+        a thread still holding one of them stays there with what remains. A remark brought in from the pull request goes
+        no further than its own replies: the thread is its author's, and this desk answers in it rather than clears it.
 
         The pull request goes first: a deletion that could not be made there leaves the comment here untouched, so the
         two copies never disagree about what is still said.
@@ -855,21 +934,24 @@ class Handler(BaseHTTPRequestHandler):
         if last_only and not replies:
             self._json({"ok": False, "error": "nothing has been said in answer to it"})
             return
+        if not last_only and found.get("who"):
+            self._json({"ok": False, "error": f"comment {seq} is {found['who']}'s word, written on the pull request"})
+            return
         # Newest first, so the comment that opened the thread is the last to go.
         going = (
             [replies[-1]["text"]] if last_only else [answer["text"] for answer in reversed(replies)] + [found["text"]]
         )
         gone = 0
         if found.get("github") == "posted" and order.get("repo") and order.get("pr"):
-            threads, trouble = review_threads(order["repo"], order["pr"])
-            if threads is None:
+            reviewed, trouble = review_threads(order["repo"], order["pr"])
+            if reviewed is None:
                 print(f"DROP FAILED {trouble}", flush=True)
                 self._json({"ok": False, "error": trouble})
                 return
             thread = next(
                 (
                     node
-                    for node in threads
+                    for node in reviewed.threads
                     if node["comments"]["nodes"] and node["comments"]["nodes"][0]["body"] == found["text"]
                 ),
                 None,
@@ -983,8 +1065,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True, "closed": 0, "owed": 0})
             return
         wanted = {row["seq"] for row in owed}
-        threads, trouble = review_threads(order["repo"], order["pr"])
-        if threads is None:
+        reviewed, trouble = review_threads(order["repo"], order["pr"])
+        if reviewed is None:
             with changing() as fresh:
                 for row in fresh:
                     if row["seq"] in wanted:
@@ -994,7 +1076,7 @@ class Handler(BaseHTTPRequestHandler):
             print(f"CLOSE FAILED {trouble}", flush=True)
             self._json({"ok": False, "error": trouble, "closed": 0, "owed": len(owed)})
             return
-        outcome = close_threads(order["repo"], order["pr"], owed, threads)
+        outcome = close_threads(order["repo"], order["pr"], owed, reviewed.threads)
         closed = len([seq for seq, (state, _) in outcome.items() if state == "done"])
         with changing() as fresh:
             for row in fresh:
@@ -1017,8 +1099,8 @@ class Handler(BaseHTTPRequestHandler):
         comment that opened it, which is the text this desk posted.
         """
         order = self._body()
-        threads, trouble = review_threads(order["repo"], order["pr"])
-        if threads is None:
+        reviewed, trouble = review_threads(order["repo"], order["pr"])
+        if reviewed is None:
             print(f"SYNC FAILED {trouble}", flush=True)
             self._json({"ok": False, "error": trouble})
             return
@@ -1030,10 +1112,14 @@ class Handler(BaseHTTPRequestHandler):
             if row.get("github") == "posted" and row.get("state") != "deleted" and under_review(row, order)
         }
         theirs = {}
-        for thread in threads:
+        for thread in reviewed.threads:
             said = thread["comments"]["nodes"]
             if said:
                 theirs[said[0]["body"]] = thread
+        # Threads opened on the pull request itself, which is where a comment this desk never wrote comes from. Matched
+        # by the same body text a thread of its own is matched by, so a second sync finds them already here.
+        known = {row["text"] for row in rows}
+        arriving = [thread for body, thread in theirs.items() if body not in known]
         # A remark settled here withholds its replies unless asked for, but its resolution is still agreed with the pull
         # request either way: agreeing on what is resolved is the point of a sync.
         plans = {
@@ -1067,9 +1153,18 @@ class Handler(BaseHTTPRequestHandler):
                         row["prResolveError"] = trouble
                     else:
                         row.pop("prResolveError", None)
-        told = f"sent {sent} reply(ies), brought {brought} back, closed {closed} here, resolved {away} there"
+            taken = take_in(fresh, arriving, order, reviewed.ref)
+        told = (
+            f"sent {sent} reply(ies), brought {brought} back, took {len(taken)} comment(s) in, "
+            f"closed {closed} here, resolved {away} there"
+        )
         print(f"SYNC {told}", flush=True)
-        self._json({"ok": True, "sent": sent, "brought": brought, "closed": closed, "resolved": away})
+        for note in taken:
+            where = "the file" if note["side"] == "file" else f"L{note['endLine']}"
+            print(f"  FROM THE PULL REQUEST [{note['seq']}] {note['who']} on {note['path']} {where}", flush=True)
+        self._json(
+            {"ok": True, "sent": sent, "brought": brought, "took": len(taken), "closed": closed, "resolved": away}
+        )
 
     def log_message(self, *args):
         pass

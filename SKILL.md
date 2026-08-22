@@ -68,9 +68,13 @@ Reply when the answer needs discussing, resolve when it is settled - a resolved 
 reply, and the reviewer can reopen it. Resolving a comment that was posted to a pull request also resolves its thread
 there, and says "not resolved there yet" until GitHub confirms it.
 
-`desk.py sync` carries replies both ways with the pull request and takes its word on what is resolved. Run it when the
-reviewer mentions having answered on GitHub, or before working through comments, so the two copies agree.
-`desk.py comments [--all]` lists what is outstanding.
+`desk.py sync` carries replies both ways with the pull request, takes its word on what is resolved, and brings in the
+comments written there that this desk has no record of - a reviewer's remark, a bot's report - each numbered like any
+other and carrying its author. Run it when the reviewer mentions having answered on GitHub, or before working through
+comments, so the two copies agree. `desk.py comments [--all]` lists what is outstanding.
+
+A comment brought in that way is answered and resolved like any other, and is the one kind that cannot be reworded or
+deleted from here: the remark is its author's, on the copy everyone reads.
 
 ## Behaviour to know
 

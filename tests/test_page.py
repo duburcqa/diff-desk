@@ -2206,3 +2206,61 @@ def test_a_reply_below_the_fold_is_not_taken_for_read(page, desk):
     read(page, made)
     page.wait_for_selector(f"#note-{made} .thread.folded")
     assert page.locator(f"#note-{made} .thread.folded").count() == 1
+
+
+def test_a_comment_written_on_the_pull_request_shows_whose_it_is_and_is_answered_rather_than_rewritten(page, desk):
+    sample(page)
+    thread = {
+        "id": "T_from_review",
+        "isResolved": False,
+        "path": "sample.py",
+        "line": FIRST_EDIT,
+        "startLine": None,
+        "originalLine": FIRST_EDIT,
+        "originalStartLine": None,
+        "diffSide": "RIGHT",
+        "comments": {
+            "nodes": [
+                {
+                    "databaseId": 501,
+                    "body": "written on the pull request",
+                    "path": "sample.py",
+                    "createdAt": "2026-08-22T09:00:00Z",
+                    "author": {"login": "Milotrince"},
+                }
+            ]
+        },
+    }
+    desk.github_answers(
+        rules=[
+            {
+                "match": "reviewThreads",
+                "out": json.dumps(
+                    {
+                        "data": {
+                            "repository": {
+                                "pullRequest": {"headRefName": "feature", "reviewThreads": {"nodes": [thread]}}
+                            }
+                        }
+                    }
+                ),
+            }
+        ]
+    )
+    try:
+        desk.post("/sync", {"repo": "someone/somewhere", "pr": 21})
+        # One comment however many syncs this desk has served: a thread already here is recognised, not recorded again.
+        (brought,) = [row for row in desk.get("/comments") if row["text"] == "written on the pull request"]
+        seq = brought["seq"]
+        page.evaluate("() => loadNotes()")
+        page.wait_for_selector(f"#note-{seq}")
+
+        # Every other comment on the page is the reader's, so this one says whose it is, and offers the answer rather
+        # than the rewording: the remark is its author's word on the copy everyone reads.
+        head = page.locator(f"#note-{seq} .thread > .line").first
+        assert "Milotrince" in head.locator(".who").inner_text()
+        assert head.locator("button.tiny").filter(has_text="Edit").count() == 0
+        assert head.locator("button.drop").count() == 0
+        assert page.locator(f"#note-{seq} .actions button.ghost").filter(has_text="Reply").count() == 1
+    finally:
+        desk.github_answers(code=1, err="gh: Not Found (HTTP 404)")

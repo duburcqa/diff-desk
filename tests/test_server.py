@@ -736,7 +736,7 @@ def test_a_sync_whose_first_attempt_never_reached_github_says_nothing_of_it(desk
     calls = desk.github_calls()[before:]
     assert len([call for call in calls if "reviewThreads" in call]) == 2
     # A blip gone by the second attempt is nobody's business: the sync reads as one that simply worked.
-    assert outcome == {"ok": True, "sent": 0, "brought": 0, "closed": 0, "resolved": 1}
+    assert outcome == {"ok": True, "sent": 0, "brought": 0, "took": 0, "closed": 0, "resolved": 1}
     assert {row["seq"]: row for row in desk.get("/comments")}[seq]["prResolve"] == "done"
 
 
@@ -1349,3 +1349,123 @@ def test_the_desk_updates_itself_over_https_when_ssh_cannot_be_reached(tmp_path)
     )
     assert gen_diff_data.run(here, "rev-parse", "HEAD").strip() == ahead, said.stdout + said.stderr
     assert "updated to" in said.stdout
+
+
+def test_syncing_takes_in_the_comments_written_on_the_pull_request(desk):
+    made = desk.post(
+        "/comments",
+        {
+            "comments": [{"branch": "feature", "path": "sample.py", "line": 40, "side": "new", "text": "written here"}],
+            "github": True,
+        },
+    )
+    seq = made["seqs"][0]
+    desk.github_answers(out=json.dumps({"html_url": "https://github.com/x/y/pull/14#review-1"}))
+    desk.post("/publish", {"repo": "someone/somewhere", "pr": 14, "seq": [seq]})
+
+    ours = {
+        "id": "T_ours",
+        "isResolved": False,
+        "path": "sample.py",
+        "line": 40,
+        "startLine": None,
+        "originalLine": 40,
+        "originalStartLine": None,
+        "diffSide": "RIGHT",
+        "comments": {
+            "nodes": [
+                {
+                    "databaseId": 901,
+                    "body": "written here",
+                    "path": "sample.py",
+                    "createdAt": "2026-08-22T09:00:00Z",
+                    "author": {"login": "duburcqa"},
+                }
+            ]
+        },
+    }
+    # A reviewer's remark on a range of lines, answered once, and a bot's report the pull request places nowhere.
+    theirs = {
+        "id": "T_theirs",
+        "isResolved": False,
+        "path": "sample.py",
+        "line": 12,
+        "startLine": 10,
+        "originalLine": 12,
+        "originalStartLine": 10,
+        "diffSide": "RIGHT",
+        "comments": {
+            "nodes": [
+                {
+                    "databaseId": 902,
+                    "body": "could we document this?",
+                    "path": "sample.py",
+                    "createdAt": "2026-08-22T09:05:00Z",
+                    "author": {"login": "Milotrince"},
+                },
+                {
+                    "databaseId": 903,
+                    "body": "seconded",
+                    "path": "sample.py",
+                    "createdAt": "2026-08-22T09:06:00Z",
+                    "author": {"login": "someone-else"},
+                },
+            ]
+        },
+    }
+    settled = {
+        "id": "T_settled",
+        "isResolved": True,
+        "path": "sample.py",
+        "line": None,
+        "startLine": None,
+        "originalLine": None,
+        "originalStartLine": None,
+        "diffSide": "RIGHT",
+        "comments": {
+            "nodes": [
+                {
+                    "databaseId": 904,
+                    "body": "a report already dealt with",
+                    "path": "sample.py",
+                    "createdAt": "2026-08-22T09:10:00Z",
+                    "author": {"login": "some-bot"},
+                }
+            ]
+        },
+    }
+    answer = json.dumps(
+        {
+            "data": {
+                "repository": {
+                    "pullRequest": {"headRefName": "feature", "reviewThreads": {"nodes": [ours, theirs, settled]}}
+                }
+            }
+        }
+    )
+    desk.github_answers(rules=[{"match": "reviewThreads", "out": answer}])
+    outcome = desk.post("/sync", {"repo": "someone/somewhere", "pr": 14})
+    assert outcome["took"] == 2
+
+    rows = {row["text"]: row for row in desk.get("/comments")}
+    brought = rows["could we document this?"]
+    assert (brought["path"], brought["line"], brought["endLine"], brought["side"]) == ("sample.py", 10, 12, "new")
+    assert brought["who"] == "Milotrince"
+    assert [(answer["who"], answer["text"]) for answer in brought["replies"]] == [("someone-else", "seconded")]
+    # Recorded as posted and as news, which is what lets a session answer it and hear about it in the first place.
+    assert (brought["github"], brought["state"], brought["eventBy"]) == ("posted", "open", "you")
+    # A thread the pull request places nowhere is a remark on the file, and one resolved there arrives closed.
+    assert rows["a report already dealt with"]["side"] == "file"
+    assert rows["a report already dealt with"]["state"] == "resolved"
+
+    # The remark is its author's word: this desk answers in the thread and leaves the wording and the thread to them.
+    said = desk.post("/reply", {"seq": brought["seq"], "text": "documented now", "who": "session"})
+    assert said["ok"]
+    assert not desk.post("/edit", {"seq": brought["seq"], "text": "something else entirely"})["ok"]
+    assert not desk.post("/drop", {"seq": brought["seq"], "repo": "someone/somewhere", "pr": 14})["ok"]
+
+    # A second sync finds them already here rather than recording them twice.
+    desk.github_answers(rules=[{"match": "reviewThreads", "out": answer}])
+    again = desk.post("/sync", {"repo": "someone/somewhere", "pr": 14})
+    assert again["took"] == 0
+    assert len([row for row in desk.get("/comments") if row["text"] == "could we document this?"]) == 1

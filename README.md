@@ -62,6 +62,9 @@ On the page:
   resolving that. Until GitHub confirms it, the comment reads "not resolved there yet" beside its own resolution rather
   than claiming agreement it does not have; a resolution that could not be made is retried like a post that did not
   land.
+- **A sync brings the pull request's own comments in.** What a reviewer or a bot wrote there arrives as a comment of
+  its own, numbered like the rest and carrying its author, so a session hears about it from the watch and can answer it.
+  Those are the comments the desk answers rather than rewrites: the remark stays its author's word.
 - **What GitHub refuses is said where you are.** A sync, a send or a resolution that could not happen raises a notice
   from the bottom of the page carrying the reason, and it stays until dismissed - the panel it happened in is often
   closed. Pressing **Refresh** is acknowledged the same way: the button reports that it is collecting and refuses a
