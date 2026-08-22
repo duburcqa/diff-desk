@@ -883,6 +883,13 @@
   <div class="head">
     <strong>Comments</strong>
     <span class="status" id="logcount"></span>
+    <label class="seen" id="logorder" title="Read the list by the submission each remark went out in, or by what moved last">
+      <span>Sort</span>
+      <select id="logsort">
+        <option value="batch">by batch</option>
+        <option value="recent">by what moved last</option>
+      </select>
+    </label>
     <label class="seen" id="logshow" title="List what is resolved, and include it when syncing with the pull request">
       <input type="checkbox" id="logresolved" />
       <span>Show resolved</span>
@@ -893,7 +900,8 @@
   <div class="actions">
     <button class="solid" id="logretry" title="Post the comments bound for the pull request whose post did not land">Retry sync failures</button>
     <button class="ghost" id="logbind" title="Aim the comments kept local at the pull request, and send them">Send the local ones too</button>
-    <button class="ghost" id="logsync">Sync all with the PR</button>
+    <button class="ghost" id="logsend" title="Send again every thread the pull request already holds, as each now reads">Sync the threads on the PR</button>
+    <button class="ghost" id="logsync" title="Bring back what the pull request holds">Sync all with the PR</button>
     <span class="status" id="logresult"></span>
   </div>
 </div>
@@ -950,7 +958,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "ctx", "hidedone", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logretry", "logbind", "logsync", "logclose", "logresult", "logresolved", "brand", "repo", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
+  for (const id of ["tabs", "scope", "q", "ctx", "hidedone", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "logresolved", "brand", "repo", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -1220,6 +1228,16 @@
 
   const OWED = ["pending", "failed"];
 
+  function owedThere(note) {
+    if (note.pending || !notes.live) return "";
+    const said = (note.replies || []).filter((answer) => answer.github !== "posted").length;
+    const owes = [];
+    if (note.github !== "posted") owes.push("the remark");
+    if (said) owes.push(`${said} repl${said === 1 ? "y" : "ies"}`);
+    if (note.state === "resolved" && note.prResolve !== "done") owes.push("its resolution");
+    return owes.join(" and ");
+  }
+
   // Which review a request is about. One log holds every review this desk has served, so naming the pull request and
   // the branch is what keeps a sweep for one review off another review's comments.
   const where = () => ({
@@ -1297,8 +1315,17 @@
     els.logretry.disabled = !owed.length;
     els.logbind.disabled = !local.length || !branch().pr;
     els.logsync.disabled = !branch().pr;
+    els.logsend.disabled = !branch().pr || !alreadyThere().length;
 
     els.logrows.innerHTML = "";
+    if (els.logsort.value === "recent") {
+      // Most recently touched first, threads and their replies together: a reply carries no batch of its own, so this
+      // is where the answer just written into a batch of long ago is found.
+      const moved = [...rows].sort((one, other) => (other.event || 0) - (one.event || 0));
+      for (const note of moved) els.logrows.append(logRow(note, keys));
+      if (!moved.length) drawEmpty(all);
+      return;
+    }
     const batches = new Map();
     for (const note of rows) {
       if (!batches.has(note.batch)) batches.set(note.batch, []);
@@ -1315,24 +1342,18 @@
       size.className = "said";
       size.textContent = `${held.length} comment${held.length === 1 ? "" : "s"}`;
       title.append(name, size);
-      const sendable = held.filter((note) => note.github !== "posted");
-      if (sendable.length && branch().pr && notes.live) {
-        const alone = document.createElement("button");
-        alone.className = "tiny";
-        alone.textContent = "Sync in batch with the PR";
-        alone.addEventListener("click", () => sendBatch(sendable));
-        title.append(alone);
-      }
       group.append(title);
       els.logrows.append(group);
       for (const note of held) group.append(logRow(note, keys));
     }
-    if (!rows.length) {
-      const empty = document.createElement("div");
-      empty.className = "empty";
-      empty.textContent = all.length ? "Nothing open: all of it is resolved." : "No comments on this branch yet.";
-      els.logrows.append(empty);
-    }
+    if (!rows.length) drawEmpty(all);
+  }
+
+  function drawEmpty(all) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = all.length ? "Nothing open: all of it is resolved." : "No comments on this branch yet.";
+    els.logrows.append(empty);
   }
 
   function reach(note) {
@@ -1369,16 +1390,23 @@
     }));
   }
 
-  async function sendBatch(held) {
+  const alreadyThere = () => mine().filter((note) => note.github === "posted" && !note.who && owedThere(note));
+
+  async function sendThreads(held) {
     const request = branch().pr;
-    if (!request) return;
-    const local = held.filter((note) => note.github === "none").map((note) => note.seq);
-    if (local.length) await post("bind", { seq: local, github: true, ...where() });
-    els.logresult.textContent = `Sending ${held.length} to PR #${request.number}...`;
-    const outcome = await post("publish", { ...where(), seq: held.map((note) => note.seq) });
-    els.logresult.textContent = outcome.ok
-      ? `Sent ${outcome.sent} to PR #${request.number}`
-      : `Still waiting: ${outcome.error || "GitHub unreachable"}`;
+    if (!request || !held.length) return;
+    els.logresult.textContent = `Sending ${held.length} thread(s) to PR #${request.number}...`;
+    let sent = 0;
+    let refused = "";
+    for (const note of held) {
+      const outcome = await post("send", { seq: note.seq, ...where() });
+      if (outcome.ok) sent += 1;
+      else refused = refused || outcome.error || "GitHub unreachable";
+    }
+    els.logresult.textContent = refused
+      ? `Sent ${sent} of ${held.length}: ${refused}`
+      : `Sent ${sent} thread(s) to PR #${request.number}`;
+    if (refused) announce("sync", `PR #${request.number}`, refused);
     await loadNotes();
     drawLog();
     render();
@@ -1405,6 +1433,26 @@
       mark.textContent = label;
       if (note.error && kind === "failed") mark.title = note.error;
       item.append(mark);
+    }
+    // The thread sent from its own row, since the panel is where a reader works through what is still owed. A span
+    // rather than a button: the row is a button itself, and a button inside one is no button at all.
+    const owes = owedThere(note);
+    if (owes && branch().pr && !note.who) {
+      const out = document.createElement("span");
+      out.className = "mark none act";
+      out.setAttribute("role", "button");
+      out.tabIndex = 0;
+      out.textContent = "sync";
+      out.title = `Send ${owes} to PR #${branch().pr.number}`;
+      const sending = async (event) => {
+        event.stopPropagation();
+        await sendThreads([note]);
+      };
+      out.addEventListener("click", sending);
+      out.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") sending(event);
+      });
+      item.append(out);
     }
     item.addEventListener("click", () => reach(note));
     return item;
@@ -1433,24 +1481,6 @@
         : `Could not sync: ${outcome.error || "GitHub unreachable"}`;
     }
     if (!outcome.ok) announce("sync", `PR #${request.number}`, outcome.error || "GitHub unreachable");
-    await loadNotes();
-    drawLog();
-    render();
-  }
-
-  async function closeThere(loud) {
-    const request = branch().pr;
-    const owed = mine().filter((note) => note.github === "posted" && OWED.includes(note.prResolve));
-    if (!owed.length || !request || !notes.live) return;
-    const outcome = await post("close", where());
-    if (loud) {
-      els.logresult.textContent = outcome.ok
-        ? `Resolved ${outcome.closed} thread(s) on PR #${request.number}`
-        : `Could not resolve there: ${outcome.error || "GitHub unreachable"}`;
-    }
-    if (!outcome.ok) {
-      announce("resolve", `PR #${request.number}`, outcome.error || "GitHub unreachable");
-    }
     await loadNotes();
     drawLog();
     render();
@@ -1915,6 +1945,15 @@
       body.className = "said";
       written(body, answer.text);
       said.append(from, body);
+      // Whether the pull request holds this reply, shown on the reply itself: what a thread still owes is what its own
+      // Sync would carry, and a reader deciding whether to press it reads that off the replies.
+      if (!note.pending && answer.github !== "none") {
+        const standing = document.createElement("span");
+        standing.className = `mark ${answer.github}`;
+        standing.textContent = GITHUB_MARK[answer.github] || answer.github;
+        if (answer.error) standing.title = answer.error;
+        said.append(standing);
+      }
       // Only what was written here can be reworded: a reply carried back from the pull request is its author's word,
       // said on the copy everyone else reads, so this desk shows it and leaves it alone.
       if (!note.pending && notes.live && (answer.who === "you" || answer.who === "session")) {
@@ -2014,10 +2053,25 @@
         }
         keepTucked();
         render();
-        // Closing it here owes a resolution on the pull request, taken as soon as it is asked for.
-        await closeThere(false);
       });
       actions.append(say, send, close);
+      // What this thread owes the pull request, sent as it now reads. Offered only when there is something to send,
+      // which is what makes the button say what pressing it would do.
+      const owes = owedThere(note);
+      if (owes && branch().pr && !note.who) {
+        const out = document.createElement("button");
+        out.className = "ghost";
+        out.textContent = "Sync";
+        out.title = `Send ${owes} to PR #${branch().pr.number}`;
+        out.addEventListener("click", async () => {
+          const outcome = await post("send", { seq: note.seq, ...where() });
+          if (!outcome.ok) announce("sync", `PR #${branch().pr.number}`, outcome.error || "GitHub unreachable");
+          await loadNotes();
+          drawLog();
+          render();
+        });
+        actions.append(out);
+      }
       box.append(actions);
     }
     cell.append(box);
@@ -3282,12 +3336,16 @@
   });
   els.logretry.addEventListener("click", async () => {
     await retryOwed(true);
-    await closeThere(true);
   });
   els.logsync.addEventListener("click", () => syncThere(true));
+  els.logsend.addEventListener("click", () => sendThreads(alreadyThere()));
   els.logresolved.addEventListener("change", () => {
     drawLog();
     render();
+  });
+  els.logsort.addEventListener("change", () => {
+    localStorage.setItem("diffdesk.logsort", els.logsort.value);
+    drawLog();
   });
   els.logbind.addEventListener("click", async () => {
     const local = mine().filter((note) => note.github === "none");
@@ -3360,7 +3418,6 @@
     // A post that could not be made is retried on its own, as long as the browser believes it is connected.
     if (navigator.onLine) {
       await retryOwed(false);
-      await closeThere(false);
       await syncThere(false);
     }
   }
@@ -3381,6 +3438,8 @@
   loadFolded();
   takeHeard();
   takeTucked();
+  // How the panel was last read, kept across reloads the way its other choices are.
+  els.logsort.value = localStorage.getItem("diffdesk.logsort") === "recent" ? "recent" : "batch";
   takeDrafts();
   showSource();
   renderTabs();

@@ -7,7 +7,7 @@ desk.py reply 3 "why it happens ..."                 answer a comment without cl
 desk.py edit 3 "what I actually meant ..."           rewrite a comment, keeping what it said before
 desk.py edit 3 --reply 0 "worded better ..."         rewrite one reply of a comment, by its place in the thread
 desk.py bind 3 4 [--local]                           aim comments at the pull request, or keep them local
-desk.py sync                                         carry replies both ways with the pull request
+desk.py sync                                         bring back what the pull request holds
 desk.py resolve 3 4 --answer "fixed in abc1234"      answer and close; --reopen puts them back
 desk.py refs --dir <repo> --base <ref>               the branches ahead of a base, and the open pull requests
 """

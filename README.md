@@ -62,6 +62,16 @@ On the page:
   resolving that. Until GitHub confirms it, the comment reads "not resolved there yet" beside its own resolution rather
   than claiming agreement it does not have; a resolution that could not be made is retried like a post that did not
   land.
+- **A thread goes out when you send it, as it reads then.** Each thread carries its own **Sync**, saying what pressing
+  it would carry - the remark if the pull request has none of it, the replies it does not hold, its resolution once you
+  have closed it. Whatever is written afterwards, by you or by a session, waits for the next press: nothing leaves this
+  desk as a consequence of somebody writing in a thread. A sync only brings back what the pull request holds.
+- **The Comments panel is where several are worked through.** Every row is a thread and sends itself from its own row;
+  **Sync the threads on the PR** sends every thread the pull request already holds, which is what a review that has been
+  going back and forth for a while needs.
+- **The panel is read by batch or by what moved last.** A batch says which submission a remark went out in, and nothing
+  else - a reply belongs to its thread and carries no batch of its own. So sorting by what moved last is where the
+  answer just written into a batch of long ago is found, and the choice outlives the reload.
 - **A sync brings the pull request's own comments in.** What a reviewer or a bot wrote there arrives as a comment of
   its own, numbered like the rest and carrying its author, so a session hears about it from the watch and can answer it.
   Those are the comments the desk answers rather than rewrites: the remark stays its author's word.

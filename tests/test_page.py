@@ -656,61 +656,43 @@ def test_a_pending_comment_can_be_sent_on_its_own_from_the_tray(page, desk):
     page.locator("#traydrop").click()
 
 
-def test_each_recorded_batch_can_be_sent_by_itself(page, desk):
+def test_the_comments_panel_reads_by_batch_or_by_what_moved_last(page, desk):
     branch = page.evaluate("() => data.branches[0].ref")
-    for text in ("first batch", "second batch"):
+    made = [
         desk.post(
             "/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": text}]
-        )
-    listed = desk.get("/comments")
-    batches = [row["batch"] for row in listed[-2:]]
-    assert batches[0] != batches[1]
-
-    # A pull request is what makes sending possible, so the repository is given one for the length of this test.
-    knows = [
-        {"match": "repos/someone/somewhere --jq", "out": "someone/somewhere"},
-        {"match": "pr list", "out": json.dumps([{"number": 7, "url": "u", "title": "t", "headRefName": branch}])},
+        )["seq"]
+        for text in (f"the older batch, number {len(desk.get('/comments')) + 1}", "the newer batch")
     ]
-    desk.github_answers(rules=knows)
-    gen_diff_data.run(desk.repo, "remote", "add", "origin", "https://github.com/someone/somewhere.git")
-    try:
-        rescan = desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})
-        assert rescan["ok"], rescan.get("error")
-        page.reload(wait_until="load")
-        page.wait_for_selector("section.file")
-        page.locator("#logopen").click()
-        page.wait_for_selector("#log[data-open='true']")
-        groups = page.locator("#logrows .batch")
-        assert groups.count() >= 2
-        sends = page.locator("#logrows .batchhead button.tiny")
-        # Every batch still holding something unposted can be sent by itself; one already on the PR offers nothing.
-        # What the panel lists by default: batches still holding something unposted, unresolved and not deleted.
-        pending = {
-            row["batch"]
-            for row in desk.get("/comments")
-            if row["branch"] == branch and row["github"] != "posted" and row["state"] not in ("resolved", "deleted")
-        }
-        assert sends.count() == len(pending)
-        assert sends.last.inner_text() == "Sync in batch with the PR"
+    page.reload(wait_until="load")
+    page.wait_for_selector("section.file")
+    page.locator("#logopen").click()
+    page.wait_for_selector("#log[data-open='true']")
 
-        # Sending one batch leaves the others exactly as they were.
-        landed = {"match": "/reviews", "out": json.dumps({"html_url": "https://github.com/x/y/pull/7#review-9"})}
-        desk.github_answers(rules=[landed, *knows])
-        sends.last.click()
-        after = until(
-            lambda: (
-                {row["seq"]: row for row in desk.get("/comments")}
-                if {row["seq"]: row for row in desk.get("/comments")}[listed[-1]["seq"]]["github"] == "posted"
-                else None
-            )
-        )
-        # Sending one batch leaves every other comment exactly as it was.
-        assert after[listed[-1]["seq"]]["github"] == "posted"
-        assert after[listed[-2]["seq"]]["github"] == "none"
-    finally:
-        gen_diff_data.run(desk.repo, "remote", "remove", "origin")
-        desk.github_answers(code=1, err="gh: Not Found (HTTP 404)")
-        desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})
+    # By batch, each remark sits under the submission it went out in, which is what a batch says and all it says.
+    assert page.locator("#logrows .batch").count() >= 2
+    older = page.locator(".logrow:has-text('the older batch')").first
+    assert older.evaluate("(row) => row.closest('.batch').querySelector('b').textContent").startswith("batch")
+
+    # A reply carries no batch of its own: answering the older thread leaves the batches as they were.
+    desk.post("/reply", {"seq": made[0], "text": "answered long after", "who": "session"})
+    page.evaluate("() => loadNotes()")
+    page.wait_for_function(
+        """(seq) => [...document.querySelectorAll('.logrow')].length > 0 &&
+             notes.sent.some((note) => note.seq === seq && (note.replies || []).length)""",
+        arg=made[0],
+    )
+    page.select_option("#logsort", "recent")
+    # Read by what moved last, the thread just answered comes first, wherever its remark was submitted.
+    assert "the older batch" in page.locator("#logrows .logrow").first.inner_text()
+    assert page.locator("#logrows .batch").count() == 0
+
+    # And the choice outlives the reload, as the panel's other choices do.
+    page.reload(wait_until="load")
+    page.wait_for_selector("section.file")
+    page.locator("#logopen").click()
+    assert page.locator("#logsort").input_value() == "recent"
+    page.select_option("#logsort", "batch")
 
 
 def test_a_comment_resolved_here_does_not_claim_the_pull_request_agrees(page, desk):
@@ -2267,3 +2249,162 @@ def test_a_comment_written_on_the_pull_request_shows_whose_it_is_and_is_answered
         assert page.locator(f"#note-{seq} .actions button.ghost").filter(has_text="Reply").count() == 1
     finally:
         desk.github_answers(code=1, err="gh: Not Found (HTTP 404)")
+
+
+def test_a_thread_says_what_it_owes_the_pull_request_and_sends_it_when_asked(page, desk):
+    branch = page.evaluate("() => data.branches[0].ref")
+    knows = [
+        {"match": "repos/someone/somewhere --jq", "out": "someone/somewhere"},
+        {"match": "pr list", "out": json.dumps([{"number": 41, "url": "u", "title": "t", "headRefName": branch}])},
+    ]
+    desk.github_answers(rules=knows)
+    gen_diff_data.run(desk.repo, "remote", "add", "origin", "https://github.com/someone/somewhere.git")
+    try:
+        assert desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})["ok"]
+        made = desk.post(
+            "/comments",
+            [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": "a thread to send"}],
+        )["seq"]
+        desk.post("/reply", {"seq": made, "text": "answered here first", "who": "session"})
+        page.reload(wait_until="load")
+        page.wait_for_selector(f"#note-{made} .line.reply")
+
+        # What pressing it would do is what it says, so the reader sends a thread knowing what leaves this desk.
+        sending = page.locator(f"#note-{made} .actions button.ghost").filter(has_text="Sync").first
+        assert "the remark and 1 reply" in sending.get_attribute("title")
+
+        landed = {
+            "id": "T_page",
+            "isResolved": False,
+            "path": "sample.py",
+            "line": FIRST_EDIT,
+            "startLine": None,
+            "originalLine": FIRST_EDIT,
+            "originalStartLine": None,
+            "diffSide": "RIGHT",
+            "comments": {
+                "nodes": [
+                    {
+                        "databaseId": 701,
+                        "body": "a thread to send",
+                        "path": "sample.py",
+                        "createdAt": "2026-08-22T09:00:00Z",
+                        "author": {"login": "duburcqa"},
+                    }
+                ]
+            },
+        }
+        desk.github_answers(
+            rules=[
+                {"match": "pulls/41/reviews", "out": json.dumps({"html_url": "https://github.com/x/y/pull/41#r1"})},
+                {
+                    "match": "reviewThreads",
+                    "out": json.dumps(
+                        {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": [landed]}}}}}
+                    ),
+                },
+                {"match": "/comments/701/replies", "out": json.dumps({"id": 702})},
+                *knows,
+            ]
+        )
+        sending.click()
+        # Sent, the thread owes nothing, so the button it was sent with is gone and the reply says it is on the PR.
+        page.wait_for_function(f"() => !document.querySelector('#note-{made} .actions button.ghost:nth-of-type(2)')")
+        assert page.locator(f"#note-{made} .line.reply .mark").first.inner_text() == "on the PR"
+        row = {row["seq"]: row for row in desk.get("/comments")}[made]
+        assert (row["github"], row["replies"][0]["github"]) == ("posted", "posted")
+    finally:
+        gen_diff_data.run(desk.repo, "remote", "remove", "origin")
+        desk.github_answers(code=1, err="gh: Not Found (HTTP 404)")
+        desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})
+        page.reload(wait_until="load")
+        page.wait_for_selector("section.file")
+
+
+def test_the_comments_panel_sends_one_thread_from_its_row_and_every_thread_the_pull_request_holds(page, desk):
+    branch = page.evaluate("() => data.branches[0].ref")
+    knows = [
+        {"match": "repos/someone/somewhere --jq", "out": "someone/somewhere"},
+        {"match": "pr list", "out": json.dumps([{"number": 42, "url": "u", "title": "t", "headRefName": branch}])},
+    ]
+    desk.github_answers(rules=knows)
+    gen_diff_data.run(desk.repo, "remote", "add", "origin", "https://github.com/someone/somewhere.git")
+    try:
+        assert desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})["ok"]
+        # Named apart from anything this desk already holds: the same thread sent once owes nothing the second time.
+        held = len(desk.get("/comments"))
+        texts = [f"already on the PR, number {held + 1}", f"and this one too, number {held + 2}"]
+        made = [
+            desk.post(
+                "/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": text}]
+            )["seq"]
+            for text in texts
+        ]
+        threads = [
+            {
+                "id": f"T_row{number}",
+                "isResolved": False,
+                "path": "sample.py",
+                "line": FIRST_EDIT,
+                "startLine": None,
+                "originalLine": FIRST_EDIT,
+                "originalStartLine": None,
+                "diffSide": "RIGHT",
+                "comments": {
+                    "nodes": [
+                        {
+                            "databaseId": 800 + number,
+                            "body": text,
+                            "path": "sample.py",
+                            "createdAt": "2026-08-22T09:00:00Z",
+                            "author": {"login": "duburcqa"},
+                        }
+                    ]
+                },
+            }
+            for number, text in enumerate(texts)
+        ]
+        answering = [
+            {"match": "pulls/42/reviews", "out": json.dumps({"html_url": "https://github.com/x/y/pull/42#r1"})},
+            {
+                "match": "reviewThreads",
+                "out": json.dumps({"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": threads}}}}}),
+            },
+            {"match": "/replies", "out": json.dumps({"id": 900})},
+            *knows,
+        ]
+        desk.github_answers(rules=answering)
+        for seq in made:
+            assert desk.post("/send", {"seq": seq, "repo": "someone/somewhere", "pr": 42})["ok"]
+        for seq in made:
+            desk.post("/reply", {"seq": seq, "text": f"answered after the send, {seq}", "who": "session"})
+        page.reload(wait_until="load")
+        page.locator("#logopen").click()
+        page.wait_for_selector("#log[data-open='true']")
+
+        # One thread out of its own row, saying what pressing it would carry.
+        row = page.locator(f".logrow:has-text('{texts[0]}')").first
+        sending = row.locator(".mark.act").first
+        assert "1 reply" in sending.get_attribute("title")
+        desk.github_answers(rules=answering)
+        sending.click()
+        page.wait_for_function(
+            """(text) => ![...document.querySelectorAll('.logrow')].some(
+                 (row) => row.textContent.includes(text) && row.querySelector('.mark.act'))""",
+            arg=texts[0],
+        )
+        rows = {row["seq"]: row for row in desk.get("/comments")}
+        assert rows[made[0]]["replies"][0]["github"] == "posted"
+        assert rows[made[1]]["replies"][0]["github"] == "none"
+
+        # Then every thread the pull request already holds, which is the sweep worth having once several have moved on.
+        desk.github_answers(rules=answering)
+        assert page.locator("#logsend").is_enabled()
+        page.locator("#logsend").click()
+        until(lambda: {row["seq"]: row for row in desk.get("/comments")}[made[1]]["replies"][0]["github"] == "posted")
+    finally:
+        gen_diff_data.run(desk.repo, "remote", "remove", "origin")
+        desk.github_answers(code=1, err="gh: Not Found (HTTP 404)")
+        desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})
+        page.reload(wait_until="load")
+        page.wait_for_selector("section.file")

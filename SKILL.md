@@ -68,18 +68,27 @@ Reply when the answer needs discussing, resolve when it is settled - a resolved 
 reply, and the reviewer can reopen it. Resolving a comment that was posted to a pull request also resolves its thread
 there, and says "not resolved there yet" until GitHub confirms it.
 
-`desk.py sync` carries replies both ways with the pull request, takes its word on what is resolved, and brings in the
+`desk.py sync` brings back what the pull request holds: replies added there, its word on what is resolved, and the
 comments written there that this desk has no record of - a reviewer's remark, a bot's report - each numbered like any
 other and carrying its author. Run it when the reviewer mentions having answered on GitHub, or before working through
-comments, so the two copies agree. `desk.py comments [--all]` lists what is outstanding.
+comments, so this desk holds everything they have said. `desk.py comments [--all]` lists what is outstanding.
 
 A comment brought in that way is answered and resolved like any other, and is the one kind that cannot be reworded or
 deleted from here: the remark is its author's, on the copy everyone reads.
+
+Nothing a session writes reaches the pull request. `desk.py sync` only brings back what the pull request holds; sending
+a thread out - the remark, the replies it does not hold, its resolution - is a press on that thread's **Sync**, on the
+thread itself or on its row in the Comments panel, and the reader's alone. The panel also sends every thread already on
+the pull request at once. So working through a review leaves no trace there unless they put it there, and a reply written
+after they sent a thread waits for them to send it again - a resolution too: closing a thread here is local until sent.
 
 ## Behaviour to know
 
 - A comment range may cover removed and added lines together. It is anchored to the added side when the range touches
   it, so `side`/`line`/`endLine` are always expressible as a GitHub line range.
+- A batch is a submission, not a grouping of comments: it says which review a remark went out in, and a reply belongs to
+  its thread and carries no batch at all. The Comments panel therefore reads either way - by batch, or by what moved
+  last, which is where an answer written into an old thread is found.
 - Reviewed-file ticks are remembered per branch and per file digest, so a file whose diff changes reopens by itself.
 - Gap expanders on each hunk header read the file at the branch revision, so context beyond the diff needs the desk
   running (they are hidden otherwise).

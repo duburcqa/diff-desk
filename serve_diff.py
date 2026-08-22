@@ -19,29 +19,34 @@ Endpoints, all on 127.0.0.1 so nothing is exposed off the machine:
   POST /drop                  {seq, reply, repo, pr} - delete a comment, or only its last reply, here and there
   POST /publish               {repo, pr, summary, seq, resolved} - post those comments as one review; everything owed
                               when seq is omitted, which is how a post that did not land is retried
-  POST /close                 {repo, pr} - resolve, on the pull request, the threads of comments closed here
-  POST /sync                  {repo, pr} - carry replies both ways, take the pull request's word on what is resolved,
-                              and record the comments written there that this desk has none of
+  POST /send                  {seq, repo, pr} - send one thread to the pull request as it now reads: the remark if it
+                              is not there yet, the replies it does not hold, and its resolution when closed here
+  POST /sync                  {repo, pr} - bring back what the pull request holds: replies, what it says is resolved,
+                              and the comments written there that this desk has none of
 
 Deleting is the one thing that does discard: a dropped comment leaves the page and every exchange with the pull
 request, and a dropped reply is gone from the thread. What was posted is deleted on the pull request first, so a
 deletion that could not be made there leaves both copies as they were rather than hiding a remark that is still on it.
 
-A comment settled here stays here: posting and carrying replies leave it out unless the request asks for it, since a
-remark already answered has no business arriving on the pull request. Resolving a thread that is already there is a
-different matter, and always proceeds.
+Nothing leaves this desk on its own. A sync listens: it brings back the replies a thread holds, takes the pull
+request's word on what is resolved, and records the comments written there. What this desk holds goes out one thread at
+a time, when the reader sends it, and carries the thread as it reads at that moment - a reply written afterwards waits
+for them to send it again.
 
-A comment is a thread: a remark plus replies from either side, each stamped with who wrote it. The remark is the
-reviewer's own unless a sync brought it in from the pull request, in which case it carries the author who wrote it there
-and stays their word: this desk answers and resolves it, and leaves its wording and its existence to them. A reply
+A comment is a thread: a remark plus replies from either side, each stamped with who wrote it and whether the pull
+request holds it - `none` while it is only here, `posted` once it is there, `failed` when a send did not land, with its
+reason. The remark is the reviewer's own unless a sync brought it in from the pull request, in which case it carries the
+author who wrote it there and stays their word: this desk answers and resolves it, and leaves its wording and its
+existence to them. A reply
 leaves the thread open; only resolving closes it, either side may do so, and a resolved thread keeps its text and every
 reply - closing it hides nothing and deletes nothing. Rewriting a comment, or any reply written here, keeps every
 earlier wording under `edits`, and one already posted is flagged as having moved on from what the pull request holds
 rather than silently disagreeing with it. A reply brought back from the pull request is left as its author wrote it.
 
-Closing a comment here closes it there too, when it was posted: its thread on the pull request is resolved, tracked
-apart under `prResolve` - `pending` until it is done, `done` once it is, `failed` when the attempt did not happen. A
-comment closed here whose thread is still open there says so rather than reading as resolved everywhere.
+Closing a comment here closes nothing there. Sending the thread does, and where that stands is tracked apart under
+`prResolve` - `done` once GitHub confirms it, `failed` when the attempt did not happen, with its reason. A thread closed
+here whose thread is still open there says so rather than reading as resolved everywhere, and a sync that finds it open
+there corrects a claim this desk could no longer stand behind.
 
 A comment also carries where it stands with the pull request, apart from whether it is resolved: `none` when it was
 never meant to go there, `pending` while it still owes a post, `failed` after an attempt worth trying again, `refused`
@@ -106,6 +111,11 @@ def read_notes():
         # A row written before the cursor existed is as old as its position says.
         row.setdefault("event", row["seq"])
         row.setdefault("eventBy", "you")
+        for answer in row["replies"]:
+            # A reply written before it had a standing of its own: one already on the pull request stands as posted, and
+            # one written here stands local, which is what it would have been given had it been written now.
+            already = answer.pop("posted", False) or answer["at"] == "on the PR"
+            answer.setdefault("github", "posted" if already else "none")
     return rows
 
 
@@ -252,30 +262,103 @@ def carry_out(repo, number, wanted):
     return outcome
 
 
-def close_threads(repo, number, owed, threads):
-    """Resolve at once the thread of every comment closed here, and say for each of them how that went.
+class Sent(NamedTuple):
+    """What sending one thread came to: the replies that went, whether it was resolved there, and what refused."""
 
-    Split by what the pull request says: a thread it already holds as resolved is settled, one it holds as open is
-    resolved now, and a comment matching neither is left owed. Assuming the last case settled would report a resolution
-    the pull request does not have, which is the one thing this must never do.
+    sent: list
+    resolved: bool
+    trouble: str
+
+
+def thread_of(threads, text):
+    """The review thread a remark opened, found by the text of it, which is what this desk posted."""
+    return next(
+        (node for node in threads if node["comments"]["nodes"] and node["comments"]["nodes"][0]["body"] == text), None
+    )
+
+
+def owed_by(row, thread, going):
+    """What a send owes the pull request for one thread: those replies, and its resolution when it is closed here."""
+    said = thread["comments"]["nodes"]
+    wanted = [Owing(thread["id"], said[0]["databaseId"], text) for text in going]
+    if row.get("state") == "resolved" and not thread["isResolved"]:
+        wanted.append(Owing(thread["id"], 0, ""))
+    return wanted
+
+
+def sent_out(wanted, answers):
+    """What a send got back, read against what it asked for, in the order it asked."""
+    sent, resolved, trouble = [], False, ""
+    for item, (went, why) in zip(wanted, answers, strict=True):
+        if not item.body:
+            resolved = went
+        elif went:
+            sent.append(item.body)
+        if not went:
+            trouble = trouble or why
+    return Sent(sent, resolved, trouble)
+
+
+def note_trouble(row, trouble):
+    """Say on the comment why a send did not land: on the replies it would have carried, and on its resolution."""
+    for answer in row["replies"]:
+        if answer["github"] != "posted":
+            answer["github"] = "failed"
+            answer["error"] = trouble
+    if row.get("state") == "resolved":
+        row["prResolve"] = "failed"
+        row["prResolveError"] = trouble
+
+
+def settle_sent(row, thread, going, step):
+    """Write what a send came to onto the comment it was asked for: its replies, and where its resolution stands."""
+    spoken = {node["body"] for node in thread["comments"]["nodes"]}
+    for answer in row["replies"]:
+        if answer["text"] in step.sent or answer["text"] in spoken:
+            answer["github"] = "posted"
+            answer.pop("error", None)
+        elif answer["text"] in going:
+            answer["github"] = "failed"
+            answer["error"] = step.trouble
+    if step.resolved or thread["isResolved"]:
+        row["prResolve"] = "done"
+        row.pop("prResolveError", None)
+    elif row.get("state") == "resolved":
+        row["prResolve"] = "failed"
+        row["prResolveError"] = step.trouble
+
+
+def post_review(repo, number, summary, sending):
+    """Post comments as one review, and say whether it landed, where it landed, and why it did not.
+
+    A remark about a whole file is a review comment naming the file and no line within it; every other one names the
+    line it was written on, and a range names where it starts as well.
     """
-    opened, settled = {}, set()
-    for thread in threads:
-        said = thread["comments"]["nodes"]
-        if not said:
+    review = {"event": "COMMENT", "body": summary or "Review from the diff desk.", "comments": []}
+    for note in sending:
+        if note.get("side") == "file":
+            review["comments"].append({"path": note["path"], "body": note["text"], "subject_type": "file"})
             continue
-        if thread["isResolved"]:
-            settled.add(said[0]["body"])
-        else:
-            opened[said[0]["body"]] = thread["id"]
-    outcome = {row["seq"]: ("done", "") for row in owed if row["text"] in settled}
-    asking = [row for row in owed if row["seq"] not in outcome and row["text"] in opened]
-    wanted = [Owing(opened[row["text"]], 0, "") for row in asking]
-    for row, (went, trouble) in zip(asking, carry_out(repo, number, wanted), strict=True):
-        outcome[row["seq"]] = ("done", "") if went else ("failed", trouble)
-    for row in owed:
-        outcome.setdefault(row["seq"], ("failed", NOWHERE))
-    return outcome
+        side = "LEFT" if note.get("side") == "old" else "RIGHT"
+        comment = {
+            "path": note["path"],
+            "body": note["text"],
+            "line": note.get("endLine") or note["line"],
+            "side": side,
+        }
+        if note.get("endLine") and note["endLine"] != note["line"]:
+            comment["start_line"] = note["line"]
+            comment["start_side"] = side
+        review["comments"].append(comment)
+    target = f"repos/{repo}/pulls/{number}/reviews"
+    print(f"PUBLISH {len(review['comments'])} comment(s) -> {target}", flush=True)
+    done = gen_diff_data.gh(
+        "api", "--method", "POST", target, "--input", "-", repeatable=False, given=json.dumps(review)
+    )
+    landed = done.returncode == 0
+    url = json.loads(done.stdout or "{}").get("html_url", "") if landed else ""
+    error = "" if landed else " ".join((done.stderr or done.stdout).split())[:400]
+    return landed, url, error, not landed and is_refusal(error)
 
 
 def serve_payload(payload):
@@ -343,24 +426,18 @@ class Reconciled(NamedTuple):
     given: tuple | None
 
 
-def reconcile(row, thread, carry=True):
-    """What one comment owes its thread and is owed by it, including every mutation that has to be asked for.
+def heard_from(row, thread):
+    """What one comment learns from its thread: which of its replies are on it, what it holds that this desk has not,
+    and whether it is resolved there.
 
-    Nothing is asked here: a sync collects the mutations of all its comments so it can ask for them in one request.
-    `carry` withholds the replies written here; whatever the pull request holds is always brought back.
+    A sync only listens. What this desk holds reaches the pull request when the reader sends that thread, so nothing
+    read here is owed back and nothing recorded here is second-guessed: a resolution that has not been sent is a local
+    one, not a claim about the pull request, and stands until the reader sends the thread.
     """
     if thread is None:
-        # Nothing on the pull request answers to this comment, so whatever was believed about it stands
-        # uncorroborated: it is owed again rather than left claiming a resolution nobody can see.
-        owed = ("failed", NOWHERE) if row.get("state") == "resolved" else None
-        return Owed([], [], False, owed, [])
+        return Owed([], [], False, None, [])
     said = thread["comments"]["nodes"]
-    landed, sending = carry_replies(row, said) if carry else ([], [])
-    settled, resolving = agree(thread, row)
-    wanted = [Owing(thread["id"], said[0]["databaseId"], text) for text in sending]
-    if resolving:
-        wanted.append(Owing(resolving, 0, ""))
-    return Owed(landed, incoming(row, said), settled, None, wanted)
+    return Owed(landed_replies(row, said), incoming(row, said), thread["isResolved"], None, [])
 
 
 def reconciled(plan, answers):
@@ -373,19 +450,6 @@ def reconciled(plan, answers):
             landed.append(item.body)
             sent += 1
     return Reconciled(landed, sent, plan.incoming, plan.settled, given)
-
-
-def agree(thread, row):
-    """What a sync should make of one thread: whether to close the comment here, and which thread to resolve there.
-
-    Decided on what the pull request says rather than on what this desk recorded, which is what repairs a comment
-    wrongly believed resolved there - trusting the record is how such a belief survives a sync.
-    """
-    if thread["isResolved"]:
-        return True, ""
-    if row.get("state") == "resolved":
-        return False, thread["id"]
-    return False, ""
 
 
 def under_review(row, order):
@@ -410,25 +474,12 @@ def under_review(row, order):
     return row.get("branch") in named
 
 
-def owes_resolution(row):
-    """Whether the pull request still owes this comment a resolution.
-
-    Read from the state rather than from the moment it was closed: a comment closed here before it was ever posted, or
-    closed by an older version of this desk, owes one just the same. Only GitHub having confirmed it settles the matter.
-    """
-    if row.get("github") != "posted" or row.get("state") == "deleted":
-        return False
-    if row.get("state") != "resolved":
-        return row.get("prResolve") in ("pending", "failed")
-    return row.get("prResolve") != "done"
-
-
 def settle(row, landed, incoming, resolved):
     """Write what a sync found onto one comment: replies that are on the pull request, replies brought back from it,
     and its resolution - the pull request being the copy others read, what it says is resolved is resolved."""
     for answer in row.get("replies", []):
         if answer["text"] in landed:
-            answer["posted"] = True
+            answer["github"] = "posted"
     if incoming:
         row.setdefault("replies", []).extend(incoming)
     if resolved:
@@ -436,16 +487,22 @@ def settle(row, landed, incoming, resolved):
         row["prResolve"] = "done"
 
 
-def carry_replies(row, said):
-    """The replies written here, split into those the thread already holds and those still to go out."""
+def landed_replies(row, said):
+    """The replies of this comment the thread holds already, whether this desk sent them or they were pasted there."""
     spoken = {answer["body"] for answer in said}
-    landed, sending = [], []
-    for answer in row.get("replies", []):
-        if answer.get("posted") or answer["text"] in spoken:
-            landed.append(answer["text"])
-        else:
-            sending.append(answer["text"])
-    return landed, sending
+    return [answer["text"] for answer in row["replies"] if answer["github"] == "posted" or answer["text"] in spoken]
+
+
+def going_out(row, said):
+    """What this thread owes the pull request, in the state the thread is in: the replies of it that are not there yet.
+
+    Read at the moment a send is asked for and no later: a reply written afterwards waits for the reader to send the
+    thread again, since what leaves this desk is never decided by what happens to be written in it.
+    """
+    spoken = {answer["body"] for answer in said}
+    return [
+        answer["text"] for answer in row["replies"] if answer["github"] != "posted" and answer["text"] not in spoken
+    ]
 
 
 def brought_in(thread, order, ref):
@@ -475,7 +532,10 @@ def brought_in(thread, order, ref):
         "at": said[0]["createdAt"],
         "state": "resolved" if thread["isResolved"] else "open",
         "github": "posted",
-        "replies": [{"who": author_of(answer), "text": answer["body"], "at": "on the PR"} for answer in said[1:]],
+        "replies": [
+            {"who": author_of(answer), "text": answer["body"], "at": "on the PR", "github": "posted"}
+            for answer in said[1:]
+        ],
         "edits": [],
         "prResolve": "done" if thread["isResolved"] else "none",
     }
@@ -510,7 +570,7 @@ def incoming(row, said):
     """The replies the thread holds that this desk does not, as replies of its own."""
     ours = {answer["text"] for answer in row.get("replies", [])} | {row["text"]}
     return [
-        {"who": author_of(answer), "text": answer["body"], "at": "on the PR"}
+        {"who": author_of(answer), "text": answer["body"], "at": "on the PR", "github": "posted"}
         for answer in said[1:]
         if answer["body"] not in ours
     ]
@@ -705,30 +765,24 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path.rstrip("/")
-        if path == "/comments":
-            self._record()
-        elif path == "/reviewed":
-            self._reviewed()
-        elif path == "/scan":
-            self._scan()
-        elif path == "/bind":
-            self._bind()
-        elif path == "/edit":
-            self._edit()
-        elif path == "/reply":
-            self._reply()
-        elif path == "/resolve":
-            self._resolve()
-        elif path == "/drop":
-            self._drop()
-        elif path == "/publish":
-            self._publish()
-        elif path == "/close":
-            self._close()
-        elif path == "/sync":
-            self._sync()
-        else:
+        routes = {
+            "/comments": self._record,
+            "/reviewed": self._reviewed,
+            "/scan": self._scan,
+            "/bind": self._bind,
+            "/edit": self._edit,
+            "/reply": self._reply,
+            "/resolve": self._resolve,
+            "/drop": self._drop,
+            "/publish": self._publish,
+            "/send": self._send_thread,
+            "/sync": self._sync,
+        }
+        serving = routes.get(path)
+        if serving is None:
             self._send(404)
+            return
+        serving()
 
     def _reviewed(self):
         """Record which files have been read, and which have been unticked.
@@ -858,7 +912,7 @@ class Handler(BaseHTTPRequestHandler):
                 said.setdefault("edits", []).append({"at": time.strftime("%H:%M:%S"), "text": said["text"]})
                 said["text"] = text
                 # Rewriting is never carried to the pull request, so its copy is marked as having been moved on from.
-                landed = said.get("posted") if index is not None else found.get("github") == "posted"
+                landed = (said["github"] if index is not None else found.get("github")) == "posted"
                 if landed:
                     said["editedAfterPost"] = True
                 touched(rows, found, "you")
@@ -870,7 +924,11 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": True, "seq": found["seq"], "reply": index, "edits": len(said["edits"])})
 
     def _reply(self):
-        """Add a reply to a comment, from whichever side wrote it. A reply leaves the thread open."""
+        """Add a reply to a comment, from whichever side wrote it. A reply leaves the thread open.
+
+        Recorded here and nowhere else: what a thread says reaches the pull request when the reader sends that thread,
+        never as a consequence of somebody answering in it.
+        """
         order = self._body()
         text = (order.get("text") or "").strip()
         if not text:
@@ -880,7 +938,7 @@ class Handler(BaseHTTPRequestHandler):
         with changing() as rows:
             found = next((row for row in rows if row["seq"] == order.get("seq")), None)
             if found is not None:
-                found["replies"].append({"who": who, "text": text, "at": time.strftime("%H:%M:%S")})
+                found["replies"].append({"who": who, "text": text, "at": time.strftime("%H:%M:%S"), "github": "none"})
                 touched(rows, found, who)
         if found is None:
             self._json({"ok": False, "error": f"no comment numbered {order.get('seq')}"})
@@ -900,11 +958,10 @@ class Handler(BaseHTTPRequestHandler):
             for row in rows:
                 if row.get("seq") in wanted:
                     row["state"] = "resolved" if closing else "open"
-                    # Closing a comment that reached the pull request owes a resolution there as well.
-                    if row.get("github") == "posted":
-                        row["prResolve"] = "pending" if closing else "none"
                     if answer:
-                        row["replies"].append({"who": who, "text": answer, "at": time.strftime("%H:%M:%S")})
+                        row["replies"].append(
+                            {"who": who, "text": answer, "at": time.strftime("%H:%M:%S"), "github": "none"}
+                        )
                     touched(rows, row, who)
                     closed += 1
         print(f"{'RESOLVED' if closing else 'REOPENED'} {closed} comment(s) by {who}", flush=True)
@@ -1006,32 +1063,7 @@ class Handler(BaseHTTPRequestHandler):
         if not sending:
             self._json({"ok": True, "sent": 0, "owed": 0})
             return
-        review = {"event": "COMMENT", "body": order.get("summary") or "Review from the diff desk.", "comments": []}
-        for note in sending:
-            if note.get("side") == "file":
-                # A remark about a whole file is a review comment naming the file and no line within it.
-                review["comments"].append({"path": note["path"], "body": note["text"], "subject_type": "file"})
-                continue
-            side = "LEFT" if note.get("side") == "old" else "RIGHT"
-            comment = {
-                "path": note["path"],
-                "body": note["text"],
-                "line": note.get("endLine") or note["line"],
-                "side": side,
-            }
-            if note.get("endLine") and note["endLine"] != note["line"]:
-                comment["start_line"] = note["line"]
-                comment["start_side"] = side
-            review["comments"].append(comment)
-        target = f"repos/{order['repo']}/pulls/{order['pr']}/reviews"
-        print(f"PUBLISH {len(review['comments'])} comment(s) -> {target}", flush=True)
-        done = gen_diff_data.gh(
-            "api", "--method", "POST", target, "--input", "-", repeatable=False, given=json.dumps(review)
-        )
-        landed = done.returncode == 0
-        url = json.loads(done.stdout or "{}").get("html_url", "") if landed else ""
-        error = "" if landed else " ".join((done.stderr or done.stdout).split())[:400]
-        refused = not landed and is_refusal(error)
+        landed, url, error, refused = post_review(order["repo"], order["pr"], order.get("summary"), sending)
         marked = {note["seq"] for note in sending}
         # Read again now the call is over: comments recorded while it ran must not be written away.
         with changing() as rows:
@@ -1051,51 +1083,80 @@ class Handler(BaseHTTPRequestHandler):
         print(f"{'PUBLISHED ' + url if landed else 'PUBLISH FAILED ' + error} ({still} still owed)", flush=True)
         self._json({"ok": landed, "url": url, "error": error, "sent": len(sending) if landed else 0, "owed": still})
 
-    def _close(self):
-        """Resolve on the pull request the threads of comments closed here, and record how that went.
+    def _send_thread(self):
+        """Send one thread to the pull request, in the state it is in when the reader asks.
 
-        A thread is found by the body of the comment that opened it, which is the text this desk posted, so no
-        identifier has to be kept in step with GitHub's own.
+        What goes out is this thread as it now reads: the remark if it is not there yet, every reply the thread does not
+        hold, and its resolution when it is closed here. A reply written after this has answered waits for the reader to
+        ask again - what leaves this desk is their decision, never a consequence of somebody writing in a thread.
         """
         order = self._body()
         with CHANGING:
             rows = read_notes()
-        owed = [row for row in rows if owes_resolution(row) and under_review(row, order)]
-        if not owed:
-            self._json({"ok": True, "closed": 0, "owed": 0})
+        found = next((row for row in rows if row["seq"] == order.get("seq")), None)
+        if found is None or found.get("state") == "deleted":
+            self._json({"ok": False, "error": f"no comment numbered {order.get('seq')}"})
             return
-        wanted = {row["seq"] for row in owed}
+        if found.get("who"):
+            self._json({"ok": False, "error": f"comment {found['seq']} is already on the pull request, as its own"})
+            return
+        if found.get("github") != "posted":
+            trouble = self._post_remark(order, found)
+            if trouble:
+                print(f"SEND FAILED {trouble}", flush=True)
+                self._json({"ok": False, "error": trouble, "sent": 0, "resolved": False})
+                return
         reviewed, trouble = review_threads(order["repo"], order["pr"])
-        if reviewed is None:
+        thread = None if reviewed is None else thread_of(reviewed.threads, found["text"])
+        if thread is None:
+            trouble = trouble or NOWHERE
+            # Written onto the comment, so the reader sees on the thread why the last send did not land: nothing sweeps
+            # up after them, and a failure said only in a log they may not have open is a failure said nowhere.
             with changing() as fresh:
                 for row in fresh:
-                    if row["seq"] in wanted:
-                        row["prResolve"] = "failed"
-                        row["prResolveError"] = trouble
+                    if row["seq"] == found["seq"]:
+                        note_trouble(row, trouble)
                         touched(fresh, row, "session")
-            print(f"CLOSE FAILED {trouble}", flush=True)
-            self._json({"ok": False, "error": trouble, "closed": 0, "owed": len(owed)})
+            print(f"SEND FAILED {trouble}", flush=True)
+            self._json({"ok": False, "error": trouble, "sent": 0, "resolved": False})
             return
-        outcome = close_threads(order["repo"], order["pr"], owed, reviewed.threads)
-        closed = len([seq for seq, (state, _) in outcome.items() if state == "done"])
+
+        going = going_out(found, thread["comments"]["nodes"])
+        wanted = owed_by(found, thread, going)
+        step = sent_out(wanted, carry_out(order["repo"], order["pr"], wanted))
         with changing() as fresh:
             for row in fresh:
-                if row["seq"] in outcome:
-                    row["prResolve"], trouble = outcome[row["seq"]]
-                    if trouble:
-                        row["prResolveError"] = trouble
-                    else:
-                        row.pop("prResolveError", None)
+                if row["seq"] == found["seq"]:
+                    settle_sent(row, thread, going, step)
                     touched(fresh, row, "session")
-            still = len([row for row in fresh if owes_resolution(row) and under_review(row, order)])
-        print(f"CLOSED {closed} thread(s) on the pull request ({still} still owed)", flush=True)
-        self._json({"ok": still == 0, "closed": closed, "owed": still})
+        told = f"[{found['seq']}] {len(step.sent)} reply(ies)" + (", resolved there" if step.resolved else "")
+        print(f"SENT {told}", flush=True)
+        self._json({"ok": not step.trouble, "error": step.trouble, "sent": len(step.sent), "resolved": step.resolved})
+
+    def _post_remark(self, order, found):
+        """Put the remark that opens a thread on the pull request, and say why it did not go when it did not."""
+        landed, url, error, refused = post_review(order["repo"], order["pr"], order.get("summary"), [found])
+        with changing() as fresh:
+            for row in fresh:
+                if row["seq"] != found["seq"]:
+                    continue
+                row["github"] = "posted" if landed else "refused" if refused else "failed"
+                # Where it was sent, so a later sweep for another pull request leaves it alone.
+                row["prRepo"], row["prNumber"] = order["repo"], order["pr"]
+                if landed:
+                    row["reviewUrl"] = url
+                    row.pop("error", None)
+                else:
+                    row["error"] = error
+                touched(fresh, row, "session")
+        return "" if landed else error
 
     def _sync(self):
         """Bring this desk and the pull request to the same state.
 
-        Replies go both ways, and so does resolution: a thread resolved there is closed here, since the pull request is
-        the copy everyone else reads, and one closed here is resolved there. A thread is matched by the body of the
+        A sync only listens: replies come back, a thread resolved there is closed here since the pull request is the
+        copy everyone else reads, and threads written there arrive as comments of their own. What this desk holds goes
+        out when the reader sends that thread, never as a consequence of a sync. A thread is matched by the body of the
         comment that opened it, which is the text this desk posted.
         """
         order = self._body()
@@ -1120,25 +1181,9 @@ class Handler(BaseHTTPRequestHandler):
         # by the same body text a thread of its own is matched by, so a second sync finds them already here.
         known = {row["text"] for row in rows}
         arriving = [thread for body, thread in theirs.items() if body not in known]
-        # A remark settled here withholds its replies unless asked for, but its resolution is still agreed with the pull
-        # request either way: agreeing on what is resolved is the point of a sync.
-        plans = {
-            seq: reconcile(
-                row, theirs.get(row["text"]), carry=bool(order.get("resolved")) or row.get("state") != "resolved"
-            )
-            for seq, row in posted.items()
-        }
-        # Every comment's replies and resolutions in one request, then handed back to the comment that asked for them.
-        wanted, spans = [], {}
-        for seq, plan in plans.items():
-            spans[seq] = slice(len(wanted), len(wanted) + len(plan.wanted))
-            wanted += plan.wanted
-        answers = carry_out(order["repo"], order["pr"], wanted)
-        found = {seq: reconciled(plan, answers[spans[seq]]) for seq, plan in plans.items()}
-        sent = sum(step.sent for step in found.values())
+        found = {seq: heard_from(row, theirs.get(row["text"])) for seq, row in posted.items()}
         brought = sum(len(step.incoming) for step in found.values())
         closed = len([seq for seq, step in found.items() if step.settled and posted[seq].get("state") != "resolved"])
-        away = len([step for step in found.values() if step.given and step.given[0] == "done"])
         with changing() as fresh:
             for row in fresh:
                 step = found.get(row["seq"])
@@ -1154,17 +1199,12 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         row.pop("prResolveError", None)
             taken = take_in(fresh, arriving, order, reviewed.ref)
-        told = (
-            f"sent {sent} reply(ies), brought {brought} back, took {len(taken)} comment(s) in, "
-            f"closed {closed} here, resolved {away} there"
-        )
+        told = f"brought {brought} reply(ies) back, took {len(taken)} comment(s) in, closed {closed} here"
         print(f"SYNC {told}", flush=True)
         for note in taken:
             where = "the file" if note["side"] == "file" else f"L{note['endLine']}"
             print(f"  FROM THE PULL REQUEST [{note['seq']}] {note['who']} on {note['path']} {where}", flush=True)
-        self._json(
-            {"ok": True, "sent": sent, "brought": brought, "took": len(taken), "closed": closed, "resolved": away}
-        )
+        self._json({"ok": True, "brought": brought, "took": len(taken), "closed": closed})
 
     def log_message(self, *args):
         pass
