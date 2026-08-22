@@ -2046,11 +2046,14 @@ def test_a_file_holding_an_unread_comment_opens_itself(page, desk):
     # Reviewed and read: nothing asks for it to be open.
     assert page.locator("section.file[data-path='added.py']").get_attribute("data-open") == "false"
 
+    # Away while it arrives, since a poll landing on an open page would show it and reading it is what folds the file
+    # away again: what is being asked here is what the reader finds on coming back.
+    page.goto("about:blank")
     desk.post(
         "/comments",
         [{"branch": branch, "path": "added.py", "line": 1, "side": "new", "text": "arrived after you read it"}],
     )
-    page.reload(wait_until="load")
+    page.go_back(wait_until="load")
     page.wait_for_selector("section.file")
     # A remark the reader has never been shown is not hidden behind a file they had finished with.
     again = page.locator("section.file[data-path='added.py']")
