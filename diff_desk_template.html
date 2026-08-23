@@ -588,7 +588,11 @@
   .thread .reply.session { color: var(--accent); }
   .thread .reply.you { color: var(--add-ink); }
   .thread .reply:not(.you):not(.session) { color: var(--stale); }
-  .thread .reply .who { color: inherit; }
+  /* Whose reply it is, said in its own voice: the line's colour draws the rule down its side, and the words inside it
+     are read in the page's ink, so the name cannot take either of them for its own. */
+  .thread .reply.session .who { color: var(--accent); }
+  .thread .reply.you .who { color: var(--add-ink); }
+  .thread .reply:not(.you):not(.session) .who { color: var(--stale); }
   .thread .reply .said { color: var(--ink); }
   .thread .mark { flex: none; font-family: var(--mono); font-size: 10.5px; padding: 0 6px; border-radius: 999px; }
   .thread .mark.pending { color: var(--stale); background: var(--stale-bg); }

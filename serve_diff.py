@@ -60,6 +60,7 @@ import os
 import pathlib
 import threading
 import time
+import types
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import NamedTuple
 from urllib.parse import parse_qs, urlparse
@@ -419,6 +420,8 @@ class Owed(NamedTuple):
     settled: bool
     given: tuple | None
     wanted: list
+    # When the pull request says each of its comments was written, for anything held here without a stamp of its own.
+    stamps: dict = types.MappingProxyType({})
 
 
 class Reconciled(NamedTuple):
@@ -442,7 +445,10 @@ def heard_from(row, thread):
     if thread is None:
         return Owed([], [], False, None, [])
     said = thread["comments"]["nodes"]
-    return Owed(landed_replies(row, said), incoming(row, said), thread["isResolved"], None, [])
+    # When the pull request says each of these was written, which is the answer for anything this desk holds without
+    # one: a reply brought back before it kept them has a date after all, and it is the pull request that knows it.
+    stamps = {node["body"]: said_at(node) for node in said}
+    return Owed(landed_replies(row, said), incoming(row, said), thread["isResolved"], None, [], stamps)
 
 
 def reconciled(plan, answers):
@@ -479,12 +485,18 @@ def under_review(row, order):
     return row.get("branch") in named
 
 
-def settle(row, landed, incoming, resolved):
+def settle(row, landed, incoming, resolved, stamps=()):
     """Write what a sync found onto one comment: replies that are on the pull request, replies brought back from it,
-    and its resolution - the pull request being the copy others read, what it says is resolved is resolved."""
+    when the pull request says each was written, and its resolution - the pull request being the copy others read,
+    what it says is resolved is resolved."""
+    stamps = stamps or {}
+    if not row.get("at") and row["text"] in stamps:
+        row["at"] = stamps[row["text"]]
     for answer in row.get("replies", []):
         if answer["text"] in landed:
             answer["github"] = "posted"
+        if not answer.get("at") and answer["text"] in stamps:
+            answer["at"] = stamps[answer["text"]]
     if incoming:
         row.setdefault("replies", []).extend(incoming)
     if resolved:
@@ -1221,7 +1233,7 @@ class Handler(BaseHTTPRequestHandler):
                 step = found.get(row["seq"])
                 if step is None:
                     continue
-                settle(row, step.landed, step.incoming, step.settled)
+                settle(row, step.landed, step.incoming, step.settled, step.stamps)
                 # A reply brought back from the pull request is somebody else's word, so it is news for this side.
                 touched(fresh, row, "you" if step.incoming else "session")
                 if step.given:

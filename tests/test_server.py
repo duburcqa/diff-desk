@@ -1781,3 +1781,68 @@ def test_the_reader_own_words_on_the_pull_request_are_theirs_to_reword(desk):
     # Their own words, wherever they wrote them: rewording is theirs, and so is taking them down.
     assert desk.post("/edit", {"seq": seq, "reply": 0, "text": "better worded"})["ok"]
     assert desk.post("/edit", {"seq": seq, "text": "the remark, better worded"})["ok"]
+
+
+def test_a_sync_gives_a_date_to_what_was_brought_back_without_one(desk):
+    made = desk.post(
+        "/comments",
+        {
+            "comments": [{"branch": "feature", "path": "sample.py", "line": 58, "side": "new", "text": "asked there"}],
+            "github": True,
+        },
+    )
+    seq = made["seqs"][0]
+    desk.github_answers(out=json.dumps({"html_url": "https://github.com/x/y/pull/71#review-1"}))
+    assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 71, "seq": [seq]})["ok"]
+
+    # As an older sync left them: brought back from the pull request with no date of their own.
+    held = desk.home / "comments.jsonl"
+    rows = [json.loads(line) for line in held.read_text().splitlines() if line.strip()]
+    for row in rows:
+        if row["seq"] == seq:
+            row["at"] = ""
+            row["replies"] = [{"who": "someone", "text": "answered there", "at": "", "github": "posted"}]
+    held.write_text("".join(json.dumps(row) + "\n" for row in rows))
+
+    thread = {
+        "id": "T_dated",
+        "isResolved": False,
+        "path": "sample.py",
+        "line": 58,
+        "startLine": None,
+        "originalLine": 58,
+        "originalStartLine": None,
+        "diffSide": "RIGHT",
+        "comments": {
+            "nodes": [
+                {
+                    "databaseId": 720,
+                    "body": "asked there",
+                    "path": "sample.py",
+                    "createdAt": "2026-08-20T14:03:00Z",
+                    "author": {"login": "duburcqa"},
+                },
+                {
+                    "databaseId": 721,
+                    "body": "answered there",
+                    "path": "sample.py",
+                    "createdAt": "2026-08-21T08:12:00Z",
+                    "author": {"login": "someone"},
+                },
+            ]
+        },
+    }
+    desk.github_answers(
+        rules=[
+            {
+                "match": "reviewThreads",
+                "out": json.dumps({"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": [thread]}}}}}),
+            }
+        ]
+    )
+    assert desk.post("/sync", {"repo": "someone/somewhere", "pr": 71})["ok"]
+
+    # The pull request knows when each of them was written, so a sync is where a missing date comes from.
+    row = {row["seq"]: row for row in desk.get("/comments")}[seq]
+    assert row["at"] == "2026-08-20 14:03"
+    assert row["replies"][0]["at"] == "2026-08-21 08:12"

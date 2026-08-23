@@ -2524,3 +2524,31 @@ def test_a_remark_and_a_reply_both_say_when_they_were_said_and_where_they_were_w
     )
     assert page.locator(f"#note-{made} .thread > .line").first.get_attribute("title").endswith(", submitted here")
     assert page.locator(f"#note-{made} .line.reply .who").first.get_attribute("title").endswith(", submitted here")
+
+
+def test_a_reply_says_whose_it_is_in_its_own_voice(page, desk):
+    branch = page.evaluate("() => data.branches[0].ref")
+    saying = f"answered in two voices, number {len(desk.get('/comments')) + 1}"
+    made = desk.post(
+        "/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": saying}]
+    )["seq"]
+    desk.post("/reply", {"seq": made, "text": "said by the session", "who": "session"})
+    desk.post("/reply", {"seq": made, "text": "> quoted\n\nsaid by the reader", "who": "you"})
+    page.reload(wait_until="load")
+    page.wait_for_selector(f"#note-{made} .line.reply")
+
+    # The name is read in the colour of the rule down the side of its reply, and neither takes the ink of the words:
+    # whose words they are is the one thing a reader picks out of a thread at a glance.
+    told = page.evaluate(
+        """(seq) =>
+          [...document.querySelectorAll(`#note-${seq} .line.reply`)].map((line) => ({
+            name: getComputedStyle(line.querySelector('.who')).color,
+            rule: getComputedStyle(line).borderLeftColor,
+            words: getComputedStyle(line.querySelector('.said .text')).color,
+          }))""",
+        made,
+    )
+    assert len(told) == 2
+    assert [row["name"] == row["rule"] for row in told] == [True, True]
+    assert [row["name"] != row["words"] for row in told] == [True, True]
+    assert told[0]["name"] != told[1]["name"]
