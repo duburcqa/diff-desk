@@ -588,9 +588,6 @@
   .thread .reply.session { color: var(--accent); }
   /* A note is set apart from the answers around it: it stays on this desk whatever the thread sends. */
   .thread .reply.aside { border-left-style: dashed; }
-  /* Offered on the line the reader is on: every line carrying it reads as a wall of buttons. */
-  .thread .line .tiny.aside { visibility: hidden; }
-  .thread .line:hover .tiny.aside, .thread .line .tiny.aside:focus-visible { visibility: visible; }
   .thread .reply.aside .who { font-style: italic; }
   .thread .mark.aside { color: var(--muted); background: var(--stale-bg); font-style: italic; }
   .thread .reply.you { color: var(--add-ink); }
@@ -1270,11 +1267,11 @@
     return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`;
   }
 
-  // A note written where it belongs: on the remark, or on a reply. Written on a note, it carries that note's own
-  // sub-thread on, standing where it stands, so notes never stand inside notes.
+  // A note written where it belongs: on the remark, or on a reply. Several may stand on one reply, and they are read
+  // in the order they were written, so notes never stand inside notes.
   function noteOn(note, on) {
     const open = document.createElement("button");
-    open.className = "tiny aside";
+    open.className = "tiny";
     open.textContent = "Note";
     open.title = "Keep a note here, on this desk";
     open.addEventListener("click", () => {
@@ -1297,7 +1294,13 @@
       const writing = document.createElement("div");
       writing.className = "line reply actions aside";
       writing.append(written, keep, drop);
-      open.closest(".line").after(writing);
+      // Where the note will be read: at the end of the notes already standing on this reply, which is where the one
+      // being written will stand.
+      let after = open.closest(".line");
+      while (after.nextElementSibling && after.nextElementSibling.matches(".line.reply.aside")) {
+        after = after.nextElementSibling;
+      }
+      after.after(writing);
       written.focus();
       drop.addEventListener("click", render);
       keep.addEventListener("click", async () => {
@@ -2163,7 +2166,9 @@
         if (answer.error) standing.title = answer.error;
         said.append(standing);
       }
-      if (!note.pending && notes.live) said.append(noteOn(note, index));
+      // Offered on a reply, never on a note: another note on the same reply is what carries an aside on, and a note
+      // standing on a note is what this desk does not hold.
+      if (!note.pending && notes.live && !answer.note) said.append(noteOn(note, index));
       // Only what was written here can be reworded: a reply carried back from the pull request is its author's word,
       // said on the copy everyone else reads, so this desk shows it and leaves it alone.
       if (!note.pending && notes.live && (isReader(answer.who) || answer.who === "session")) {
