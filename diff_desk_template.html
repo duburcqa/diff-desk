@@ -588,6 +588,9 @@
   .thread .reply.session { color: var(--accent); }
   /* A note is set apart from the answers around it: it stays on this desk whatever the thread sends. */
   .thread .reply.aside { border-left-style: dashed; }
+  /* Offered on the line the reader is on: every line carrying it reads as a wall of buttons. */
+  .thread .line .tiny.aside { visibility: hidden; }
+  .thread .line:hover .tiny.aside, .thread .line .tiny.aside:focus-visible { visibility: visible; }
   .thread .reply.aside .who { font-style: italic; }
   .thread .mark.aside { color: var(--muted); background: var(--stale-bg); font-style: italic; }
   .thread .reply.you { color: var(--add-ink); }
@@ -1271,10 +1274,16 @@
   // sub-thread on, standing where it stands, so notes never stand inside notes.
   function noteOn(note, on) {
     const open = document.createElement("button");
-    open.className = "tiny";
+    open.className = "tiny aside";
     open.textContent = "Note";
     open.title = "Keep a note here, on this desk";
     open.addEventListener("click", () => {
+      // One at a time: a second press goes back to the box already open rather than opening another beside it.
+      const already = document.querySelector(".thread .line.actions.aside textarea");
+      if (already) {
+        already.focus();
+        return;
+      }
       const written = document.createElement("textarea");
       written.rows = 2;
       written.placeholder = "a note, kept here";
@@ -2099,7 +2108,16 @@
     }
     box.append(head);
 
-    (note.replies || []).forEach((answer, index, answers) => {
+    // Read where it belongs rather than where it landed: every note written on something follows that thing, and the
+    // notes on one thing follow each other in the order they were written. A note on the thread itself closes it.
+    const said_of = (note.replies || []).map((answer, index) => ({ answer, index }));
+    const notesOn = (on) => said_of.filter(({ answer }) => answer.note && (answer.on ?? null) === on);
+    const ordered = [
+      ...said_of.filter(({ answer }) => !answer.note).flatMap((entry) => [entry, ...notesOn(entry.index)]),
+      ...notesOn(null),
+    ];
+    ordered.forEach(({ answer, index }, place) => {
+      const answers = ordered.map((entry) => entry.answer);
       const said = document.createElement("div");
       // Read as the reader's own where they wrote it, whichever side of the pull request they were on at the time. A
       // note is nobody's word to the pull request: it is written for this side of the desk, so it opens as one.
@@ -2117,7 +2135,7 @@
       body.className = "said";
       // Said once for a run of them: the first note says what the ones under it are, and repeating it on each says
       // nothing the step in has not already said.
-      if (answer.note && !(index > 0 && answers[index - 1].note)) {
+      if (answer.note && !(place > 0 && answers[place - 1].note)) {
         const kind = document.createElement("span");
         kind.className = "mark aside";
         kind.textContent = "note";
@@ -2178,7 +2196,7 @@
         said.append(mark);
       }
       // Only the last one can go: deleting further up would leave the answers below it standing against nothing.
-      if (!note.pending && notes.live && index === answers.length - 1) {
+      if (!note.pending && notes.live && place === answers.length - 1) {
         const undo = document.createElement("button");
         undo.className = "drop";
         undo.textContent = "\u00d7";
