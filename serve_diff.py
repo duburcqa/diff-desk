@@ -823,6 +823,7 @@ class Handler(BaseHTTPRequestHandler):
             "/reply": self._reply,
             "/resolve": self._resolve,
             "/drop": self._drop,
+            "/forget": self._forget,
             "/publish": self._publish,
             "/send": self._send_thread,
             "/sync": self._sync,
@@ -1048,6 +1049,38 @@ class Handler(BaseHTTPRequestHandler):
                     closed += 1
         print(f"{'RESOLVED' if closing else 'REOPENED'} {closed} comment(s) by {who}", flush=True)
         self._json({"ok": True, "resolved": closed, "state": "resolved" if closing else "open"})
+
+    def _forget(self):
+        """Forget one note, named by its place in the thread.
+
+        A note never left this desk, so it goes on its own and asks nothing of the pull request - which is what tells
+        it apart from a reply, where only the last can go and a posted one has to be deleted there as well.
+        """
+        order = self._body()
+        seq, at = order.get("seq"), order.get("note")
+        with changing() as rows:
+            found = next((row for row in rows if row["seq"] == seq), None)
+            said = (found or {}).get("replies") or []
+            if found is None or not isinstance(at, int) or not 0 <= at < len(said) or not said[at].get("note"):
+                found = None
+            else:
+                said.pop(at)
+                # What is said is addressed by its place in the thread, so the places move when one goes: an anchor
+                # past it comes back one, and one that named it stands on the thread instead.
+                for answer in said:
+                    on = answer.get("on")
+                    if on is None:
+                        continue
+                    if on == at:
+                        answer.pop("on")
+                    elif on > at:
+                        answer["on"] = on - 1
+                touched(rows, found, "you")
+        if found is None:
+            self._json({"ok": False, "error": f"[{at}] is no note of comment {seq}"})
+            return
+        print(f"FORGOT note [{at}] of [{seq}]", flush=True)
+        self._json({"ok": True, "seq": seq, "note": at})
 
     def _drop(self):
         """Delete a comment, or only its last reply, here and on the pull request when it was posted.

@@ -1269,10 +1269,10 @@
 
   // A note written where it belongs: on the remark, or on a reply. Several may stand on one reply, and they are read
   // in the order they were written, so notes never stand inside notes.
-  function noteOn(note) {
+  function noteOn(note, on) {
     const open = document.createElement("button");
     open.className = "tiny";
-    open.textContent = "Note";
+    open.textContent = "note";
     open.title = "Keep a note here, on this desk";
     open.addEventListener("click", () => {
       // One at a time: a second press goes back to the box already open rather than opening another beside it.
@@ -1297,14 +1297,17 @@
       // Standing where what is written into it will stand: a note is read one step in, and so is the box for it.
       writing.style.marginLeft = "12px";
       writing.append(written, keep, drop);
-      // Where the note will be read: at the foot of what has been said, which is where the notes on a thread stand.
-      open.closest(".thread").querySelector(".actions").before(writing);
+      // Where the note will be read: after the last note about the same comment, and under that comment while none
+      // stands there yet.
+      const thread = open.closest(".thread");
+      const kin = [...thread.querySelectorAll(`.line.reply.aside[data-on="${on === null ? "" : on}"]`)];
+      (kin.length ? kin[kin.length - 1] : open.closest(".line")).after(writing);
       written.focus();
       drop.addEventListener("click", render);
       keep.addEventListener("click", async () => {
         const wanted = written.value.trim();
         if (!wanted) return render();
-        await post("reply", { seq: note.seq, text: wanted, who: "you", note: true });
+        await post("reply", { seq: note.seq, text: wanted, who: "you", note: true, on });
         await loadNotes();
         render();
       });
@@ -2005,7 +2008,7 @@
     if ((note.pending || notes.live) && !note.who) {
       const change = document.createElement("button");
       change.className = "tiny";
-      change.textContent = "Edit";
+      change.textContent = "edit";
       change.title = note.edits && note.edits.length ? `rewritten ${note.edits.length} time(s)` : "Rewrite this comment";
       change.addEventListener("click", () => {
         const written = document.createElement("textarea");
@@ -2119,9 +2122,12 @@
     };
     const notesOn = (on) => said_of.filter((entry) => entry.answer.note && standsOn(entry) === on);
     const ordered = [
-      ...said_of.filter(({ answer }) => !answer.note).flatMap((entry) => [entry, ...notesOn(entry.index)]),
       ...notesOn(null),
+      ...said_of.filter(({ answer }) => !answer.note).flatMap((entry) => [entry, ...notesOn(entry.index)]),
     ];
+    // Every comment carries one way to add a note about it, the remark included: it stands on the last note about
+    // that comment, or on the comment itself while none stands there.
+    if (!note.pending && notes.live && !notesOn(null).length) head.append(noteOn(note, null));
     // Nothing said is left unread, whatever an anchor written before this says.
     for (const entry of said_of) if (!ordered.includes(entry)) ordered.push(entry);
     // What each thing said belongs to: a reply is its own, and a note belongs to what it stands on.
@@ -2138,7 +2144,10 @@
       // back at the margin: a run of notes reads as an aside, and the thread resumes where it left off.
       said.style.marginLeft = answer.note ? "12px" : "0";
       said.dataset.on = groupOf(entry) === null ? "" : String(groupOf(entry));
+      // The tail of what stands on one comment carries the way to add to it, so it is always where the next will read.
+      const carries = !ordered[place + 1] || groupOf(ordered[place + 1]) !== groupOf(entry);
       const from = document.createElement("span");
+
       from.className = "who";
       from.textContent = spokenBy(answer.who);
       // When it was said and where it stands, kept for the asking: in the line they say little and take the room the
@@ -2171,10 +2180,11 @@
       // reply itself while nothing stands on it yet. A note on the thread is written from the box at the foot.
       // Only what was written here can be reworded: a reply carried back from the pull request is its author's word,
       // said on the copy everyone else reads, so this desk shows it and leaves it alone.
+      if (!note.pending && notes.live && carries) said.append(noteOn(note, groupOf(entry)));
       if (!note.pending && notes.live && (isReader(answer.who) || answer.who === "session")) {
         const change = document.createElement("button");
         change.className = "tiny";
-        change.textContent = "Edit";
+        change.textContent = "edit";
         change.title = answer.edits && answer.edits.length ? `rewritten ${answer.edits.length} time(s)` : "Rewrite this reply";
         change.addEventListener("click", () => {
           const written = document.createElement("textarea");
@@ -2209,8 +2219,23 @@
         mark.textContent = "rewritten after posting";
         said.append(mark);
       }
-      // Only the last one can go: deleting further up would leave the answers below it standing against nothing.
-      if (!note.pending && notes.live && place === answers.length - 1) {
+      // A note never left this desk, so any of them goes on its own; a reply is somebody's word on the pull request,
+      // so only the last can go - deleting further up would leave the answers below it standing against nothing.
+      if (!note.pending && notes.live && answer.note) {
+        const forget = document.createElement("button");
+        forget.className = "drop";
+        forget.textContent = "\u00d7";
+        forget.title = "Forget this note";
+        forget.addEventListener("click", async () => {
+          if (!window.confirm("Forget this note?")) return;
+          await post("forget", { seq: note.seq, note: index });
+          await loadNotes();
+          drawLog();
+          render();
+        });
+        said.append(forget);
+      }
+      if (!note.pending && notes.live && !answer.note && place === answers.length - 1) {
         const undo = document.createElement("button");
         undo.className = "drop";
         undo.textContent = "\u00d7";
@@ -2227,13 +2252,6 @@
       }
       box.append(said);
     });
-
-    // One for the thread, at the end of what has been said: on the last note if any stands there, on the remark
-    // itself if none does.
-    if (!note.pending && notes.live) {
-      const asides = box.querySelectorAll(".line.reply.aside");
-      (asides.length ? asides[asides.length - 1] : head).append(noteOn(note));
-    }
 
     // A recorded comment can be answered and closed from here; resolving keeps the thread and all of its replies.
     if (!note.pending && notes.live) {
