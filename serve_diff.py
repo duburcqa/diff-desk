@@ -865,6 +865,9 @@ class Handler(BaseHTTPRequestHandler):
             group = max((row.get("batch", 0) for row in rows), default=0) + 1
             for note in batch:
                 seq += 1
+                # When it was written, where the writer did not say: a comment recorded through the API carries no
+                # stamp of its own, and a thread with no time on it can say when nothing it holds was said.
+                note.setdefault("at", time.strftime("%H:%M:%S"))
                 note["seq"] = seq
                 note["batch"] = group
                 note["state"] = "open"

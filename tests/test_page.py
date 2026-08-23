@@ -2279,9 +2279,9 @@ def test_a_comment_written_on_the_pull_request_shows_whose_it_is_and_is_answered
         # reads, so the page offers the reply and withholds what would put words in their mouth.
         head = page.locator(f"#note-{seq} .thread > .line").first
         assert head.locator(".who .seq").inner_text() == f"[{seq}]"
-        # Whose remark it is stands in the line; where it was written is what hovering says.
+        # Whose remark it is stands in the line; when it was said and where it stands are what hovering says.
         assert head.locator(".who .by").inner_text() == "Milotrince"
-        assert head.get_attribute("title") == "written on the pull request"
+        assert head.get_attribute("title") == "2026-08-22 09:00, on the pull request"
         assert head.locator("button.tiny").filter(has_text="Edit").count() == 0
         assert head.locator("button.drop").count() == 0
         assert page.locator(f"#note-{seq} .actions button.ghost").filter(has_text="Reply").count() == 1
@@ -2489,3 +2489,35 @@ def test_reaching_a_comment_in_a_file_far_from_the_reader_lands_on_it(page, desk
         seconds=15.0,
     )
     assert landed
+
+
+def test_a_remark_and_a_reply_both_say_when_they_were_said_and_where_they_stand(page, desk):
+    branch = page.evaluate("() => data.branches[0].ref")
+    saying = f"asked when and where, number {len(desk.get('/comments')) + 1}"
+    made = desk.post(
+        "/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": saying}]
+    )["seq"]
+    desk.post("/reply", {"seq": made, "text": "answered here", "who": "session"})
+    page.reload(wait_until="load")
+    page.wait_for_selector(f"#note-{made} .line.reply")
+
+    # Written here and answered here, so both say so, each with the time it was said.
+    head = page.locator(f"#note-{made} .thread > .line").first
+    assert head.get_attribute("title").endswith(", here")
+    answer = page.locator(f"#note-{made} .line.reply .who").first
+    assert answer.get_attribute("title").endswith(", here")
+    assert re.match(r"^[0-9]", answer.get_attribute("title"))
+
+    # A remark the pull request holds says that instead, wherever it was written: what a thread stands at is where it
+    # is now, not where it started.
+    page.evaluate(
+        """(seq) => {
+          const note = notes.sent.find((one) => one.seq === seq);
+          note.github = 'posted';
+          note.replies[0].github = 'posted';
+          render();
+        }""",
+        made,
+    )
+    assert page.locator(f"#note-{made} .thread > .line").first.get_attribute("title").endswith(", on the pull request")
+    assert page.locator(f"#note-{made} .line.reply .who").first.get_attribute("title").endswith(", on the pull request")

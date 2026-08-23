@@ -1244,6 +1244,21 @@
   const isReader = (who) => who === "you" || (Boolean(mine_()) && who === mine_());
   const spokenBy = (who) => (isReader(who) ? "you" : who === "session" ? "claude" : who);
 
+  const saidWhen = (when, standing) => {
+    const where = standing === "posted" ? "on the pull request" : standing === "failed" ? "not sent" : "here";
+    return when ? `${said(when)}, ${where}` : where;
+  };
+
+  function said(when) {
+    // A stamp is a stamp however it was written down: a clock time from this desk stands as it is, a date from a pull
+    // request or from an older log is read and said to the minute.
+    if (/^\d{1,2}:\d{2}/.test(when)) return when;
+    const at = new Date(when);
+    if (Number.isNaN(at.getTime())) return when;
+    const pad = (number) => String(number).padStart(2, "0");
+    return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`;
+  }
+
   function owedThere(note) {
     if (note.pending || !notes.live) return "";
     const said = (note.replies || []).filter((answer) => answer.github !== "posted").length;
@@ -1896,7 +1911,7 @@
       from.className = `by ${note.who ? (isReader(note.who) ? "you" : "them") : "you"}`;
       from.textContent = note.who ? spokenBy(note.who) : "you";
       who.append(document.createTextNode(" "), from);
-      head.title = note.who ? "written on the pull request" : "written here";
+      head.title = saidWhen(note.at, note.github);
     }
     const text = document.createElement("span");
     text.className = "said";
@@ -2039,8 +2054,9 @@
       const from = document.createElement("span");
       from.className = "who";
       from.textContent = spokenBy(answer.who);
-      // When it was said, kept for the asking: in the line it says little and takes the room the reply is read in.
-      if (answer.at) from.title = answer.at;
+      // When it was said and where it stands, kept for the asking: in the line they say little and take the room the
+      // reply is read in.
+      from.title = saidWhen(answer.at, answer.github);
       const body = document.createElement("span");
       body.className = "said";
       body.append(from);
@@ -2897,8 +2913,6 @@
   // the height it had, so nothing under the reader moves as they go.
   const drawn = new WeakMap();
   const NEAR = 1.5;
-  // Whether a change is holding the reader's place as it happens, so the settling it causes leaves that to it.
-  let holding = false;
   // The card a jump is on its way to, kept while it is: a scroll still travelling leaves it as far off as it was, and
   // letting go of it there is letting go of the very thing being gone to.
   let reaching = null;
@@ -2974,16 +2988,7 @@
     const covered = document.querySelector("header").getBoundingClientRect().bottom;
     const before = at(path);
     const passed = before !== null && before < covered;
-    holding = true;
-    try {
-      change();
-    } finally {
-      // Held past the change itself: what it draws is settled a frame or two later, and the place it has just been put
-      // at is the place it should be left at, not a starting point to be compensated away from.
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        holding = false;
-      }));
-    }
+    change();
     const after = at(path);
     if (after === null || before === null) return;
     if (passed) document.querySelector(`section.file[data-path="${CSS.escape(path)}"]`).scrollIntoView({ block: "start" });
@@ -3314,16 +3319,11 @@
   function settleBody(wrap) {
     const held = drawn.get(wrap);
     if (!held) return;
-    // Whatever a card does with its lines, the reader keeps their place: one that changes height entirely above them
-    // would otherwise take the page with it, and a reservation is never exactly what the lines turn out to measure.
-    const before = wrap.getBoundingClientRect();
+    // A card let go stands at what its lines measured, and one built stands at what they measure, so what a settle
+    // does above the reader is a change of nothing at all. Where an estimate turns out to be off, the browsers hold
+    // the place themselves; scrolling for it by hand walks the page a line at a time as each settle nudges the next.
     if (wrap.dataset.open === "true" && (nearReader(wrap) || wrap === reaching)) fillBody(wrap, held.file, held.index);
     else releaseBody(wrap);
-    const after = wrap.getBoundingClientRect();
-    // Whole pixels, and only where it is worth it: a fraction moved on every settle drifts the place it is holding.
-    // Left alone while a change is holding the reader's place itself, which would otherwise be held twice over.
-    const moved = Math.round(after.height - before.height);
-    if (!holding && before.bottom < 0 && Math.abs(moved) > 1) window.scrollBy(0, moved);
   }
 
   function settleNear() {
