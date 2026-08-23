@@ -1005,7 +1005,19 @@ class Handler(BaseHTTPRequestHandler):
                 if on is not None and not 0 <= on < len(said_before):
                     self._json({"ok": False, "error": f"comment {found['seq']} has nothing said at [{on}]"})
                     return
-                is_note = bool(order.get("note")) or (on is not None and bool(said_before[on].get("note")))
+                is_note = bool(order.get("note"))
+                if on is not None and said_before[on].get("note"):
+                    # A reply is never turned into a note, nor a note into a reply: what is bound for the pull request
+                    # cannot hang on something the pull request has never seen.
+                    if not is_note:
+                        self._json({"ok": False, "error": f"[{on}] is a note, which the pull request holds none of"})
+                        return
+                    # One more note on a note carries on where that note stands, so notes never stand inside notes.
+                    while on is not None and said_before[on].get("note"):
+                        on = said_before[on].get("on")
+                    said.pop("on", None)
+                    if on is not None:
+                        said["on"] = on
                 if is_note:
                     said["note"] = True
                 said_before.append(said)

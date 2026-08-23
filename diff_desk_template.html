@@ -1267,12 +1267,12 @@
     return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`;
   }
 
-  // A note written where it belongs: on the remark, on a reply, or on another note - which makes it an answer to that
-  // note, and no more able to leave than the note it hangs under.
-  function noteOn(note, on, label) {
+  // A note written where it belongs: on the remark, or on a reply. Written on a note, it carries that note's own
+  // sub-thread on, standing where it stands, so notes never stand inside notes.
+  function noteOn(note, on) {
     const open = document.createElement("button");
     open.className = "tiny";
-    open.textContent = label;
+    open.textContent = "Note";
     open.title = "Keep a note here, on this desk";
     open.addEventListener("click", () => {
       const written = document.createElement("textarea");
@@ -2136,7 +2136,7 @@
         if (answer.error) standing.title = answer.error;
         said.append(standing);
       }
-      if (!note.pending && notes.live) said.append(noteOn(note, index, answer.note ? "Reply" : "Note"));
+      if (!note.pending && notes.live) said.append(noteOn(note, index));
       // Only what was written here can be reworded: a reply carried back from the pull request is its author's word,
       // said on the copy everyone else reads, so this desk shows it and leaves it alone.
       if (!note.pending && notes.live && (isReader(answer.who) || answer.who === "session")) {

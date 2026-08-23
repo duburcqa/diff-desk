@@ -2322,9 +2322,8 @@ def test_a_thread_says_what_it_owes_the_pull_request_and_sends_it_when_asked(pag
         assert aside.locator(".mark.aside").inner_text() == "note"
         assert aside.locator(".who").inner_text() == "you"
 
-        # A note is answered where it stands, and the answer is a note too: it steps in under what it answers, and
-        # neither of them carries a standing, having nowhere to go.
-        aside.locator("button.tiny").filter(has_text="Reply").click()
+        # One more note carries the aside on, standing where the note it was written on stands rather than inside it.
+        aside.locator("button.tiny").filter(has_text="Note").click()
         page.locator(f"#note-{made} .line.actions.aside textarea").fill("done.")
         page.locator(f"#note-{made} .line.actions.aside button").filter(has_text="Keep").click()
         page.wait_for_function(
