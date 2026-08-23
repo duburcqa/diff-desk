@@ -1269,7 +1269,7 @@
 
   // A note written where it belongs: on the remark, or on a reply. Several may stand on one reply, and they are read
   // in the order they were written, so notes never stand inside notes.
-  function noteOn(note, on) {
+  function noteOn(note) {
     const open = document.createElement("button");
     open.className = "tiny";
     open.textContent = "Note";
@@ -1292,21 +1292,19 @@
       drop.className = "ghost";
       drop.textContent = "Cancel";
       const writing = document.createElement("div");
-      writing.className = "line reply actions aside";
+      // Written by the reader, so read in the reader's voice: the rule down its side is the one their words carry.
+      writing.className = "line reply actions aside you";
+      // Standing where what is written into it will stand: a note is read one step in, and so is the box for it.
+      writing.style.marginLeft = "12px";
       writing.append(written, keep, drop);
-      // Where the note will be read: at the end of the notes already standing on this reply, which is where the one
-      // being written will stand.
-      let after = open.closest(".line");
-      while (after.nextElementSibling && after.nextElementSibling.matches(".line.reply.aside")) {
-        after = after.nextElementSibling;
-      }
-      after.after(writing);
+      // Where the note will be read: at the foot of what has been said, which is where the notes on a thread stand.
+      open.closest(".thread").querySelector(".actions").before(writing);
       written.focus();
       drop.addEventListener("click", render);
       keep.addEventListener("click", async () => {
         const wanted = written.value.trim();
         if (!wanted) return render();
-        await post("reply", { seq: note.seq, text: wanted, who: "you", note: true, on });
+        await post("reply", { seq: note.seq, text: wanted, who: "you", note: true });
         await loadNotes();
         render();
       });
@@ -2109,8 +2107,6 @@
       });
       head.append(drop);
     }
-    box.append(head);
-
     // Read where it belongs rather than where it landed: every note written on something follows that thing, and the
     // notes on one thing follow each other in the order they were written. A note on the thread itself closes it.
     const said_of = (note.replies || []).map((answer, index) => ({ answer, index }));
@@ -2130,6 +2126,7 @@
     for (const entry of said_of) if (!ordered.includes(entry)) ordered.push(entry);
     // What each thing said belongs to: a reply is its own, and a note belongs to what it stands on.
     const groupOf = (entry) => (entry.answer.note ? standsOn(entry) : entry.index);
+    box.append(head);
     ordered.forEach((entry, place) => {
       const { answer, index } = entry;
       const answers = ordered.map((held) => held.answer);
@@ -2140,6 +2137,7 @@
       // A note stands one step in, however deep the notes it answers go, and what is said to the pull request is read
       // back at the margin: a run of notes reads as an aside, and the thread resumes where it left off.
       said.style.marginLeft = answer.note ? "12px" : "0";
+      said.dataset.on = groupOf(entry) === null ? "" : String(groupOf(entry));
       const from = document.createElement("span");
       from.className = "who";
       from.textContent = spokenBy(answer.who);
@@ -2171,10 +2169,6 @@
       }
       // Offered once for everything standing on one thing, at the end of it: on the last note of a reply, or on the
       // reply itself while nothing stands on it yet. A note on the thread is written from the box at the foot.
-      const carries = !ordered[place + 1] || groupOf(ordered[place + 1]) !== groupOf(entry);
-      if (!note.pending && notes.live && carries && groupOf(entry) !== null) {
-        said.append(noteOn(note, groupOf(entry)));
-      }
       // Only what was written here can be reworded: a reply carried back from the pull request is its author's word,
       // said on the copy everyone else reads, so this desk shows it and leaves it alone.
       if (!note.pending && notes.live && (isReader(answer.who) || answer.who === "session")) {
@@ -2234,6 +2228,13 @@
       box.append(said);
     });
 
+    // One for the thread, at the end of what has been said: on the last note if any stands there, on the remark
+    // itself if none does.
+    if (!note.pending && notes.live) {
+      const asides = box.querySelectorAll(".line.reply.aside");
+      (asides.length ? asides[asides.length - 1] : head).append(noteOn(note));
+    }
+
     // A recorded comment can be answered and closed from here; resolving keeps the thread and all of its replies.
     if (!note.pending && notes.live) {
       const actions = document.createElement("div");
@@ -2250,19 +2251,6 @@
       send.addEventListener("click", async () => {
         if (!say.value.trim()) return;
         await post("reply", { seq: note.seq, text: say.value.trim(), who: "you" });
-        writing.delete(note.seq);
-        await loadNotes();
-        render();
-      });
-      // A note is written in the thread and stays there: what to come back to, what a session is to do next. It is
-      // no answer to the remark, so nothing that decides what the thread sends ever reads it.
-      const aside = document.createElement("button");
-      aside.className = "ghost";
-      aside.textContent = "Note";
-      aside.title = "Keep this on the desk, whatever the thread sends";
-      aside.addEventListener("click", async () => {
-        if (!say.value.trim()) return;
-        await post("reply", { seq: note.seq, text: say.value.trim(), who: "you", note: true });
         writing.delete(note.seq);
         await loadNotes();
         render();
@@ -2288,7 +2276,7 @@
         keepTucked();
         render();
       });
-      actions.append(say, send, aside, close);
+      actions.append(say, send, close);
       // What this thread owes the pull request, sent as it now reads. Offered only when there is something to send,
       // which is what makes the button say what pressing it would do.
       const owes = owedThere(note);

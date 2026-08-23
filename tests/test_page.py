@@ -2315,17 +2315,18 @@ def test_a_thread_says_what_it_owes_the_pull_request_and_sends_it_when_asked(pag
 
         # A note is written into the thread and stays there: it is read as a note rather than as somebody's answer,
         # it carries no standing, and what the thread owes the pull request is what it was without it.
-        page.locator(f"#note-{made} .actions textarea").fill("come back to this after the rebase")
-        page.locator(f"#note-{made} .actions button").filter(has_text="Note").first.click()
+        page.locator(f"#note-{made} .filehead, #note-{made} .line").first.hover()
+        page.locator(f"#note-{made} .line:not(.reply) button.tiny").filter(has_text="Note").click()
+        page.locator(f"#note-{made} .line.actions.aside textarea").fill("come back to this after the rebase")
+        page.locator(f"#note-{made} .line.actions.aside button").filter(has_text="Keep").click()
         page.wait_for_selector(f"#note-{made} .line.reply.aside:not(.actions)")
         aside = page.locator(f"#note-{made} .line.reply.aside:not(.actions)")
         assert aside.locator(".mark.aside").inner_text() == "note"
         assert aside.locator(".who").inner_text() == "you"
 
-        # Nothing is offered on a note: another note on the same reply is what carries an aside on, and it stands at
-        # the end of the ones already there.
-        assert aside.locator("button.tiny").filter(has_text="Note").count() == 0
-        page.locator(f"#note-{made} .line.reply:not(.aside) button.tiny").filter(has_text="Note").click()
+        # One for the thread, wherever the last thing said stands: on this note now, and nowhere else.
+        assert page.locator(f"#note-{made} button.tiny").filter(has_text="Note").count() == 1
+        aside.locator("button.tiny").filter(has_text="Note").click()
         page.locator(f"#note-{made} .line.actions.aside textarea").fill("done.")
         page.locator(f"#note-{made} .line.actions.aside button").filter(has_text="Keep").click()
         page.wait_for_function(
