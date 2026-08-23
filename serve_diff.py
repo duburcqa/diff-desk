@@ -1051,17 +1051,18 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": True, "resolved": closed, "state": "resolved" if closing else "open"})
 
     def _forget(self):
-        """Forget one note, named by its place in the thread.
+        """Forget the last note of a thread, named by its place in it.
 
-        A note never left this desk, so it goes on its own and asks nothing of the pull request - which is what tells
-        it apart from a reply, where only the last can go and a posted one has to be deleted there as well.
+        A note never left this desk, so nothing has to be asked of the pull request - which is what tells it apart
+        from a reply, where a posted one has to be deleted there as well. What they share is that only the last of
+        them can go: letting go of one further up leaves what stands under it standing against nothing.
         """
         order = self._body()
         seq, at = order.get("seq"), order.get("note")
         with changing() as rows:
             found = next((row for row in rows if row["seq"] == seq), None)
             said = (found or {}).get("replies") or []
-            if found is None or not isinstance(at, int) or not 0 <= at < len(said) or not said[at].get("note"):
+            if found is None or at != len(said) - 1 or not said[at].get("note"):
                 found = None
             else:
                 said.pop(at)
@@ -1077,7 +1078,7 @@ class Handler(BaseHTTPRequestHandler):
                         answer["on"] = on - 1
                 touched(rows, found, "you")
         if found is None:
-            self._json({"ok": False, "error": f"[{at}] is no note of comment {seq}"})
+            self._json({"ok": False, "error": f"[{at}] is not the last note of comment {seq}"})
             return
         print(f"FORGOT note [{at}] of [{seq}]", flush=True)
         self._json({"ok": True, "seq": seq, "note": at})

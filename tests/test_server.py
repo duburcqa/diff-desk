@@ -1606,25 +1606,26 @@ def test_a_note_stays_on_the_desk_whatever_the_thread_sends(desk):
     assert not desk.post("/reply", {"seq": seq, "text": "out loud", "who": "session", "on": 0})["ok"]
     assert not desk.post("/reply", {"seq": seq, "text": "nowhere", "who": "you", "on": 9})["ok"]
 
-    # A note never left, so any of them is forgotten on its own, whatever its place - and nothing else is.
-    assert desk.post("/forget", {"seq": seq, "note": 0})["ok"]
+    # A note never left, so it is forgotten without asking the pull request anything - but only the last of them, as
+    # for a reply: letting go of one further up leaves what stands under it standing against nothing.
     assert not desk.post("/forget", {"seq": seq, "note": 0})["ok"]
+    assert desk.post("/forget", {"seq": seq, "note": 4})["ok"]
     assert [reply["text"] for reply in {row["seq"]: row for row in desk.get("/comments")}[seq]["replies"]] == [
+        "come back to this after the rebase",
         "answered on the pull request",
         "and the session is to widen the test",
         "done.",
-        "and again",
     ]
 
     # Written for this side of the desk, so a note carries no standing and a thread holding one owes nothing more.
     row = {row["seq"]: row for row in desk.get("/comments")}[seq]
-    # What each note is about, after one of them went: the reply it was written on, its place come back one with the
-    # rest, and - for the one written on a note - the remark itself, said by carrying no anchor at all.
-    assert (row["replies"][2]["who"], row["replies"][2]["note"], row["replies"][2]["on"]) == ("session", True, 0)
-    assert (row["replies"][3]["who"], row["replies"][3]["note"], "on" in row["replies"][3]) == ("you", True, False)
+    # What each note is about: the reply it was written on, and the ones with no anchor at all, which stand on the
+    # remark.
+    assert (row["replies"][3]["who"], row["replies"][3]["note"], row["replies"][3]["on"]) == ("session", True, 1)
+    assert (row["replies"][0]["who"], row["replies"][0]["note"], "on" in row["replies"][0]) == ("you", True, False)
     assert [(reply.get("note", False), reply["github"]) for reply in row["replies"]] == [
-        (False, "posted"),
         (True, "none"),
+        (False, "posted"),
         (True, "none"),
         (True, "none"),
     ]
