@@ -1130,9 +1130,10 @@ class Handler(BaseHTTPRequestHandler):
     def _send_thread(self):
         """Send one thread to the pull request, in the state it is in when the reader asks.
 
-        What goes out is this thread as it now reads: the remark if it is not there yet, every reply the thread does not
-        hold, and its resolution when it is closed here. A reply written after this has answered waits for the reader to
-        ask again - what leaves this desk is their decision, never a consequence of somebody writing in a thread.
+        What goes out is this thread as it now reads: the remark if it is this desk's and not there yet, every reply the
+        thread does not hold, and its resolution when it is closed here. A reply written after this has answered waits
+        for the reader to ask again - what leaves this desk is their decision, never a consequence of somebody writing
+        in a thread.
         """
         order = self._body()
         with CHANGING:
@@ -1141,10 +1142,9 @@ class Handler(BaseHTTPRequestHandler):
         if found is None or found.get("state") == "deleted":
             self._json({"ok": False, "error": f"no comment numbered {order.get('seq')}"})
             return
-        if found.get("who"):
-            self._json({"ok": False, "error": f"comment {found['seq']} is already on the pull request, as its own"})
-            return
-        if found.get("github") != "posted":
+        # A remark written on the pull request is its author's word and is already there, so what this desk sends of
+        # that thread is what this desk wrote in it: the replies made here, and its resolution.
+        if not found.get("who") and found.get("github") != "posted":
             trouble = self._post_remark(order, found)
             if trouble:
                 print(f"SEND FAILED {trouble}", flush=True)

@@ -1518,6 +1518,32 @@ def test_syncing_takes_in_the_comments_written_on_the_pull_request(desk):
     assert not desk.post("/edit", {"seq": brought["seq"], "text": "something else entirely"})["ok"]
     assert not desk.post("/drop", {"seq": brought["seq"], "repo": "someone/somewhere", "pr": 14})["ok"]
 
+    # What this desk wrote in somebody else's thread is still this desk's to send: the answer and the resolution go,
+    # and the remark that opened it is left where it stands.
+    desk.post("/resolve", {"seq": [brought["seq"]], "who": "you"})
+    desk.github_answers(
+        rules=[
+            {"match": "reviewThreads", "out": answer},
+            {
+                "match": "addPullRequestReviewThreadReply",
+                "out": json.dumps(
+                    {"data": {"m0": {"comment": {"id": "C_answer"}}, "m1": {"thread": {"isResolved": True}}}}
+                ),
+            },
+        ]
+    )
+    before = len(desk.github_calls())
+    outcome = desk.post("/send", {"seq": brought["seq"], "repo": "someone/somewhere", "pr": 14})
+    calls = desk.github_calls()[before:]
+    assert (outcome["ok"], outcome["sent"], outcome["resolved"]) == (True, 1, True)
+    assert "documented now" in calls[-1]
+    assert "resolveReviewThread" in calls[-1]
+    assert not any("could we document this?" in call for call in calls[1:])
+    carried = {row["seq"]: row for row in desk.get("/comments")}[brought["seq"]]
+    assert [reply["github"] for reply in carried["replies"]] == ["posted", "posted"]
+    assert carried["prResolve"] == "done"
+    desk.post("/resolve", {"seq": [brought["seq"]], "reopen": True, "who": "you"})
+
     # A second sync finds them already here rather than recording them twice.
     desk.github_answers(rules=[{"match": "reviewThreads", "out": answer}])
     again = desk.post("/sync", {"repo": "someone/somewhere", "pr": 14})

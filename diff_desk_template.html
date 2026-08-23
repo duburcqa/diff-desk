@@ -1445,7 +1445,7 @@
     }));
   }
 
-  const alreadyThere = () => mine().filter((note) => note.github === "posted" && !note.who && owedThere(note));
+  const alreadyThere = () => mine().filter((note) => note.github === "posted" && owedThere(note));
 
   async function sendThreads(held) {
     const request = branch().pr;
@@ -1492,7 +1492,7 @@
     // The thread sent from its own row, since the panel is where a reader works through what is still owed. A span
     // rather than a button: the row is a button itself, and a button inside one is no button at all.
     const owes = owedThere(note);
-    if (owes && branch().pr && !note.who) {
+    if (owes && branch().pr) {
       const out = document.createElement("span");
       out.className = "mark none act";
       out.setAttribute("role", "button");
@@ -2179,7 +2179,7 @@
       // What this thread owes the pull request, sent as it now reads. Offered only when there is something to send,
       // which is what makes the button say what pressing it would do.
       const owes = owedThere(note);
-      if (owes && branch().pr && !note.who) {
+      if (owes && branch().pr) {
         const out = document.createElement("button");
         out.className = "ghost";
         out.textContent = "Sync";
