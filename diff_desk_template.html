@@ -1250,8 +1250,8 @@
   };
 
   function said(when) {
-    // A stamp is a stamp however it was written down: a clock time from this desk stands as it is, a date from a pull
-    // request or from an older log is read and said to the minute.
+    // A stamp is a stamp however it was written down: a date is said to the minute, and a bare clock time - all an
+    // older log kept of what was written here - stands as the only thing it knows.
     if (/^\d{1,2}:\d{2}/.test(when)) return when;
     const at = new Date(when);
     if (Number.isNaN(at.getTime())) return when;

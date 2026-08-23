@@ -867,7 +867,7 @@ class Handler(BaseHTTPRequestHandler):
                 seq += 1
                 # When it was written, where the writer did not say: a comment recorded through the API carries no
                 # stamp of its own, and a thread with no time on it can say when nothing it holds was said.
-                note.setdefault("at", time.strftime("%H:%M:%S"))
+                note.setdefault("at", time.strftime("%Y-%m-%d %H:%M:%S"))
                 note["seq"] = seq
                 note["batch"] = group
                 note["state"] = "open"
@@ -939,7 +939,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 said = replies[index]
             if said is not None:
-                said.setdefault("edits", []).append({"at": time.strftime("%H:%M:%S"), "text": said["text"]})
+                said.setdefault("edits", []).append({"at": time.strftime("%Y-%m-%d %H:%M:%S"), "text": said["text"]})
                 said["text"] = text
                 # Rewriting is never carried to the pull request, so its copy is marked as having been moved on from.
                 landed = (said["github"] if index is not None else found.get("github")) == "posted"
@@ -968,7 +968,9 @@ class Handler(BaseHTTPRequestHandler):
         with changing() as rows:
             found = next((row for row in rows if row["seq"] == order.get("seq")), None)
             if found is not None:
-                found["replies"].append({"who": who, "text": text, "at": time.strftime("%H:%M:%S"), "github": "none"})
+                found["replies"].append(
+                    {"who": who, "text": text, "at": time.strftime("%Y-%m-%d %H:%M:%S"), "github": "none"}
+                )
                 touched(rows, found, who)
         if found is None:
             self._json({"ok": False, "error": f"no comment numbered {order.get('seq')}"})
@@ -990,7 +992,7 @@ class Handler(BaseHTTPRequestHandler):
                     row["state"] = "resolved" if closing else "open"
                     if answer:
                         row["replies"].append(
-                            {"who": who, "text": answer, "at": time.strftime("%H:%M:%S"), "github": "none"}
+                            {"who": who, "text": answer, "at": time.strftime("%Y-%m-%d %H:%M:%S"), "github": "none"}
                         )
                     touched(rows, row, who)
                     closed += 1
