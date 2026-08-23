@@ -2317,8 +2317,8 @@ def test_a_thread_says_what_it_owes_the_pull_request_and_sends_it_when_asked(pag
         # it carries no standing, and what the thread owes the pull request is what it was without it.
         page.locator(f"#note-{made} .actions textarea").fill("come back to this after the rebase")
         page.locator(f"#note-{made} .actions button").filter(has_text="Note").first.click()
-        page.wait_for_selector(f"#note-{made} .line.reply.aside")
-        aside = page.locator(f"#note-{made} .line.reply.aside")
+        page.wait_for_selector(f"#note-{made} .line.reply.aside:not(.actions)")
+        aside = page.locator(f"#note-{made} .line.reply.aside:not(.actions)")
         assert aside.locator(".mark.aside").inner_text() == "note"
         assert aside.locator(".who").inner_text() == "you"
 
@@ -2328,9 +2328,9 @@ def test_a_thread_says_what_it_owes_the_pull_request_and_sends_it_when_asked(pag
         page.locator(f"#note-{made} .line.actions.aside textarea").fill("done.")
         page.locator(f"#note-{made} .line.actions.aside button").filter(has_text="Keep").click()
         page.wait_for_function(
-            "(seq) => document.querySelectorAll(`#note-${seq} .line.reply.aside`).length === 2", arg=made
+            "(seq) => document.querySelectorAll(`#note-${seq} .line.reply.aside:not(.actions)`).length === 2", arg=made
         )
-        stepped = page.locator(f"#note-{made} .line.reply.aside").nth(1)
+        stepped = page.locator(f"#note-{made} .line.reply.aside:not(.actions)").nth(1)
         assert stepped.evaluate("(line) => parseInt(line.style.marginLeft)") > 0
         assert page.locator(f"#note-{made} .line.reply.aside .mark:not(.aside)").count() == 0
 
