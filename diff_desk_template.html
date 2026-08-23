@@ -2128,8 +2128,11 @@
     ];
     // Nothing said is left unread, whatever an anchor written before this says.
     for (const entry of said_of) if (!ordered.includes(entry)) ordered.push(entry);
-    ordered.forEach(({ answer, index }, place) => {
-      const answers = ordered.map((entry) => entry.answer);
+    // What each thing said belongs to: a reply is its own, and a note belongs to what it stands on.
+    const groupOf = (entry) => (entry.answer.note ? standsOn(entry) : entry.index);
+    ordered.forEach((entry, place) => {
+      const { answer, index } = entry;
+      const answers = ordered.map((held) => held.answer);
       const said = document.createElement("div");
       // Read as the reader's own where they wrote it, whichever side of the pull request they were on at the time. A
       // note is nobody's word to the pull request: it is written for this side of the desk, so it opens as one.
@@ -2166,9 +2169,12 @@
         if (answer.error) standing.title = answer.error;
         said.append(standing);
       }
-      // Offered on a reply, never on a note: another note on the same reply is what carries an aside on, and a note
-      // standing on a note is what this desk does not hold.
-      if (!note.pending && notes.live && !answer.note) said.append(noteOn(note, index));
+      // Offered once for everything standing on one thing, at the end of it: on the last note of a reply, or on the
+      // reply itself while nothing stands on it yet. A note on the thread is written from the box at the foot.
+      const carries = !ordered[place + 1] || groupOf(ordered[place + 1]) !== groupOf(entry);
+      if (!note.pending && notes.live && carries && groupOf(entry) !== null) {
+        said.append(noteOn(note, groupOf(entry)));
+      }
       // Only what was written here can be reworded: a reply carried back from the pull request is its author's word,
       // said on the copy everyone else reads, so this desk shows it and leaves it alone.
       if (!note.pending && notes.live && (isReader(answer.who) || answer.who === "session")) {
