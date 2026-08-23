@@ -1525,14 +1525,15 @@
   }
 
   async function syncThere(loud) {
-    // Replies both ways, and the pull request's word on what is resolved: it is the copy everyone else reads.
+    // A sync only listens: replies, comments opened there, and the pull request's word on what is resolved, which is
+    // the copy everyone else reads. What this desk holds goes out when the reader sends that thread.
     const request = branch().pr;
     if (!request || !notes.live) return;
     if (loud) els.logresult.textContent = `Syncing with PR #${request.number}...`;
     const outcome = await post("sync", where());
     if (loud) {
       els.logresult.textContent = outcome.ok
-        ? `Sent ${outcome.sent}, brought back ${outcome.brought}, closed ${outcome.closed} here`
+        ? `Brought back ${outcome.brought} reply(ies), took ${outcome.took} comment(s) in, closed ${outcome.closed} here`
         : `Could not sync: ${outcome.error || "GitHub unreachable"}`;
     }
     if (!outcome.ok) announce("sync", `PR #${request.number}`, outcome.error || "GitHub unreachable");

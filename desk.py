@@ -310,7 +310,7 @@ job = jobs.add_parser("comments", help="what has been submitted")
 job.add_argument("--all", action="store_true", help="include the ones already addressed")
 job.set_defaults(run=comments)
 
-job = jobs.add_parser("sync", help="carry replies both ways with the pull request")
+job = jobs.add_parser("sync", help="bring back what the pull request holds")
 job.set_defaults(run=sync)
 
 job = jobs.add_parser("bind", help="aim comments at the pull request, or keep them local")
