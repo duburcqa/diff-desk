@@ -1302,17 +1302,6 @@
     return open;
   }
 
-  // How far in a word said in a thread stands: what it answers, and what that answered, up to the remark itself.
-  function depthOf(answers, index) {
-    let depth = 0;
-    let on = answers[index].on;
-    while (on !== undefined && on !== null && on >= 0 && on < index) {
-      depth += 1;
-      on = answers[on].on;
-    }
-    return depth;
-  }
-
   function owedThere(note) {
     if (note.pending || !notes.live) return "";
     // A note never goes: it is written for this side of the desk, so it is no part of what a thread owes.
@@ -2115,9 +2104,9 @@
       // Read as the reader's own where they wrote it, whichever side of the pull request they were on at the time. A
       // note is nobody's word to the pull request: it is written for this side of the desk, so it opens as one.
       said.className = `line reply ${isReader(answer.who) ? "you" : answer.who}${answer.note ? " aside" : ""}`;
-      // What it hangs under, stepped in one for each word it answers: a note on a reply, and an answer to that note,
-      // are read where they belong rather than at the end of everything said.
-      said.style.marginLeft = `${12 * depthOf(answers, index)}px`;
+      // A note stands one step in, however deep the notes it answers go, and what is said to the pull request is read
+      // back at the margin: a run of notes reads as an aside, and the thread resumes where it left off.
+      said.style.marginLeft = answer.note ? "12px" : "0";
       const from = document.createElement("span");
       from.className = "who";
       from.textContent = spokenBy(answer.who);
