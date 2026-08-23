@@ -1244,9 +1244,9 @@
   const isReader = (who) => who === "you" || (Boolean(mine_()) && who === mine_());
   const spokenBy = (who) => (isReader(who) ? "you" : who === "session" ? "claude" : who);
 
-  const saidWhen = (when, standing) => {
-    const where = standing === "posted" ? "on the pull request" : standing === "failed" ? "not sent" : "here";
-    return when ? `${said(when)}, ${where}` : where;
+  const saidWhen = (when, who) => {
+    const from = who && who !== "you" && who !== "session" ? "submitted on the pull request" : "submitted here";
+    return when ? `${said(when)}, ${from}` : from;
   };
 
   function said(when) {
@@ -1911,7 +1911,7 @@
       from.className = `by ${note.who ? (isReader(note.who) ? "you" : "them") : "you"}`;
       from.textContent = note.who ? spokenBy(note.who) : "you";
       who.append(document.createTextNode(" "), from);
-      head.title = saidWhen(note.at, note.github);
+      head.title = saidWhen(note.at, note.who);
     }
     const text = document.createElement("span");
     text.className = "said";
@@ -2056,7 +2056,7 @@
       from.textContent = spokenBy(answer.who);
       // When it was said and where it stands, kept for the asking: in the line they say little and take the room the
       // reply is read in.
-      from.title = saidWhen(answer.at, answer.github);
+      from.title = saidWhen(answer.at, answer.who);
       const body = document.createElement("span");
       body.className = "said";
       body.append(from);

@@ -133,7 +133,8 @@ def submit(page, text):
 def submit_alone(page, text):
     """Send one comment straight from the box, without it waiting in the review tray.
 
-    The box goes only once the desk has answered, so the comment can be read back the moment this returns.
+    The box goes as soon as it is sent rather than when the desk answers, so a caller reading the log back waits for
+    what it is looking for.
     """
     page.locator("tr[data-composer='true'] textarea").fill(text)
     page.locator("tr[data-composer='true'] button.solid.direct").click()
@@ -290,6 +291,8 @@ def test_one_comment_can_be_sent_without_a_batch(page, desk):
     line.locator("button.pin").first.click()
     before = len(desk.get("/comments"))
     submit_alone(page, "sent straight from the box")
+    # The box goes the moment it is sent rather than when the desk has it, so what is asked here is waited for.
+    until(lambda: len(desk.get("/comments")) == before + 1)
     rows = desk.get("/comments")
     # Recorded on its own, and the tray is never involved.
     assert len(rows) == before + 1
@@ -2281,7 +2284,7 @@ def test_a_comment_written_on_the_pull_request_shows_whose_it_is_and_is_answered
         assert head.locator(".who .seq").inner_text() == f"[{seq}]"
         # Whose remark it is stands in the line; when it was said and where it stands are what hovering says.
         assert head.locator(".who .by").inner_text() == "Milotrince"
-        assert head.get_attribute("title") == "2026-08-22 09:00, on the pull request"
+        assert head.get_attribute("title") == "2026-08-22 09:00, submitted on the pull request"
         assert head.locator("button.tiny").filter(has_text="Edit").count() == 0
         assert head.locator("button.drop").count() == 0
         assert page.locator(f"#note-{seq} .actions button.ghost").filter(has_text="Reply").count() == 1
@@ -2491,7 +2494,7 @@ def test_reaching_a_comment_in_a_file_far_from_the_reader_lands_on_it(page, desk
     assert landed
 
 
-def test_a_remark_and_a_reply_both_say_when_they_were_said_and_where_they_stand(page, desk):
+def test_a_remark_and_a_reply_both_say_when_they_were_said_and_where_they_were_written(page, desk):
     branch = page.evaluate("() => data.branches[0].ref")
     saying = f"asked when and where, number {len(desk.get('/comments')) + 1}"
     made = desk.post(
@@ -2503,13 +2506,13 @@ def test_a_remark_and_a_reply_both_say_when_they_were_said_and_where_they_stand(
 
     # Written here and answered here, so both say so, each with the time it was said.
     head = page.locator(f"#note-{made} .thread > .line").first
-    assert head.get_attribute("title").endswith(", here")
+    assert head.get_attribute("title").endswith(", submitted here")
     answer = page.locator(f"#note-{made} .line.reply .who").first
-    assert answer.get_attribute("title").endswith(", here")
+    assert answer.get_attribute("title").endswith(", submitted here")
     assert re.match(r"^[0-9]", answer.get_attribute("title"))
 
-    # A remark the pull request holds says that instead, wherever it was written: what a thread stands at is where it
-    # is now, not where it started.
+    # Where it was written stands whatever becomes of it: sending it to the pull request is what the mark on the right
+    # of the line is for, and a remark written here reads as written here for as long as it exists.
     page.evaluate(
         """(seq) => {
           const note = notes.sent.find((one) => one.seq === seq);
@@ -2519,5 +2522,5 @@ def test_a_remark_and_a_reply_both_say_when_they_were_said_and_where_they_stand(
         }""",
         made,
     )
-    assert page.locator(f"#note-{made} .thread > .line").first.get_attribute("title").endswith(", on the pull request")
-    assert page.locator(f"#note-{made} .line.reply .who").first.get_attribute("title").endswith(", on the pull request")
+    assert page.locator(f"#note-{made} .thread > .line").first.get_attribute("title").endswith(", submitted here")
+    assert page.locator(f"#note-{made} .line.reply .who").first.get_attribute("title").endswith(", submitted here")
