@@ -2219,9 +2219,9 @@
         mark.textContent = "rewritten after posting";
         said.append(mark);
       }
-      // A note never left this desk, so any of them goes on its own; a reply is somebody's word on the pull request,
-      // so only the last can go - deleting further up would leave the answers below it standing against nothing.
-      if (!note.pending && notes.live && answer.note) {
+      // The last of what stands on one comment is what can go, note or reply alike: forgetting one further up would
+      // leave the ones under it standing against nothing.
+      if (!note.pending && notes.live && answer.note && carries) {
         const forget = document.createElement("button");
         forget.className = "drop";
         forget.textContent = "\u00d7";
