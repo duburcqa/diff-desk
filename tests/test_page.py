@@ -2446,3 +2446,46 @@ def test_the_comments_panel_sends_one_thread_from_its_row_and_every_thread_the_p
         desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})
         page.reload(wait_until="load")
         page.wait_for_selector("section.file")
+
+
+def test_reaching_a_comment_in_a_file_far_from_the_reader_lands_on_it(page, desk):
+    branch = page.evaluate("() => data.branches[0].ref")
+    # Written on the first file of the review, which is what a reader standing at the end of it is nowhere near.
+    path = page.evaluate("() => data.branches[0].files[0].path")
+    line = page.evaluate(
+        "(path) => (data.branches[0].files.find((file) => file.path === path).lines.find((row) => row[0] !== 'h'))[2]",
+        path,
+    )
+    saying = f"far from where the reader stands, number {len(desk.get('/comments')) + 1}"
+    made = desk.post("/comments", [{"branch": branch, "path": path, "line": line, "side": "new", "text": saying}])[
+        "seq"
+    ]
+    # Short enough that the top of the review is well beyond what the page holds around a reader at the end of it.
+    page.set_viewport_size({"width": 1200, "height": 380})
+    page.reload(wait_until="load")
+    page.wait_for_selector("section.file")
+    page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+    page.wait_for_timeout(400)
+    assert page.locator(f"section.file[data-path='{path}'] .body[data-filled='true']").count() == 0
+
+    # One press: the file is built for it, and the thread is where the reader is looking rather than a screenful below.
+    page.locator("#logopen").click()
+    page.wait_for_selector("#log[data-open='true']")
+    page.locator(".logrow").filter(has_text=saying).first.click()
+    # Built for the press rather than for the arrival: waiting on the scroll to bring the file within reach leaves the
+    # aim pointing at a card holding nothing, which is how a jump used to land a screenful short of the thread.
+    assert page.locator(f"#note-{made}").count() == 1
+    landed = until(
+        lambda: page.evaluate(
+            """(seq) => {
+              const box = document.getElementById(`note-${seq}`);
+              if (!box) return null;
+              const rect = box.getBoundingClientRect();
+              const covered = document.querySelector('header').getBoundingClientRect().bottom;
+              return rect.top >= covered - 2 && rect.bottom > covered && rect.top < window.innerHeight ? true : null;
+            }""",
+            made,
+        ),
+        seconds=15.0,
+    )
+    assert landed

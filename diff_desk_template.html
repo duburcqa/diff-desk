@@ -1380,8 +1380,11 @@
     card.dataset.reveal = "true";
     folds.set(note.path, { digest: card.dataset.digest, open: true, upTo: latest() });
     els.log.dataset.open = "false";
-    // The lines of a file the reader was nowhere near are built for this, since the thread hangs among them.
-    settleBody(card);
+    // The lines of a file the reader was nowhere near are built for this, since the thread hangs among them - built
+    // outright rather than settled, which would leave a file they are nowhere near exactly as it was.
+    const held = drawn.get(card);
+    if (held) fillBody(card, held.file, held.index);
+    reaching = card;
     // A remark about the file as a whole hangs under its header rather than on a row, so it is found by the seq it
     // carries either way.
     const thread =
@@ -1412,7 +1415,10 @@
       const room = window.innerHeight - covered;
       const middle = Math.max(0, (room - box.height) / 2);
       const off = box.top - covered - middle;
-      if (Math.abs(off) < 2 || tries <= 0) return;
+      if (Math.abs(off) < 2 || tries <= 0) {
+        reaching = null;
+        return;
+      }
       // Told to go there outright once the first aim has been taken: a smooth scroll still on its way answers with
       // where it is rather than where it is going, and every aim after the first would read that as a miss.
       window.scrollTo({ top: Math.max(0, window.scrollY + off), behavior: tries === 6 ? "smooth" : "auto" });
@@ -2893,6 +2899,9 @@
   const NEAR = 1.5;
   // Whether a change is holding the reader's place as it happens, so the settling it causes leaves that to it.
   let holding = false;
+  // The card a jump is on its way to, kept while it is: a scroll still travelling leaves it as far off as it was, and
+  // letting go of it there is letting go of the very thing being gone to.
+  let reaching = null;
   // What a file's lines take up, so a card whose lines are not built still stands as tall as it will: without it the
   // page grows under the reader as they go, and the scrollbar means nothing until they have been everywhere.
   const heights = new Map();
@@ -3308,7 +3317,7 @@
     // Whatever a card does with its lines, the reader keeps their place: one that changes height entirely above them
     // would otherwise take the page with it, and a reservation is never exactly what the lines turn out to measure.
     const before = wrap.getBoundingClientRect();
-    if (wrap.dataset.open === "true" && nearReader(wrap)) fillBody(wrap, held.file, held.index);
+    if (wrap.dataset.open === "true" && (nearReader(wrap) || wrap === reaching)) fillBody(wrap, held.file, held.index);
     else releaseBody(wrap);
     const after = wrap.getBoundingClientRect();
     // Whole pixels, and only where it is worth it: a fraction moved on every settle drifts the place it is holding.
