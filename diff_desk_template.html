@@ -1403,13 +1403,13 @@
     // outright rather than settled, which would leave a file they are nowhere near exactly as it was.
     const held = drawn.get(card);
     if (held) fillBody(card, held.file, held.index);
-    reaching = card;
     // A remark about the file as a whole hangs under its header rather than on a row, so it is found by the seq it
     // carries either way.
     const thread =
       document.getElementById(`note-${note.seq}`) ||
       document.querySelector(`.filenote[data-seq="${note.seq}"]`) ||
       card;
+    reaching = { card, thread };
     // Resolved and hidden away, it is still the thread being reached for, so it is shown, as a folded file is opened.
     if (thread !== card) thread.dataset.reveal = "true";
     for (const found of document.querySelectorAll(".thread.found")) found.classList.remove("found");
@@ -1427,21 +1427,28 @@
     aim(thread, 6);
   }
 
-  function aim(thread, tries) {
+  function aim(thread, tries, again) {
     requestAnimationFrame(() => requestAnimationFrame(() => {
       const box = thread.getBoundingClientRect();
       const covered = document.querySelector("header").getBoundingClientRect().bottom;
       const room = window.innerHeight - covered;
       const middle = Math.max(0, (room - box.height) / 2);
       const off = box.top - covered - middle;
-      if (Math.abs(off) < 2 || tries <= 0) {
+      if (tries <= 0) {
         reaching = null;
+        return;
+      }
+      // Landed is landed and still there a frame later: a file built because the aim brought it within reach is
+      // measured after that aim, and what its lines turn out to take moves the thread from under where it landed.
+      if (Math.abs(off) < 2) {
+        if (again) reaching = null;
+        else aim(thread, tries - 1, true);
         return;
       }
       // Told to go there outright once the first aim has been taken: a smooth scroll still on its way answers with
       // where it is rather than where it is going, and every aim after the first would read that as a miss.
       window.scrollTo({ top: Math.max(0, window.scrollY + off), behavior: tries === 6 ? "smooth" : "auto" });
-      aim(thread, tries - 1);
+      aim(thread, tries - 1, false);
     }));
   }
 
@@ -2917,8 +2924,8 @@
   // the height it had, so nothing under the reader moves as they go.
   const drawn = new WeakMap();
   const NEAR = 1.5;
-  // The card a jump is on its way to, kept while it is: a scroll still travelling leaves it as far off as it was, and
-  // letting go of it there is letting go of the very thing being gone to.
+  // The jump in flight - the card it goes to, and the thread it aims at inside it - kept while it is: a scroll still
+  // travelling leaves the card as far off as it was, and letting go of it there is letting go of what is being gone to.
   let reaching = null;
   // What a file's lines take up, so a card whose lines are not built still stands as tall as it will: without it the
   // page grows under the reader as they go, and the scrollbar means nothing until they have been everywhere.
@@ -2957,6 +2964,9 @@
 
   const nearby = new IntersectionObserver((entries) => {
     for (const entry of entries) settleBody(entry.target);
+    // What a jump lands on is aimed at again from here: these are the files it brought within reach, and each one
+    // built stands at what its lines measure rather than at what was reserved for them, which moves everything below.
+    if (reaching) aim(reaching.thread, 2, false);
   }, { rootMargin: `${Math.round(NEAR * 100)}% 0px` });
 
   // What each file's body can actually show, and how far it has been scrolled: together they keep every comment on
@@ -3326,7 +3336,8 @@
     // A card let go stands at what its lines measured, and one built stands at what they measure, so what a settle
     // does above the reader is a change of nothing at all. Where an estimate turns out to be off, the browsers hold
     // the place themselves; scrolling for it by hand walks the page a line at a time as each settle nudges the next.
-    if (wrap.dataset.open === "true" && (nearReader(wrap) || wrap === reaching)) fillBody(wrap, held.file, held.index);
+    const wanted = nearReader(wrap) || (reaching !== null && wrap === reaching.card);
+    if (wrap.dataset.open === "true" && wanted) fillBody(wrap, held.file, held.index);
     else releaseBody(wrap);
   }
 
