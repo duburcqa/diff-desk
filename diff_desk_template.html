@@ -2115,7 +2115,9 @@
       from.title = answer.note ? `${answer.at}, kept here` : saidWhen(answer.at, answer.who);
       const body = document.createElement("span");
       body.className = "said";
-      if (answer.note) {
+      // Said once for a run of them: the first note says what the ones under it are, and repeating it on each says
+      // nothing the step in has not already said.
+      if (answer.note && !(index > 0 && answers[index - 1].note)) {
         const kind = document.createElement("span");
         kind.className = "mark aside";
         kind.textContent = "note";
