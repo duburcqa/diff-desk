@@ -1600,6 +1600,7 @@ def test_a_note_stays_on_the_desk_whatever_the_thread_sends(desk):
 
     # A note stands on the remark or on a reply, and one more note on a note carries that sub-thread on rather than
     # standing inside it. A reply is never turned into a note: it cannot hang on what the pull request has never seen.
+    # An anchor naming a note is read through it, so a thread written before that rule reads as it did.
     assert desk.post("/reply", {"seq": seq, "text": "done.", "who": "session", "note": True, "on": 1})["ok"]
     assert desk.post("/reply", {"seq": seq, "text": "and again", "who": "you", "note": True, "on": 0})["ok"]
     assert not desk.post("/reply", {"seq": seq, "text": "out loud", "who": "session", "on": 0})["ok"]

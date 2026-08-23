@@ -2111,11 +2111,20 @@
     // Read where it belongs rather than where it landed: every note written on something follows that thing, and the
     // notes on one thing follow each other in the order they were written. A note on the thread itself closes it.
     const said_of = (note.replies || []).map((answer, index) => ({ answer, index }));
-    const notesOn = (on) => said_of.filter(({ answer }) => answer.note && (answer.on ?? null) === on);
+    // What a note stands on, read through the notes between: one written on a note stands where that note stands, and
+    // one whose anchor says nothing this thread holds stands on the thread itself.
+    const standsOn = ({ answer }) => {
+      let on = answer.note ? (answer.on ?? null) : null;
+      while (on !== null && said_of[on] && said_of[on].answer.note) on = said_of[on].answer.on ?? null;
+      return said_of[on] && !said_of[on].answer.note ? on : null;
+    };
+    const notesOn = (on) => said_of.filter((entry) => entry.answer.note && standsOn(entry) === on);
     const ordered = [
       ...said_of.filter(({ answer }) => !answer.note).flatMap((entry) => [entry, ...notesOn(entry.index)]),
       ...notesOn(null),
     ];
+    // Nothing said is left unread, whatever an anchor written before this says.
+    for (const entry of said_of) if (!ordered.includes(entry)) ordered.push(entry);
     ordered.forEach(({ answer, index }, place) => {
       const answers = ordered.map((entry) => entry.answer);
       const said = document.createElement("div");
