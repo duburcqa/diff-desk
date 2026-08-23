@@ -2080,12 +2080,15 @@ def test_a_file_holding_an_unread_comment_opens_itself(page, desk):
     assert page.locator("section.file[data-path='added.py']").get_attribute("data-open") == "false"
 
     # One that arrives already settled is unread too, so it opens its file and shows the thread rather than an outline.
+    # Away while it arrives, as above: a poll landing on the open page shows it, and what is asked here is what the
+    # reader finds on coming back.
+    page.goto("about:blank")
     made = desk.post(
         "/comments",
         [{"branch": branch, "path": "added.py", "line": 1, "side": "new", "text": "settled before you saw it"}],
     )["seqs"][0]
     desk.post("/resolve", {"seq": [made], "who": "session"})
-    page.reload(wait_until="load")
+    page.go_back(wait_until="load")
     page.wait_for_selector("section.file")
     assert page.locator("section.file[data-path='added.py']").get_attribute("data-open") == "true"
     assert page.locator(f"#note-{made} .thread.folded").count() == 0
