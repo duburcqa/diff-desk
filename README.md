@@ -1,222 +1,112 @@
 # Diff desk
 
-A local code review page for any git range, and a way to hand the comments you leave on it to an AI coding session.
+A local review page for any git range, and a way to hand the comments left on it to an AI coding session or to a pull request.
 
-![The review page: the file tree, a diff with a comment thread open, and the comment panel](media/desk.png)
+![The review page: the file tree, a diff with a comment thread open, and the Comments panel](media/desk.png)
 
-Point it at a repository and a base ref; it serves a review page on `127.0.0.1:8787` with your branches as tabs, each
-scoped to the whole range or to a single commit. You comment on lines by dragging over them; every submitted batch is
-recorded to a file with a cursor, so a session can pick up exactly what it has not seen yet, work through it, and mark
-each comment addressed - which the page then shows as closed. If the branch has an open pull request, the same batch
-can optionally be posted there as one review.
+## What it is for
 
-It needs `git`, `gh` and python3. Nothing else - no build step, no packages, no service.
+Any range of commits, whoever wrote them. These are typical uses, not the only ones:
 
-## Using it
+- Read what a session just wrote, before any of it becomes a pull request.
+- Review an open pull request locally, holding every remark until you decide to send it.
+- Hand the remarks to a session locally, and put only the settled outcome on the pull request.
+- Let a session review someone else's pull request, then audit and edit its remarks before they go out.
+
+It needs `git`, `gh` and python3. No build step, no packages, no service.
+
+## Serving a review
 
     python3 desk.py serve --dir /path/to/repo --base upstream/main [refs ...]
 
-What can be reviewed:
+The page comes up on `127.0.0.1:8787`, each ref a tab, scoped to the whole range or to a single commit.
 
-- **Local branches.** Omit the refs entirely to be offered every local branch ahead of the base. The checked-out
-  branch is shown with its uncommitted work included, so a review can start before a commit exists.
-- **Pull requests, by number** - `3243`, `#3243` or `pr/3243`. The head is fetched from the upstream repository by
-  number, so neither the fork it lives on nor the branch name it uses has to be known, and a head force-pushed since
-  the last look is picked up. It lands in `refs/diffdesk/pull/<number>`, out of the way of your own branches. One
-  fetched earlier stays reviewable while GitHub is unreachable: what cannot be read falls back to the head on disk.
+- **Local branches.** Omit the refs to be offered every branch ahead of the base. The checked-out branch carries its uncommitted work, so a review can start before a commit exists.
+- **Pull requests, by number** - `3243`, `#3243` or `pr/3243`. The head is fetched by number into `refs/diffdesk/pull/<number>`, so neither the fork it lives on nor its branch name has to be known, and a force-push since the last look is picked up. One fetched earlier stays reviewable while GitHub is unreachable.
+- Both are reviewed side by side as tabs, and the page's **Source** panel switches repository, base, branch and pull request without a restart.
 
-Both can be reviewed side by side in one desk, as tabs. A tab whose branch has a pull request names it on hover - title
-and link - and clicking the tab you are already on opens that pull request on GitHub. Repository, base, branches and pull requests can also be
-switched from the page's own Source panel, without restarting anything - it lists the branches ahead of the base and
-every open pull request, filterable together.
+## Reading a diff
 
-On the page:
+- The file list is a tree following the repository's folders, foldable and remembered, with a count per folder. A chain of single-child directories is one row.
+- `j`/`k` walk the files, `/` filters them, `c` comments on the selection, `r` marks the current file reviewed.
+- **Changes only** hides context lines, **Hide reviewed** clears what you are done with, and **Reviewed** folds one file away. The tick is kept per file digest, so a file whose diff moves reopens itself.
+- **`+20 up` / `+20 down` / `all N` / `+20 below`** bring in the lines the diff left out, read from the file at that revision.
+- A file is built when you come within reach of it and let go once you are well past, standing at the height its lines measured. A six-thousand-line review is 5,700 nodes rather than 218,000 and opens in half a second rather than seven. What it costs: the browser's own search reaches the files you are near.
+- Copying a selection gives the code alone - no line numbers, no `+`/`-` markers, indentation intact.
+- **What you have not seen does not stay folded**: a file whose diff changed since you ticked it, one holding a comment never shown to you, a resolved thread answered since you last read it. Seen means it has been on your screen.
+- The branch is watched while you read it. **Refresh** is offered once the diff it was built from has moved on - a commit, a fixup, work saved on disk - and never taken on your behalf: it keeps the branch, the commit, every comment and every tick.
 
-- **Drag the line numbers or the `+`** to select a range, and let go to open the comment box. A range may cover removed
-  and added lines together. Dragging across the code selects the code, as anywhere else - that is how it is copied.
-- **`+20 up` / `+20 down` / `all N`** on each hunk header, and `+20 below` at the end of a file, bring in the lines the
-  diff left out, read from the file at that branch's revision.
-- **Reviewed** folds a file away. The tick is remembered per branch and per file digest, so a file whose diff changes
-  reopens itself rather than staying silently ticked.
-- **Send** in the comment box posts that one comment immediately; **Add to review** keeps it for a batch that goes out
-  together with **Submit review** and an optional overall note. Both take the same path, so a lone comment is recorded,
-  threaded and posted exactly like a batch.
-- **Nothing has to go out all at once.** Each comment waiting in the review tray has its own Send, leaving the rest
-  pending, and the Comments panel groups everything by the batch it was written in, with a Send for each - so batches go
-  to the pull request one at a time, in whatever order suits.
-- **A file can be commented on as a whole**, from its header, for a remark that belongs to no line of it. It is
-  recorded, threaded, replied to and resolved like any other, reads as "the file" wherever a line range would be, and
-  reaches a pull request as a review comment naming the file with no line beside it.
-- **A session hears about replies, not only comments.** The log carries an event cursor that every write bumps, and
-  `desk.py watch` follows it: an answer written on a comment read long ago reaches the session exactly as a new comment
-  does. Each event says which side made it, so a session never mistakes its own reply for news, and the watch keeps
-  running rather than stopping at the first thing said.
-- **Every comment is a thread.** Either side can reply, and either side can resolve or reopen it. Resolving folds the
-  thread to its remark alone and keeps every reply behind one click, so closing a comment discards nothing.
-- **A comment can be deleted**, whole or down to its last reply, from the `x` on the thread and the one on that reply.
-  A comment already posted is deleted on the pull request as well, newest first, and a deletion GitHub refuses leaves it
-  here untouched rather than hiding a remark that is still there. Deleting is the one thing that does discard: it is
-  asked for each time, and only the last reply can go, since deleting further up would leave the answers below it
-  standing against nothing.
-- **Resolving one that reached the pull request resolves it there too**, by finding the thread its text opened and
-  resolving that. Until GitHub confirms it, the comment reads "not resolved there yet" beside its own resolution rather
-  than claiming agreement it does not have; a resolution that could not be made is retried like a post that did not
-  land.
-- **Every remark and every reply says whose it is**, in the ink their words are read in: yours, the session's, or the
-  author who wrote it on the pull request - your own login among them, read back as "you". It opens the line the way a
-  name opens a line of dialogue, so the words run on from it and wrap at the full width; hovering says where it was
-  written, which is the one thing rarely worth the room.
-- **A reply is a comment attached to a thread.**
-- **A thread goes out when you send it, as it reads then.** Each thread carries its own **Sync**, saying what pressing
-  it would carry - the remark if the pull request has none of it, the replies it does not hold, its resolution once you
-  have closed it. Whatever is written afterwards, by you or by a session, waits for the next press: nothing leaves this
-  desk as a consequence of somebody writing in a thread. A sync only brings back what the pull request holds.
-- **The Comments panel is where several are worked through.** Every row is a thread and sends itself from its own row;
-  **Sync the threads on the PR** sends every thread the pull request already holds, which is what a review that has been
-  going back and forth for a while needs.
-- **The panel is read by batch or by what moved last.** A batch says which submission a remark went out in, and nothing
-  else - a reply belongs to its thread and carries no batch of its own. So sorting by what moved last is where the
-  answer just written into a batch of long ago is found, and the choice outlives the reload.
-- **A sync brings the pull request's own comments in.** What a reviewer or a bot wrote there arrives as a comment of
-  its own, numbered like the rest and carrying its author, so a session hears about it from the watch and can answer it.
-  Those are the comments the desk answers rather than rewrites: the remark stays its author's word.
-- **What GitHub refuses is said where you are.** A sync, a send or a resolution that could not happen raises a notice
-  from the bottom of the page carrying the reason, and it stays until dismissed - the panel it happened in is often
-  closed. Pressing **Refresh** is acknowledged the same way: the button reports that it is collecting and refuses a
-  second press until it is done.
-- **Bring back** collects what the pull request holds: replies written there, arriving with their author, its word on
-  what is resolved, and the threads opened there that this desk has none of. It asks for nothing in return - a resolution
-  a thread there is holding closes it here, since that is the copy everyone else reads, and one closed here waits to be
-  sent. Bringing back twice brings nothing back twice.
+## Commenting
 
-  A resolution is believed only when GitHub reports the thread as resolved, so a send that could not be made says so on
-  the thread rather than reading as agreement nobody else can see.
-- **A review is held a screenful at a time.** Every file keeps its header; the lines of one are built when you come
-  within reach of it and let go once you are well past, and a card that has been let go stands at the height its lines
-  measured, so nothing under you moves as you read. A six-thousand-line review is 5,700 nodes rather than 218,000, opens
-  in half a second rather than seven, and redraws in 50 ms rather than two seconds. What it costs: the browser's own
-  search reaches the files you are near rather than every file at once, and a comment reached from the panel builds the
-  file it hangs in on the way.
-- **Copying a selection gives the code alone** - no line numbers, no `+`/`-` markers, indentation intact - so a snippet
-  lifted out of a diff pastes straight into an editor. A selection inside a single line copies as the browser made it.
-- **Code stays code.** A fenced block keeps its indentation as a code block, backticks stay inline code, and line
-  breaks stay where you put them. Pasted text is only ever text, never markup the page acts on.
-- **Edit** rewrites a comment, or any reply written here, and keeps what it said before. One already posted to a pull
-  request is marked as having moved on from what the pull request holds. A reply carried back from a pull request is
-  shown as its author wrote it and carries no Edit.
-- **Comments** in the header opens the log: every comment on the branch, whether it is open or resolved, whether it is
-  waiting for GitHub, already on the pull request, or local only. Clicking one jumps to it.
-- **The standing of a comment is a control, not a label.** Click "local only" on a comment to send that one to the pull
-  request, or the panel's button to send every local one at once; click it again to keep a comment out. The decision
-  stays changeable until it lands, so a comment written before deciding never has to be written twice.
+- **Drag the line numbers or the `+`** to select a range, and let go to open the box. A range may cover removed and added lines together. Dragging across the code selects the code, as anywhere else.
+- **A file header comments on the file as a whole**, for a remark that belongs to no line of it.
+- **Add to review** hands a comment to the tray, which submits the batch with **Submit review** and an optional overall note. A submission records the remarks here; **Also post to PR #N** in the tray is what sends them out with it.
+- **Every comment is a thread.** Either side replies, resolves or reopens. Resolving folds the thread to its remark and keeps the replies one click away.
+- **Every remark and reply says whose it is**, in the ink its words are read in - yours, the session's, or the author who wrote it on the pull request, your own login among them read back as "you". Hovering says when and where it was written.
+- **Edit** rewrites a remark, or a reply written here, keeping what it said before. A reply carried back from a pull request stands as its author wrote it.
+- **Delete** takes a thread, or its last reply, from the `x` on either. It is the one thing that discards, so it is asked for each time; one already posted goes from the pull request too.
+- **A comment follows its line** when the diff moves under it, reading "moved from L<n>". One whose line has left the diff is kept, marked "code moved on", at the end of the file it belonged to. Neither is ever resolved or deleted on your behalf.
+- **Every comment wears the number it is referred to by**, so an answer saying "[58]" points at a thread. Press `#`, type the number, and the page goes to it, unfolding whatever was folded; a URL ending in `#58` lands the same way.
+- A comment keeps the markdown that carries meaning: fenced blocks and backticks stay code, `>` lines read as the passage they quote. Pasted text is only ever text.
+- Comments survive a reload, a refresh and a browser closed on them, a half-written reply included.
+- **Comments** in the header opens the panel: every thread on the branch, open or resolved, waiting for GitHub or local only. Clicking one jumps to it.
 
-A comment remembers the line it was written against, so when the diff moves under it - a fixup pushed, a rebase - it
-follows that line to wherever it went and says "moved from L<n>" rather than sitting on a line number that now holds
-something else. A comment whose line is no longer in the diff at all is **kept**, marked "code moved on", and shown at
-the end of the file it belonged to. Neither is ever resolved or deleted on your behalf.
-- **Every comment wears the number it is referred to by**, so an answer that says "[58]" points at a thread you can
-  find. Press `#` from anywhere, type the number, and the page goes to it - unfolding the file and the thread whatever
-  state they were left in - and a URL ending in `#58` lands on it the same way.
-- **What you have not seen does not stay folded.** A file whose diff has changed since you marked it reviewed opens
-  itself, so does one holding a comment you have never been shown, and so does a resolved thread answered since you
-  last read it. What counts as seen is what has been on your screen: a thread built inside a folded file or below the
-  fold is not read, so it keeps showing itself until you have actually looked at it.
-  A fold you make by hand is remembered against the diff you made it on, so it holds until that diff moves.
-- **The branch is watched while you read it.** A reload collects the diffs again, and a page left open offers a
-  **Refresh** once what it was built from has moved on - a commit, a fixup, work saved on disk. It is offered, never
-  taken: rebuilding the diff under you would move the ground you are on, and taking it keeps the branch and commit you
-  were reading, along with every comment and tick. Comments written and not yet sent are kept through both, so a
-  refresh, a reload, or a browser closed on them costs nothing, and a reply half written into a thread survives the
-  page redrawing itself under it. Every box grows with what is written into it, up to the point where a long remark
-  would push the diff off screen and scrolls inside instead. A comment keeps the little markdown that carries meaning:
-  fenced blocks and backticks stay code, and a run of `>` lines reads as the passage it quotes.
-- **The file list is a tree** following the repository's folders, each foldable and remembered across reloads, with a
-  count per folder. A chain of single-child directories is one row, so a deep path costs one line and not one per
-  level. Walking onto a file inside a folded folder reveals it.
-- **Changes only** hides context lines; **Hide reviewed** clears what you are done with; `j`/`k` walk the files, `/`
-  filters them, `c` comments on the selection, `r` marks the current file reviewed.
+## Sending to a pull request
 
-## Handing the comments to a session
+Nothing leaves this desk on its own.
 
-The desk records every batch to `~/.claude/diff-desk/comments.jsonl`, numbering each comment and stamping the batch it
-arrived in. A session waits for one with:
+- **A thread goes out when you send it, as it reads then.** Each carries its own **Sync**, saying what pressing it would carry: the remark if the pull request has none of it, the replies it does not hold, the resolution once you have closed it. Whatever is written afterwards waits for the next press.
+- **The Comments panel works through several.** Every row sends itself; **Send local** aims the local ones at the pull request and sends them; **Sync threads** sends every thread the pull request already holds, which is what a review going back and forth needs.
+- **Bring back** collects what the pull request holds: replies written there with their authors, its word on what is resolved, and the threads opened there this desk has none of. It asks for nothing in return, and bringing back twice brings nothing back twice.
+- **The standing of a comment is a control.** Click "local only" to send that one, click it again to keep it out. The decision stays changeable until it lands.
+- A range becomes a GitHub range comment; one covering removed and added lines is anchored on the added side, the side a range can be expressed on. A batch goes out as one review.
+- **A send that does not land loses nothing.** The comment is recorded before GitHub is contacted, marked `pending` until it lands and `failed` if it does not, keeping the reason. What is owed is retried three ways: the panel's **Retry failures**, on its own every few seconds, and the moment the network returns. A rejection retrying cannot help - a line outside the diff, no permission - is marked `refused` instead.
+- **A resolution is believed only when GitHub reports the thread resolved.** Until then the comment reads "not resolved there yet" beside its own resolution.
+- **What GitHub refuses is said where you are**, as a notice carrying the reason that stays until dismissed.
+- **The panel reads by batch or by what moved last.** A batch names the submission a remark went out in; a reply belongs to its thread and carries no batch, so recency is where the answer just written into an old batch is found.
 
-    python3 desk.py watch
+## Working with a session
 
-which blocks until a batch lands, prints each comment as `[seq] branch path:line-endLine (side) text` with its state
-and any replies, each numbered by its place in the thread, and exits. It reports to stdout and nowhere else: sent to a
-file, the watch keeps watching and reports to nobody. A session then answers, closes, or rewrites them:
+Every comment is recorded to `~/.claude/diff-desk/comments.jsonl`, numbered, with an event cursor every write bumps.
 
+    python3 desk.py watch                                     # block until something is said, print it, exit
+    python3 desk.py comments                                  # what is outstanding, with replies and GitHub standing
     python3 desk.py reply 3 "it happens because ..."          # answer, leaving it open
     python3 desk.py resolve 3 4 --answer "fixed in abc1234"   # answer and close
     python3 desk.py resolve 3 --reopen                        # put one back
     python3 desk.py edit 3 "what I actually meant ..."        # rewrite, keeping the earlier wording
     python3 desk.py edit 3 --reply 0 "worded better ..."      # rewrite one reply, by its place in the thread
+    python3 desk.py sync                                      # bring the pull request's comments in
 
-The page picks all of that up on its own, threading the replies under the comment. `desk.py comments` lists what is
-still outstanding, with each thread's replies and where it stands with GitHub.
+The watch follows the cursor, so an answer written on a comment read long ago arrives exactly as a new comment does, and each event says which side made it, so a session never mistakes its own reply for news. It reports to stdout and nowhere else. The page picks all of it up on its own, threading the replies under the comment.
 
-As a Claude Code skill, drop this repository into `~/.claude/skills/diff-desk/` and the flow above needs no
-explaining - `SKILL.md` tells the session how to serve a review, wait for comments, and close them out.
+A sync brings the pull request's own comments in, each carrying its author, so a remark a reviewer or a bot wrote there reaches the session through the watch and can be answered. Those the desk answers rather than rewrites: the remark stays its author's word.
 
-## Posting to a pull request
+Dropped into `~/.claude/skills/diff-desk/`, this is a Claude Code skill and the flow above needs no explaining - `SKILL.md` tells the session how to serve a review, wait for comments, and close them out.
 
-When a branch has an open pull request, the tray offers to post the batch there as well. Ranges become GitHub range
-comments; a comment covering removed and added lines is anchored on the added side, which is the side a line range can
-be expressed on. It goes out as a single review rather than a stream of separate comments, and it is always opt-in.
+## Where things live
 
-**A post that does not land loses nothing.** The comment is written to the log before GitHub is contacted, so the order
-of events is: recorded, then attempted. A comment bound for a pull request is marked `pending` until it lands and
-`failed` if it does not, keeping the reason. Either way it stays in the log, and the log panel shows exactly how many
-are waiting.
+State is `~/.claude/diff-desk/`, overridden with `DIFF_DESK_HOME`; the port is `DIFF_DESK_PORT`. One log holds every review the desk has served, each comment recording which pull request it was sent to, so posting, resolving or syncing one review never reaches another's comments.
 
-What is waiting is retried three ways: the button in the log panel, on its own every few seconds while the page is
-open, and the moment the browser reports the network is back. Retrying takes everything still owed without being told
-which, so a failure needs no bookkeeping from you. A comment never meant for the pull request is left alone by all of
-it.
+A review is identified by its pull request, not by the ref it is read from. The same work opened from its branch, from the head fetched by number, or from the number typed in is one review: its comments and its reviewed ticks follow it across all three.
 
-A refusal is told apart from a failure: when GitHub rejects the comment itself - a line outside the diff, a pull
-request that is gone, no permission - retrying cannot help, so it is marked `refused` with its reason and left in the
-log instead of being attempted forever.
-
-## Layout
+## Contributing
 
 | file | what it is |
 | --- | --- |
-| `desk.py` | the entry point: `serve`, `watch`, `comments`, `resolve`, `refs` |
-| `gen_diff_data.py` | turns a git range into the payload a page renders: hunks, digests, pull request resolution |
+| `desk.py` | the entry point: `serve`, `watch`, `comments`, `reply`, `edit`, `resolve`, `bind`, `sync`, `refs` |
+| `gen_diff_data.py` | turns a git range into the payload a page renders: hunks, digests, pull request threads |
 | `serve_diff.py` | the local server: the page, rescans, file slices, comments, resolutions, pull request posts |
 | `diff_desk_template.html` | the page itself, with `__DIFF_DATA__` and `__BUILD__` substituted at build time |
 | `SKILL.md` | how a Claude Code session drives all of the above |
 
-State lives in `~/.claude/diff-desk/` (override with `DIFF_DESK_HOME`); the port is `DIFF_DESK_PORT`. One log holds
-every review the desk has served, and each comment records which pull request it was sent to, so posting, resolving or
-syncing one review never reaches another's comments.
-
-A review is identified by its pull request, not by the ref it is read from. The same work opened from its branch, from
-the head fetched by number, or from the number typed in is one review: its comments and its reviewed ticks follow it
-across all three.
-
-## Development
-
     pip install pytest pytest-xdist playwright && playwright install chromium firefox webkit
     python3 -m pytest
 
-The suite builds its own repository to review and its own desk to serve it, so it touches neither your checkouts nor
-the network. Nothing is shared between the engines either, so the five groups it is collected into - one per engine,
-one for the server, one for the collector - can be run side by side, which is about three times quicker:
+The suite builds its own repository to review and its own desk to serve it, so it touches neither your checkouts nor the network. Nothing is shared between the engines either, so its five groups - one per engine, one for the server, one for the collector - run side by side, about three times quicker:
 
     python3 -m pytest -n 5 --dist loadgroup
 
-Every worker builds its own repository and brings up its own desk on a port of its own. Leave the flags off while
-working on a failure: one process, in order, is where a failure is easiest to read.
+Leave the flags off while working on a failure: one process, in order, is where a failure is easiest to read.
 
-`tests/test_page.py` drives the page in Chromium, WebKit and Firefox because pointer handling and sticky positioning
-genuinely differ between them - two defects that shipped here were invisible in two engines out of three:
-
-- A trailing click follows every drag, aimed at the pin or at an ancestor depending on the engine, and collapses the
-  range to a single line unless it is swallowed.
-- An `overflow` on a file card makes the card its own scrollport, so its head never pins and the hunk delimiter is
-  what stands at the top of the view, reading as the file's name.
-
-A change to selection, hit testing or layout is not done until the suite passes in all three.
+`tests/test_page.py` drives the page in Chromium, WebKit and Firefox because pointer handling and sticky positioning genuinely differ between them - two defects that shipped here were invisible in two engines out of three. A change to selection, hit testing or layout is not done until the suite passes in all three.
