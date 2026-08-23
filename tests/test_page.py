@@ -2313,6 +2313,27 @@ def test_a_thread_says_what_it_owes_the_pull_request_and_sends_it_when_asked(pag
         page.reload(wait_until="load")
         page.wait_for_selector(f"#note-{made} .line.reply")
 
+        # A note is written into the thread and stays there: it is read as a note rather than as somebody's answer,
+        # it carries no standing, and what the thread owes the pull request is what it was without it.
+        page.locator(f"#note-{made} .actions textarea").fill("come back to this after the rebase")
+        page.locator(f"#note-{made} .actions button").filter(has_text="Note").first.click()
+        page.wait_for_selector(f"#note-{made} .line.reply.aside")
+        aside = page.locator(f"#note-{made} .line.reply.aside")
+        assert aside.locator(".mark.aside").inner_text() == "note"
+        assert aside.locator(".who").inner_text() == "you"
+
+        # A note is answered where it stands, and the answer is a note too: it steps in under what it answers, and
+        # neither of them carries a standing, having nowhere to go.
+        aside.locator("button.tiny").filter(has_text="Reply").click()
+        page.locator(f"#note-{made} .line.actions.aside textarea").fill("done.")
+        page.locator(f"#note-{made} .line.actions.aside button").filter(has_text="Keep").click()
+        page.wait_for_function(
+            "(seq) => document.querySelectorAll(`#note-${seq} .line.reply.aside`).length === 2", arg=made
+        )
+        stepped = page.locator(f"#note-{made} .line.reply.aside").nth(1)
+        assert stepped.evaluate("(line) => parseInt(line.style.marginLeft)") > 0
+        assert page.locator(f"#note-{made} .line.reply.aside .mark:not(.aside)").count() == 0
+
         # What pressing it would do is what it says, so the reader sends a thread knowing what leaves this desk.
         sending = page.locator(f"#note-{made} .actions button.ghost").filter(has_text="Sync").first
         assert "the remark and 1 reply" in sending.get_attribute("title")
@@ -2353,10 +2374,17 @@ def test_a_thread_says_what_it_owes_the_pull_request_and_sends_it_when_asked(pag
         )
         sending.click()
         # Sent, the thread owes nothing, so the button it was sent with is gone and the reply says it is on the PR.
-        page.wait_for_function(f"() => !document.querySelector('#note-{made} .actions button.ghost:nth-of-type(2)')")
+        page.wait_for_function(
+            """(seq) => {
+              const buttons = document.querySelectorAll(`#note-${seq} .actions button`);
+              return ![...buttons].some((button) => button.textContent === "Sync");
+            }""",
+            arg=made,
+        )
         assert page.locator(f"#note-{made} .line.reply .mark").first.inner_text() == "on the PR"
         row = {row["seq"]: row for row in desk.get("/comments")}[made]
         assert (row["github"], row["replies"][0]["github"]) == ("posted", "posted")
+        assert (row["replies"][1]["note"], row["replies"][1]["github"]) == (True, "none")
     finally:
         gen_diff_data.run(desk.repo, "remote", "remove", "origin")
         desk.github_answers(code=1, err="gh: Not Found (HTTP 404)")

@@ -586,6 +586,10 @@
   .thread.done > .line:first-child .said { color: var(--muted); }
   .thread .reply { padding-left: 10px; border-left: 1px solid currentColor; }
   .thread .reply.session { color: var(--accent); }
+  /* A note is set apart from the answers around it: it stays on this desk whatever the thread sends. */
+  .thread .reply.aside { border-left-style: dashed; }
+  .thread .reply.aside .who { font-style: italic; }
+  .thread .mark.aside { color: var(--muted); background: var(--stale-bg); font-style: italic; }
   .thread .reply.you { color: var(--add-ink); }
   .thread .reply:not(.you):not(.session) { color: var(--stale); }
   /* Whose reply it is, said in its own voice: the line's colour draws the rule down its side, and the words inside it
@@ -1263,9 +1267,56 @@
     return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`;
   }
 
+  // A note written where it belongs: on the remark, on a reply, or on another note - which makes it an answer to that
+  // note, and no more able to leave than the note it hangs under.
+  function noteOn(note, on, label) {
+    const open = document.createElement("button");
+    open.className = "tiny";
+    open.textContent = label;
+    open.title = "Keep a note here, on this desk";
+    open.addEventListener("click", () => {
+      const written = document.createElement("textarea");
+      written.rows = 2;
+      written.placeholder = "a note, kept here";
+      grows(written);
+      const keep = document.createElement("button");
+      keep.className = "solid";
+      keep.textContent = "Keep";
+      const drop = document.createElement("button");
+      drop.className = "ghost";
+      drop.textContent = "Cancel";
+      const writing = document.createElement("div");
+      writing.className = "line reply actions aside";
+      writing.append(written, keep, drop);
+      open.closest(".line").after(writing);
+      written.focus();
+      drop.addEventListener("click", render);
+      keep.addEventListener("click", async () => {
+        const wanted = written.value.trim();
+        if (!wanted) return render();
+        await post("reply", { seq: note.seq, text: wanted, who: "you", note: true, on });
+        await loadNotes();
+        render();
+      });
+    });
+    return open;
+  }
+
+  // How far in a word said in a thread stands: what it answers, and what that answered, up to the remark itself.
+  function depthOf(answers, index) {
+    let depth = 0;
+    let on = answers[index].on;
+    while (on !== undefined && on !== null && on >= 0 && on < index) {
+      depth += 1;
+      on = answers[on].on;
+    }
+    return depth;
+  }
+
   function owedThere(note) {
     if (note.pending || !notes.live) return "";
-    const said = (note.replies || []).filter((answer) => answer.github !== "posted").length;
+    // A note never goes: it is written for this side of the desk, so it is no part of what a thread owes.
+    const said = (note.replies || []).filter((answer) => !answer.note && answer.github !== "posted").length;
     const owes = [];
     if (note.github !== "posted") owes.push("the remark");
     if (said) owes.push(`${said} repl${said === 1 ? "y" : "ies"}`);
@@ -2061,28 +2112,40 @@
 
     (note.replies || []).forEach((answer, index, answers) => {
       const said = document.createElement("div");
-      // Read as the reader's own where they wrote it, whichever side of the pull request they were on at the time.
-      said.className = `line reply ${isReader(answer.who) ? "you" : answer.who}`;
+      // Read as the reader's own where they wrote it, whichever side of the pull request they were on at the time. A
+      // note is nobody's word to the pull request: it is written for this side of the desk, so it opens as one.
+      said.className = `line reply ${isReader(answer.who) ? "you" : answer.who}${answer.note ? " aside" : ""}`;
+      // What it hangs under, stepped in one for each word it answers: a note on a reply, and an answer to that note,
+      // are read where they belong rather than at the end of everything said.
+      said.style.marginLeft = `${12 * depthOf(answers, index)}px`;
       const from = document.createElement("span");
       from.className = "who";
       from.textContent = spokenBy(answer.who);
       // When it was said and where it stands, kept for the asking: in the line they say little and take the room the
       // reply is read in.
-      from.title = saidWhen(answer.at, answer.who);
+      from.title = answer.note ? `${answer.at}, kept here` : saidWhen(answer.at, answer.who);
       const body = document.createElement("span");
       body.className = "said";
+      if (answer.note) {
+        const kind = document.createElement("span");
+        kind.className = "mark aside";
+        kind.textContent = "note";
+        kind.title = "Kept on this desk, whatever the thread sends";
+        body.append(kind);
+      }
       body.append(from);
       written(body.appendChild(spoke()), answer.text);
       said.append(body);
       // Whether the pull request holds this reply, shown on the reply itself: what a thread still owes is what its own
       // Sync would carry, and a reader deciding whether to press it reads that off the replies.
-      if (!note.pending && answer.github !== "none") {
+      if (!note.pending && !answer.note && answer.github !== "none") {
         const standing = document.createElement("span");
         standing.className = `mark ${answer.github}`;
         standing.textContent = GITHUB_MARK[answer.github] || answer.github;
         if (answer.error) standing.title = answer.error;
         said.append(standing);
       }
+      if (!note.pending && notes.live) said.append(noteOn(note, index, answer.note ? "Reply" : "Note"));
       // Only what was written here can be reworded: a reply carried back from the pull request is its author's word,
       // said on the copy everyone else reads, so this desk shows it and leaves it alone.
       if (!note.pending && notes.live && (isReader(answer.who) || answer.who === "session")) {
@@ -2162,6 +2225,19 @@
         await loadNotes();
         render();
       });
+      // A note is written in the thread and stays there: what to come back to, what a session is to do next. It is
+      // no answer to the remark, so nothing that decides what the thread sends ever reads it.
+      const aside = document.createElement("button");
+      aside.className = "ghost";
+      aside.textContent = "Note";
+      aside.title = "Keep this on the desk, whatever the thread sends";
+      aside.addEventListener("click", async () => {
+        if (!say.value.trim()) return;
+        await post("reply", { seq: note.seq, text: say.value.trim(), who: "you", note: true });
+        writing.delete(note.seq);
+        await loadNotes();
+        render();
+      });
       const close = document.createElement("button");
       close.className = note.state === "resolved" ? "ghost" : "solid";
       close.textContent = note.state === "resolved" ? "Reopen" : "Resolve";
@@ -2183,7 +2259,7 @@
         keepTucked();
         render();
       });
-      actions.append(say, send, close);
+      actions.append(say, send, aside, close);
       // What this thread owes the pull request, sent as it now reads. Offered only when there is something to send,
       // which is what makes the button say what pressing it would do.
       const owes = owedThere(note);

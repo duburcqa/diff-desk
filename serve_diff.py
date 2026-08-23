@@ -308,7 +308,7 @@ def sent_out(wanted, answers):
 def note_trouble(row, trouble):
     """Say on the comment why a send did not land: on the replies it would have carried, and on its resolution."""
     for answer in row["replies"]:
-        if answer["github"] != "posted":
+        if not answer.get("note") and answer["github"] != "posted":
             answer["github"] = "failed"
             answer["error"] = trouble
     if row.get("state") == "resolved":
@@ -320,6 +320,8 @@ def settle_sent(row, thread, going, step):
     """Write what a send came to onto the comment it was asked for: its replies, and where its resolution stands."""
     spoken = {node["body"] for node in thread["comments"]["nodes"]}
     for answer in row["replies"]:
+        if answer.get("note"):
+            continue
         if answer["text"] in step.sent or answer["text"] in spoken:
             answer["github"] = "posted"
             answer.pop("error", None)
@@ -493,6 +495,8 @@ def settle(row, landed, incoming, resolved, stamps=()):
     if not row.get("at") and row["text"] in stamps:
         row["at"] = stamps[row["text"]]
     for answer in row.get("replies", []):
+        if answer.get("note"):
+            continue
         if answer["text"] in landed:
             answer["github"] = "posted"
         if not answer.get("at") and answer["text"] in stamps:
@@ -507,7 +511,11 @@ def settle(row, landed, incoming, resolved, stamps=()):
 def landed_replies(row, said):
     """The replies of this comment the thread holds already, whether this desk sent them or they were pasted there."""
     spoken = {answer["body"] for answer in said}
-    return [answer["text"] for answer in row["replies"] if answer["github"] == "posted" or answer["text"] in spoken]
+    return [
+        answer["text"]
+        for answer in row["replies"]
+        if not answer.get("note") and (answer["github"] == "posted" or answer["text"] in spoken)
+    ]
 
 
 def going_out(row, said):
@@ -518,7 +526,9 @@ def going_out(row, said):
     """
     spoken = {answer["body"] for answer in said}
     return [
-        answer["text"] for answer in row["replies"] if answer["github"] != "posted" and answer["text"] not in spoken
+        answer["text"]
+        for answer in row["replies"]
+        if not answer.get("note") and answer["github"] != "posted" and answer["text"] not in spoken
     ]
 
 
@@ -966,10 +976,13 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": True, "seq": found["seq"], "reply": index, "edits": len(said["edits"])})
 
     def _reply(self):
-        """Add a reply to a comment, from whichever side wrote it. A reply leaves the thread open.
+        """Add a reply to a comment, from whichever side wrote it, or a note that stays here. A reply leaves the thread
+        open.
 
         Recorded here and nowhere else: what a thread says reaches the pull request when the reader sends that thread,
-        never as a consequence of somebody answering in it.
+        never as a consequence of somebody answering in it. A note goes further and never leaves at all: it is written
+        for this side of the desk - what to look at again, what a session is to do - so nothing that decides what a
+        thread owes the pull request looks at it.
         """
         order = self._body()
         text = (order.get("text") or "").strip()
@@ -977,17 +990,30 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": False, "error": "an empty reply says nothing"})
             return
         who = "you" if order.get("who") == "you" else "session"
+        # What it hangs under: the remark it answers, or one of the words already said in the thread, by its place in
+        # it. Nothing that hangs under a note can leave either, the pull request holding no such thing to answer.
+        on = order.get("on")
+        said = {"who": who, "text": text, "at": time.strftime("%Y-%m-%d %H:%M:%S"), "github": "none"}
+        if on is not None:
+            said["on"] = on
         with changing() as rows:
             found = next((row for row in rows if row["seq"] == order.get("seq")), None)
-            if found is not None:
-                found["replies"].append(
-                    {"who": who, "text": text, "at": time.strftime("%Y-%m-%d %H:%M:%S"), "github": "none"}
-                )
+            if found is None:
+                is_note = bool(order.get("note"))
+            else:
+                said_before = found["replies"]
+                if on is not None and not 0 <= on < len(said_before):
+                    self._json({"ok": False, "error": f"comment {found['seq']} has nothing said at [{on}]"})
+                    return
+                is_note = bool(order.get("note")) or (on is not None and bool(said_before[on].get("note")))
+                if is_note:
+                    said["note"] = True
+                said_before.append(said)
                 touched(rows, found, who)
         if found is None:
             self._json({"ok": False, "error": f"no comment numbered {order.get('seq')}"})
             return
-        print(f"REPLY [{found['seq']}] {who}: {' '.join(text.split())}", flush=True)
+        print(f"{'NOTE' if is_note else 'REPLY'} [{found['seq']}] {who}: {' '.join(text.split())}", flush=True)
         self._json({"ok": True, "seq": found["seq"], "replies": len(found["replies"])})
 
     def _resolve(self):

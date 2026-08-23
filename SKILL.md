@@ -59,13 +59,19 @@ numbered `[0]`, `[1]` ... by its place in the thread. Answer in the thread, and 
 without a reload:
 
     python3 ~/.claude/skills/diff-desk/desk.py reply 3 "it happens because ..."
+    python3 ~/.claude/skills/diff-desk/desk.py reply 3 --note "check the sibling call site too"
     python3 ~/.claude/skills/diff-desk/desk.py resolve 3 4 --answer "fixed in abc1234"
     python3 ~/.claude/skills/diff-desk/desk.py resolve 3 --reopen
     python3 ~/.claude/skills/diff-desk/desk.py edit 3 "what I actually meant ..."
     python3 ~/.claude/skills/diff-desk/desk.py edit 3 --reply 0 "worded better ..."
 
 Reply when the answer needs discussing, resolve when it is settled - a resolved thread keeps its remark and every
-reply, and the reviewer can reopen it. Resolving a comment that was posted to a pull request also resolves its thread
+reply, and the reviewer can reopen it. A note is neither: printed as `[i] note <who> ...` in a thread, it is written
+for this side of the desk - what the reviewer wants looked at, what is left to do - and it never reaches the pull
+request, so it is guidance to act on rather than a remark to answer. It hangs on what it is about, said as `on [j]`
+when that is not the remark itself, and it is answered with a note of its own: a reviewer's "check whether this is
+true, and if it is not just resolve it" is answered with `reply 3 --note --on 0 "done."` and the thread closed with
+`resolve 3`, which leaves nothing of it on the pull request. Anything written under a note is a note too. Resolving a comment that was posted to a pull request also resolves its thread
 there, and says "not resolved there yet" until GitHub confirms it.
 
 `desk.py sync` brings back what the pull request holds: replies added there, its word on what is resolved, and the

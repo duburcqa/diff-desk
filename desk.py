@@ -4,6 +4,8 @@ desk.py serve --dir <repo> --base <ref> [refs ...]   collect the diffs and serve
 desk.py watch [--since N] [--once]                   print whatever the reviewer says, as they say it
 desk.py comments [--all]                             what has been submitted, unresolved unless --all
 desk.py reply 3 "why it happens ..."                 answer a comment without closing it
+desk.py reply 3 --note "look at this again"          leave a note, which never reaches the pull request
+desk.py reply 3 --note --on 0 "done."                answer what was said at [0], here and nowhere else
 desk.py edit 3 "what I actually meant ..."           rewrite a comment, keeping what it said before
 desk.py edit 3 --reply 0 "worded better ..."         rewrite one reply of a comment, by its place in the thread
 desk.py bind 3 4 [--local]                           aim comments at the pull request, or keep them local
@@ -119,8 +121,13 @@ def show(note):
     )
     print(f"      {' | '.join(marks)}", flush=True)
     for index, answer in enumerate(note.get("replies") or []):
-        # Numbered as the desk addresses it, so the reply to reword is named by what is printed here.
-        print(f"      [{index}] {answer['who']} {answer['at']}: {' '.join(answer['text'].split())}", flush=True)
+        # Numbered as the desk addresses it, so the reply to reword, or the note to answer, is named by what is
+        # printed here. A note is said to be one: it is written for this side of the desk, so it guides the work
+        # rather than answering the remark, and what it hangs under is said when it is not the remark itself.
+        kind = "note " if answer.get("note") else ""
+        on = f" on [{answer['on']}]" if answer.get("on") is not None else ""
+        said = f"{kind}{answer['who']}{on}"
+        print(f"      [{index}] {said} {answer['at']}: {' '.join(answer['text'].split())}", flush=True)
         for earlier in answer.get("edits") or []:
             print(f"          was {earlier['at']}: {' '.join(earlier['text'].split())[:80]}", flush=True)
     for earlier in note.get("edits") or []:
@@ -249,12 +256,16 @@ def edit(args):
 
 
 def reply(args):
-    outcome = ask("/reply", {"seq": args.seq, "text": " ".join(args.text), "who": "session"})
+    order = {"seq": args.seq, "text": " ".join(args.text), "who": "session", "note": args.note}
+    if args.on is not None:
+        order["on"] = args.on
+    outcome = ask("/reply", order)
     if outcome is None:
         sys.exit("nothing is serving")
     if not outcome.get("ok"):
         sys.exit(outcome.get("error", "the reply was refused"))
-    print(f"replied to [{outcome['seq']}], now {outcome['replies']} reply(ies) on it")
+    said = "left a note on" if args.note else "replied to"
+    print(f"{said} [{outcome['seq']}], now {outcome['replies']} reply(ies) on it")
 
 
 def resolve(args):
@@ -329,6 +340,8 @@ job.set_defaults(run=edit)
 job = jobs.add_parser("reply", help="answer a comment without closing it")
 job.add_argument("seq", type=int)
 job.add_argument("text", nargs="+", help="the reply, shown under the comment on the page")
+job.add_argument("--note", action="store_true", help="leave it as a note, which stays on this desk whatever is sent")
+job.add_argument("--on", type=int, help="answer what was said at this place in the thread rather than the remark")
 job.set_defaults(run=reply)
 
 job = jobs.add_parser("resolve", help="answer and close comments, or reopen them")

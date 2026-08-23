@@ -1551,6 +1551,82 @@ def test_syncing_takes_in_the_comments_written_on_the_pull_request(desk):
     assert len([row for row in desk.get("/comments") if row["text"] == "could we document this?"]) == 1
 
 
+def test_a_note_stays_on_the_desk_whatever_the_thread_sends(desk):
+    made = desk.post(
+        "/comments",
+        {
+            "comments": [{"branch": "feature", "path": "sample.py", "line": 12, "side": "new", "text": "worth a look"}],
+            "github": True,
+        },
+    )
+    seq = made["seqs"][0]
+    desk.github_answers(out=json.dumps({"html_url": "https://github.com/x/y/pull/31#review-1"}))
+    assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 31, "seq": [seq]})["ok"]
+
+    desk.post("/reply", {"seq": seq, "text": "come back to this after the rebase", "who": "you", "note": True})
+    desk.post("/reply", {"seq": seq, "text": "answered on the pull request", "who": "session"})
+    desk.post("/reply", {"seq": seq, "text": "and the session is to widen the test", "who": "you", "note": True})
+
+    thread = {
+        "id": "T_note",
+        "isResolved": False,
+        "comments": {
+            "nodes": [
+                {
+                    "databaseId": 910,
+                    "body": "worth a look",
+                    "path": "sample.py",
+                    "createdAt": "2026-08-23T09:00:00Z",
+                    "author": {"login": "duburcqa"},
+                }
+            ]
+        },
+    }
+    desk.github_answers(
+        rules=[
+            {
+                "match": "reviewThreads",
+                "out": json.dumps({"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": [thread]}}}}}),
+            },
+            {"match": "addPullRequestReviewThreadReply", "out": json.dumps({"data": {"m0": {"comment": {"id": "C"}}}})},
+        ]
+    )
+    before = len(desk.github_calls())
+    outcome = desk.post("/send", {"seq": seq, "repo": "someone/somewhere", "pr": 31})
+    calls = desk.github_calls()[before:]
+    assert (outcome["ok"], outcome["sent"]) == (True, 1)
+    assert "answered on the pull request" in calls[-1]
+    assert not any("come back to this" in call or "widen the test" in call for call in calls)
+
+    # A note is answered where it stands, and what answers a note is a note too: the pull request holds no such thing
+    # to answer, whichever side writes it.
+    assert desk.post("/reply", {"seq": seq, "text": "done.", "who": "session", "on": 0})["ok"]
+    assert not desk.post("/reply", {"seq": seq, "text": "nowhere", "who": "you", "on": 9})["ok"]
+
+    # Written for this side of the desk, so a note carries no standing and a thread holding one owes nothing more.
+    row = {row["seq"]: row for row in desk.get("/comments")}[seq]
+    answered = row["replies"][3]
+    assert (answered["who"], answered["note"], answered["on"]) == ("session", True, 0)
+    assert [(reply.get("note", False), reply["github"]) for reply in row["replies"]] == [
+        (True, "none"),
+        (False, "posted"),
+        (True, "none"),
+        (True, "none"),
+    ]
+    desk.github_answers(
+        rules=[
+            {
+                "match": "reviewThreads",
+                "out": json.dumps({"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": [thread]}}}}}),
+            }
+        ]
+    )
+    before = len(desk.github_calls())
+    again = desk.post("/send", {"seq": seq, "repo": "someone/somewhere", "pr": 31})
+    assert (again["ok"], again["sent"]) == (True, 0)
+    assert not any("done." in call for call in desk.github_calls()[before:])
+
+
 def test_sending_a_thread_carries_what_it_holds_and_leaves_what_comes_after(desk):
     made = desk.post(
         "/comments",
