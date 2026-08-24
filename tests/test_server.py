@@ -1370,6 +1370,15 @@ def test_watching_hears_everything_said_not_only_the_first(desk):
     assert "and a third word" in heard
     assert heard.count("comment(s) with news") == 1
 
+    # A watch outlives the desk it was armed against, and a restarted desk carries whatever the tool has become, so
+    # one armed against the run before it says so and stops rather than reading a page that no longer exists.
+    armed = json.loads(stopped.read_text())
+    assert armed["desk"] == desk.get("/serving")["desk"]
+    stopped.write_text(json.dumps({**armed, "desk": "some run before this one"}))
+    told = desk.cli("watch", "--once", "--every", "0.2", "--timeout", "20").communicate(timeout=40)[0]
+    assert "arm it again" in told
+    stopped.write_text(json.dumps(armed))
+
 
 def test_the_desk_updates_itself_over_https_when_ssh_cannot_be_reached(tmp_path):
     # A published copy of the desk to update from, and a checkout of it whose remote is an address SSH cannot reach.

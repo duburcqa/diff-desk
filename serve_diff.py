@@ -9,6 +9,7 @@ Endpoints, all on 127.0.0.1 so nothing is exposed off the machine:
   GET  /reviewed              which files have been read, so a tick outlives the browser it was made in
   POST /reviewed              {marks, drop} - tick files at the digest they were read at, or untick them
   GET  /comments?since=N      every recorded comment past the cursor, each with its seq and batch
+  GET  /serving             which run of the desk is answering, so a watch armed against an older one stops
   GET  /comments?event=N      every comment touched past that event, which is how a session hears about replies
   POST /comments              {comments: [...], github: bool} - a batch as submitted, or a bare list of comments
   POST /bind                  {seq: [...], github} - mark comments as bound for the pull request, or keep them local
@@ -706,6 +707,8 @@ CHANGING = threading.Lock()
 
 # Collecting the diffs ends in a write of the payload and of the page, so it is done one at a time for the same reason.
 BUILDING = threading.Lock()
+# This run of the desk, as the moment it started answering: a restart carries whatever the tool has become with it.
+SERVING = time.strftime("%Y-%m-%d %H:%M:%S")
 
 
 @contextlib.contextmanager
@@ -743,6 +746,10 @@ class Handler(BaseHTTPRequestHandler):
             # Loading the page is asking for the diffs as they stand, so they are collected again before it goes out.
             rebuild()
             self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
+        elif path == "/serving":
+            # Which desk is answering: a watch armed against one that has since been restarted is reading a page and
+            # a wording that no longer exist, which is what tells it to arm itself again.
+            self._json({"desk": SERVING})
         elif path == "/data":
             self._send(200, DATA.read_bytes(), "application/json")
         elif path == "/refs":

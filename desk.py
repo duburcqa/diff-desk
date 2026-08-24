@@ -143,9 +143,22 @@ def heard_upto():
     return json.loads(kept.read_text())["event"] if kept.exists() else None
 
 
-def stop_at(event):
+def stop_at(event, desk=None):
     kept = gen_diff_data.home() / "watched.json"
-    kept.write_text(json.dumps({"event": event}))
+    held = json.loads(kept.read_text()) if kept.exists() else {}
+    kept.write_text(json.dumps({"event": event, "desk": desk if desk is not None else held.get("desk")}))
+
+
+def serving():
+    """Which run of the desk is answering, or None where it does not say - an older desk than this one."""
+    answer = ask("/serving")
+    return (answer or {}).get("desk")
+
+
+def armed_against():
+    """The run of the desk the last watch was armed against."""
+    kept = gen_diff_data.home() / "watched.json"
+    return json.loads(kept.read_text()).get("desk") if kept.exists() else None
 
 
 def serve(args):
@@ -195,8 +208,14 @@ def watch(args):
         since = min(waiting) - 1
     else:
         since = max((row.get("event", row["seq"]) for row in sent), default=0)
+    # A watch outlives the desk it was armed against: a restarted desk carries whatever the tool has become, wording
+    # and all, so one armed against the run before it is reading something that no longer exists.
+    running = serving()
+    if running is not None and armed_against() not in (None, running):
+        print("the desk has been restarted since this watch was armed; arm it again", flush=True)
+        return
     print(f"watching for anything said past event {since}", flush=True)
-    stop_at(since)
+    stop_at(since, running)
     deadline = time.monotonic() + args.timeout if args.timeout else None
     # Never returns of its own accord: a reviewer says one thing, then another, and a watch that stopped at the first
     # left every word after it unheard - which is what happened before it kept going.
@@ -208,9 +227,12 @@ def watch(args):
             for note in fresh:
                 show(note, since)
             since = max(row.get("event", row["seq"]) for row in fresh)
-            stop_at(since)
+            stop_at(since, running)
             if args.once:
                 return
+        if serving() not in (None, running):
+            print("the desk has been restarted; arm the watch again", flush=True)
+            return
         time.sleep(args.every)
     print("nothing said within the timeout")
 
