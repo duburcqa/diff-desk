@@ -1358,6 +1358,8 @@ def test_watching_hears_everything_said_not_only_the_first(desk):
     assert "and the second word" in said
     # Its own writes are not news to it, so a session's reply never wakes it.
     assert said.count("comment(s) with news") == 2
+    # A thread is printed whole, so the line that woke it is marked: what has already been answered reads as read.
+    assert "*[0] you" in said
 
     # Watching again carries on from where that one stopped: what has been heard once does not wake anything twice, and
     # a watch that stops at the first word can therefore be armed again after answering it.

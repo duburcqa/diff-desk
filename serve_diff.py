@@ -652,6 +652,11 @@ def touched(rows, row, by):
     """
     row["event"] = max((held.get("event", 0) for held in rows), default=0) + 1
     row["eventBy"] = by
+    # The last word said carries that stamp too, so a session woken by a thread can tell which line woke it from the
+    # ones it has already read.
+    said = row.get("replies") or []
+    if said and not said[-1].get("event"):
+        said[-1]["event"] = row["event"]
 
 
 def read_ticks():

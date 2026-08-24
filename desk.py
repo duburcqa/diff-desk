@@ -107,7 +107,7 @@ def span(note):
     return f"{note['line']}-{end}" if end and end != note["line"] else str(note["line"])
 
 
-def show(note):
+def show(note, since=None):
     text = " ".join(str(note.get("text", "")).split())
     marks = [note.get("state", "open")]
     if note.get("github", "none") != "none":
@@ -127,7 +127,10 @@ def show(note):
         kind = "note " if answer.get("note") else ""
         on = f" on [{answer['on']}]" if answer.get("on") is not None else ""
         said = f"{kind}{answer['who']}{on}"
-        print(f"      [{index}] {said} {answer['at']}: {' '.join(answer['text'].split())}", flush=True)
+        # What woke the session, marked: a thread is printed whole, so without this the line that is news reads like
+        # the ones it has already answered.
+        news = "*" if since is not None and answer.get("event", 0) > since else " "
+        print(f"     {news}[{index}] {said} {answer['at']}: {' '.join(answer['text'].split())}", flush=True)
         for earlier in answer.get("edits") or []:
             print(f"          was {earlier['at']}: {' '.join(earlier['text'].split())[:80]}", flush=True)
     for earlier in note.get("edits") or []:
@@ -203,7 +206,7 @@ def watch(args):
         if fresh:
             print(f"{len(fresh)} comment(s) with news:", flush=True)
             for note in fresh:
-                show(note)
+                show(note, since)
             since = max(row.get("event", row["seq"]) for row in fresh)
             stop_at(since)
             if args.once:

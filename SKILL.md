@@ -29,7 +29,7 @@ The user writes comments on the page and presses "Submit review", which sends th
 
 It reports to stdout and nowhere else, so whatever runs it has to be reading that stream: started with its output sent to a file, it watches faithfully and reports to nobody, and the review sits there unanswered with nothing to say it arrived. Either keep the stream where the session reads it, or arm `--once` and read what it printed when it exits.
 
-It keeps running and prints whatever the reviewer says, as they say it - not only the first thing, and not only new comments: a reply on a comment already read reaches it just the same, since it follows the log's event cursor rather than the comment numbers. A session's own replies and resolutions bump that cursor too and are told apart, so what it is waiting for is never confused with what it just did.
+A thread is printed whole and the line that woke the session is marked with a `*`, so what has already been answered reads as read. It keeps running and prints whatever the reviewer says, as they say it - not only the first thing, and not only new comments: a reply on a comment already read reaches it just the same, since it follows the log's event cursor rather than the comment numbers. A session's own replies and resolutions bump that cursor too and are told apart, so what it is waiting for is never confused with what it just did.
 
 `--once` stops it after the first report, and where it stopped is remembered, so the way to be woken rather than to keep looking is to arm `watch --once` in the background, answer what it reports, and arm it again: the same reply never wakes a session twice, and nothing said while it was answering is lost. `--since N` overrides where it resumes from.
 
