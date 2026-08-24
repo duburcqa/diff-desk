@@ -6,6 +6,7 @@ desk.py comments [--all]                             what has been submitted, un
 desk.py reply 3 "why it happens ..."                 answer a comment without closing it
 desk.py reply 3 --note "look at this again"          leave a note, which never reaches the pull request
 desk.py reply 3 --note --on 0 "done."                answer what was said at [0], here and nowhere else
+desk.py forget 3                                     let go of the last note on a comment
 desk.py edit 3 "what I actually meant ..."           rewrite a comment, keeping what it said before
 desk.py edit 3 --reply 0 "worded better ..."         rewrite one reply of a comment, by its place in the thread
 desk.py bind 3 4 [--local]                           aim comments at the pull request, or keep them local
@@ -293,6 +294,21 @@ def reply(args):
     print(f"{said} [{outcome['seq']}], now {outcome['replies']} reply(ies) on it")
 
 
+def forget(args):
+    """Let go of the last note on a comment, which is the only one that can go: what stands under it would be left
+    standing against nothing."""
+    held = ask("/comments")
+    if held is None:
+        sys.exit("nothing is serving")
+    said = next((row.get("replies") or [] for row in held if row["seq"] == args.seq), None)
+    if said is None:
+        sys.exit(f"no comment numbered {args.seq}")
+    outcome = ask("/forget", {"seq": args.seq, "note": len(said) - 1})
+    if not (outcome or {}).get("ok"):
+        sys.exit((outcome or {}).get("error", "the note is still there"))
+    print(f"forgot the last note on [{args.seq}], {len(said) - 1} thing(s) still said in it")
+
+
 def resolve(args):
     outcome = ask("/resolve", {"seq": args.seq, "answer": args.answer, "resolved": not args.reopen, "who": "session"})
     if outcome is None:
@@ -368,6 +384,10 @@ job.add_argument("text", nargs="+", help="the reply, shown under the comment on 
 job.add_argument("--note", action="store_true", help="leave it as a note, which stays on this desk whatever is sent")
 job.add_argument("--on", type=int, help="answer what was said at this place in the thread rather than the remark")
 job.set_defaults(run=reply)
+
+job = jobs.add_parser("forget", help="let go of the last note on a comment")
+job.add_argument("seq", type=int)
+job.set_defaults(run=forget)
 
 job = jobs.add_parser("resolve", help="answer and close comments, or reopen them")
 job.add_argument("seq", nargs="+", type=int)

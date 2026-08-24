@@ -1618,9 +1618,11 @@ def test_a_note_stays_on_the_desk_whatever_the_thread_sends(desk):
     assert not desk.post("/reply", {"seq": seq, "text": "nowhere", "who": "you", "on": 9})["ok"]
 
     # A note never left, so it is forgotten without asking the pull request anything - but only the last of them, as
-    # for a reply: letting go of one further up leaves what stands under it standing against nothing.
+    # for a reply: letting go of one further up leaves what stands under it standing against nothing. A session says
+    # which comment and the desk works out which note that is, since the last is the only one it could mean.
     assert not desk.post("/forget", {"seq": seq, "note": 0})["ok"]
-    assert desk.post("/forget", {"seq": seq, "note": 4})["ok"]
+    told = desk.cli("forget", str(seq)).communicate(timeout=30)[0]
+    assert "forgot the last note" in told
     assert [reply["text"] for reply in {row["seq"]: row for row in desk.get("/comments")}[seq]["replies"]] == [
         "come back to this after the rebase",
         "answered on the pull request",
