@@ -1423,7 +1423,9 @@
       if (!batches.has(note.batch)) batches.set(note.batch, []);
       batches.get(note.batch).push(note);
     }
-    for (const [id, held] of batches) {
+    // Newest batch first, since the last thing said is what a reader comes back for; inside one, in the order it was
+    // written, which is the order it is read in.
+    for (const [id, held] of [...batches].reverse()) {
       const group = document.createElement("div");
       group.className = "batch";
       const title = document.createElement("div");

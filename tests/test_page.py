@@ -711,6 +711,12 @@ def test_the_comments_panel_reads_by_batch_or_by_what_moved_last(page, desk):
     older = page.locator(".logrow:has-text('the older batch')").first
     assert older.evaluate("(row) => row.closest('.batch').querySelector('b').textContent").startswith("batch")
 
+    # The last submission is what the panel opens on, so the batches read from the newest down.
+    heads = page.locator("#logrows .batchhead b").all_inner_texts()
+    numbered = [int(head.split()[-1]) for head in heads if head.lower().startswith("batch")]
+    assert len(numbered) >= 2, "two submissions are what makes their order sayable"
+    assert numbered == sorted(numbered, reverse=True)
+
     # A reply carries no batch of its own: answering the older thread leaves the batches as they were.
     desk.post("/reply", {"seq": made[0], "text": "answered long after", "who": "session"})
     page.evaluate("() => loadNotes()")
