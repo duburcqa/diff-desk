@@ -1215,7 +1215,7 @@ def test_the_log_reaches_a_comment_and_leaves_what_is_settled_out(page, desk):
     page.locator("#logopen").click()
     page.wait_for_selector("#log[data-open='true']")
     page.locator("#logrows .logrow").filter(has_text=saying).first.click()
-    # The scroll is animated, so the arrival is waited for rather than guessed at.
+    # The aim takes a frame or two to be taken, so the arrival is waited for rather than guessed at.
     page.wait_for_function(
         """(seq) => {
           const thread = document.getElementById(`note-${seq}`);

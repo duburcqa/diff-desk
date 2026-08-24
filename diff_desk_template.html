@@ -1502,9 +1502,11 @@
         else aim(thread, tries - 1, true);
         return;
       }
-      // Told to go there outright once the first aim has been taken: a smooth scroll still on its way answers with
-      // where it is rather than where it is going, and every aim after the first would read that as a miss.
-      window.scrollTo({ top: Math.max(0, window.scrollY + off), behavior: tries === 6 ? "smooth" : "auto" });
+      // Told to go there outright: an animated scroll answers with where it is rather than where it is going, so the
+      // aim after it reads a miss, and where the animation ends is delivered after the landing was taken as made -
+      // leaving the reader a screen away from the comment they asked for. The thread flashes where it arrives, which
+      // is what says where that is.
+      window.scrollTo({ top: Math.max(0, window.scrollY + off), behavior: "auto" });
       aim(thread, tries - 1, false);
     }));
   }
