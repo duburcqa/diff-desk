@@ -2486,6 +2486,28 @@ def test_the_comments_panel_sends_one_thread_from_its_row_and_every_thread_the_p
         page.wait_for_selector("section.file")
 
 
+def test_a_comment_being_written_survives_the_reader_walking_away_from_it(page):
+    # Short enough that a file the reader has left is well outside what the page holds around them.
+    page.set_viewport_size({"width": 1200, "height": 380})
+    page.reload(wait_until="load")
+    page.wait_for_selector("section.file")
+    path = page.evaluate("() => data.branches[0].files[0].path")
+    card = page.locator(f"section.file[data-path='{path}']")
+    line = card.locator("tr.a[data-line]").first
+    line.locator("td.code").first.hover()
+    line.locator("button.pin").first.click()
+    page.locator("tr[data-composer] textarea").fill("half written, and worth keeping")
+
+    # Away to the end of the review and back: the lines the box hangs among are what a walk away lets go of, and the
+    # words go with them unless the card holding them is kept.
+    page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+    page.wait_for_timeout(400)
+    assert card.locator(".body[data-filled='true']").count() == 1
+    page.evaluate("() => window.scrollTo(0, 0)")
+    page.wait_for_timeout(400)
+    assert page.locator("tr[data-composer] textarea").input_value() == "half written, and worth keeping"
+
+
 def test_reaching_a_comment_in_a_file_far_from_the_reader_lands_on_it(page, desk):
     branch = page.evaluate("() => data.branches[0].ref")
     # Written on the first file of the review, which is what a reader standing at the end of it is nowhere near.

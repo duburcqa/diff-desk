@@ -3448,7 +3448,10 @@
     // A card let go stands at what its lines measured, and one built stands at what they measure, so what a settle
     // does above the reader is a change of nothing at all. Where an estimate turns out to be off, the browsers hold
     // the place themselves; scrolling for it by hand walks the page a line at a time as each settle nudges the next.
-    const wanted = nearReader(wrap) || (reaching !== null && wrap === reaching.card);
+    // A card is never let go of while something is being written in it: its lines are what the box hangs among, so
+    // letting them go takes the words with them, however far the reader has scrolled from where they wrote them.
+    const writing = wrap.querySelector("tr[data-composer], .filenote.writing");
+    const wanted = nearReader(wrap) || (reaching !== null && wrap === reaching.card) || writing !== null;
     if (wrap.dataset.open === "true" && wanted) fillBody(wrap, held.file, held.index);
     else releaseBody(wrap);
   }
