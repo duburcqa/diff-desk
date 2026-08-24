@@ -1317,9 +1317,15 @@ class Handler(BaseHTTPRequestHandler):
                 step = found.get(row["seq"])
                 if step is None:
                     continue
+                was_open = row.get("state") != "resolved"
                 settle(row, step.landed, step.incoming, step.settled, step.stamps)
-                # A reply brought back from the pull request is somebody else's word, so it is news for this side.
-                touched(fresh, row, "you" if step.incoming else "session")
+                # A reply brought back from the pull request is somebody else's word, so it is news for this side, and
+                # so is a thread somebody closed there. A sync that found neither is not news, and saying it is would
+                # float every synced thread above the answers written here since, on a page ordered by what is recent.
+                if step.incoming:
+                    touched(fresh, row, "you")
+                elif step.settled and was_open:
+                    touched(fresh, row, "session")
                 if step.given:
                     row["prResolve"], trouble = step.given
                     if trouble:

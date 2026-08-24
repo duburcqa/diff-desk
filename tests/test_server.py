@@ -970,8 +970,18 @@ def test_a_sync_brings_replies_back_and_a_send_carries_ours_out(desk):
     assert kept["replies"][0]["editedAfterPost"] is True
 
     # Syncing again brings nothing back twice, a reply reworded here included.
+    steady = {row["seq"]: row for row in desk.get("/comments")}[seq]["event"]
     assert desk.post("/sync", {"repo": "someone/somewhere", "pr": 4})["brought"] == 0
-    assert len({row["seq"]: row for row in desk.get("/comments")}[seq]["replies"]) == 2
+    again = {row["seq"]: row for row in desk.get("/comments")}[seq]
+    assert len(again["replies"]) == 2
+    # A sync that found nothing said nothing, so it leaves the thread where it stood in what is recent: were it to
+    # count as news, every synced thread would outrank the answers written here since, however much newer they are.
+    assert again["event"] == steady
+    written = desk.post(
+        "/comments",
+        {"comments": [{"branch": "feature", "path": "sample.py", "line": 19, "side": "new", "text": "said after"}]},
+    )
+    assert {row["seq"]: row for row in desk.get("/comments")}[written["seqs"][0]]["event"] > again["event"]
 
 
 def test_a_comment_github_rejects_is_kept_and_not_retried(desk):
