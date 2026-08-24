@@ -973,6 +973,10 @@
   // the diff it was decided on: the page redraws itself while it is read, so without this a file opened to look at a
   // comment folds itself away again moments later - but a file that has changed since is news, and opens.
   const folds = new Map();
+  // Files opened because they held news, for as long as this page is up. News counts as read the moment it is in front
+  // of the reader, so without this the draw that follows would fold the file away under them - and what they came back
+  // for is what would go.
+  const shownNews = new Set();
   // How many replies of each comment the reader has been shown, so a thread that has been answered since opens itself.
   let heard = {};
 
@@ -3132,7 +3136,9 @@
     // A comment that arrived after the reader put the file down outranks the fold: it is news, and news is shown. One
     // they had already left unread does not, or saying "I am done with this file" would never hold.
     const since = held ? held.upTo : -1;
-    const unread = mine().some((note) => note.path === file.path && note.seq > since && !(note.seq in heard));
+    const news = mine().some((note) => note.path === file.path && note.seq > since && !(note.seq in heard));
+    if (news) shownNews.add(file.path);
+    const unread = news || shownNews.has(file.path);
     const shown = held && held.digest === file.digest ? held.open : status !== "done";
     wrap.dataset.open = String(unread || shown);
     wrap.dataset.done = String(status === "done");
@@ -3161,6 +3167,8 @@
     }
     const fold = () => {
       wrap.dataset.open = wrap.dataset.open === "true" ? "false" : "true";
+      // Folded by the reader themselves, which is what says they are done with the news it held.
+      shownNews.delete(file.path);
       folds.set(file.path, { digest: file.digest, open: wrap.dataset.open === "true", upTo: latest() });
       settleBody(wrap);
       fitNotes();
@@ -3217,9 +3225,12 @@
       const anchor = box.checked && document.body.classList.contains("hide-done") ? following : file;
       holdPlace(anchor && anchor.path, () => {
         setSeen(file, box.checked);
-        // Marking a file reviewed says its comments have been read as well, which is what keeps it folded through a
-        // reload - and leaves it to whatever is said afterwards to open it again.
-        if (box.checked) markRead(file.path);
+        // Reviewed says the reader is done with the file, news included, so it neither counts as unread nor is held
+        // open for what it held.
+        if (box.checked) {
+          markRead(file.path);
+          shownNews.delete(file.path);
+        }
         wrap.dataset.done = String(box.checked);
         wrap.dataset.open = String(!box.checked);
         folds.set(file.path, { digest: file.digest, open: !box.checked, upTo: latest() });

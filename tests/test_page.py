@@ -70,6 +70,16 @@ def settle(page):
     page.evaluate("() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))")
 
 
+def comments_reach(page):
+    """Wait for the page to have read the comments, which it draws its cards a second time for.
+
+    Cards are drawn as soon as the diff is in hand and again once the comments answer, so a card read before the
+    answer says what the page knew without them - open or folded for the wrong reason either way.
+    """
+    page.wait_for_function("() => notes.live")
+    settle(page)
+
+
 def reached(page, want):
     """Wait for a pick to have brought the file it names under the bar, which is where it leaves the reader."""
     page.wait_for_function(f"(want) => ({NEAREST})() === want", arg=want)
@@ -2057,6 +2067,7 @@ def test_a_file_holding_an_unread_comment_opens_itself(page, desk):
     page.wait_for_selector("section.file[data-path='added.py'][data-open='false']")
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
+    comments_reach(page)
     # Reviewed and read: nothing asks for it to be open.
     assert page.locator("section.file[data-path='added.py']").get_attribute("data-open") == "false"
 
@@ -2069,6 +2080,7 @@ def test_a_file_holding_an_unread_comment_opens_itself(page, desk):
     )
     page.go_back(wait_until="load")
     page.wait_for_selector("section.file")
+    comments_reach(page)
     # A remark the reader has never been shown is not hidden behind a file they had finished with.
     again = page.locator("section.file[data-path='added.py']")
     assert again.get_attribute("data-open") == "true"
@@ -2077,6 +2089,7 @@ def test_a_file_holding_an_unread_comment_opens_itself(page, desk):
     # Shown once, it stops asking: the file goes back to being folded away.
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
+    comments_reach(page)
     assert page.locator("section.file[data-path='added.py']").get_attribute("data-open") == "false"
 
     # One that arrives already settled is unread too, so it opens its file and shows the thread rather than an outline.
@@ -2090,6 +2103,7 @@ def test_a_file_holding_an_unread_comment_opens_itself(page, desk):
     desk.post("/resolve", {"seq": [made], "who": "session"})
     page.go_back(wait_until="load")
     page.wait_for_selector("section.file")
+    comments_reach(page)
     assert page.locator("section.file[data-path='added.py']").get_attribute("data-open") == "true"
     assert page.locator(f"#note-{made} .thread.folded").count() == 0
     assert "settled before you saw it" in page.locator(f"#note-{made}").inner_text()
@@ -2097,6 +2111,7 @@ def test_a_file_holding_an_unread_comment_opens_itself(page, desk):
     # Read now, so the file closes again - and it holds its header alone until something asks for its lines.
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
+    comments_reach(page)
     card = page.locator("section.file[data-path='added.py']")
     assert card.get_attribute("data-open") == "false"
     assert card.locator(".body table").count() == 0
