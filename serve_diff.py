@@ -337,28 +337,54 @@ def settle_sent(row, thread, going, step):
         row["prResolveError"] = step.trouble
 
 
-def post_review(repo, number, summary, sending):
-    """Post comments as one review, and say whether it landed, where it landed, and why it did not.
+def anchored(note):
+    """Where a remark hangs on the pull request: a whole file, the line it was written on, or a range from one."""
+    if note.get("side") == "file":
+        return {"path": note["path"], "body": note["text"], "subject_type": "file"}
+    side = "LEFT" if note.get("side") == "old" else "RIGHT"
+    where = {"path": note["path"], "body": note["text"], "line": note.get("endLine") or note["line"], "side": side}
+    if note.get("endLine") and note["endLine"] != note["line"]:
+        where["start_line"] = note["line"]
+        where["start_side"] = side
+    return where
 
-    A remark about a whole file is a review comment naming the file and no line within it; every other one names the
-    line it was written on, and a range names where it starts as well.
+
+def post_comments(repo, number, sending):
+    """Post each remark as a review comment of its own, so the pull request holds nothing but what was written.
+
+    A review carries a body of its own, which GitHub requires and nobody asked for, so a submission with no summary
+    goes out without one. Each comment is anchored to the head commit, which is what a comment on a line needs.
     """
-    review = {"event": "COMMENT", "body": summary or "Review from the diff desk.", "comments": []}
+    asked = gen_diff_data.gh("api", f"repos/{repo}/pulls/{number}", "--jq", ".head.sha", repeatable=False)
+    if asked.returncode != 0:
+        error = " ".join((asked.stderr or asked.stdout).split())[:400]
+        return [], "", error, is_refusal(error)
+    commit = asked.stdout.strip()
+    target = f"repos/{repo}/pulls/{number}/comments"
+    print(f"PUBLISH {len(sending)} comment(s) -> {target}", flush=True)
+    landed, url = [], ""
     for note in sending:
-        if note.get("side") == "file":
-            review["comments"].append({"path": note["path"], "body": note["text"], "subject_type": "file"})
-            continue
-        side = "LEFT" if note.get("side") == "old" else "RIGHT"
-        comment = {
-            "path": note["path"],
-            "body": note["text"],
-            "line": note.get("endLine") or note["line"],
-            "side": side,
-        }
-        if note.get("endLine") and note["endLine"] != note["line"]:
-            comment["start_line"] = note["line"]
-            comment["start_side"] = side
-        review["comments"].append(comment)
+        given = {**anchored(note), "commit_id": commit}
+        done = gen_diff_data.gh(
+            "api", "--method", "POST", target, "--input", "-", repeatable=False, given=json.dumps(given)
+        )
+        if done.returncode != 0:
+            error = " ".join((done.stderr or done.stdout).split())[:400]
+            return landed, url, error, is_refusal(error)
+        landed.append(note["seq"])
+        url = url or json.loads(done.stdout or "{}").get("html_url", "")
+    return landed, url, "", False
+
+
+def post_review(repo, number, summary, sending):
+    """Post comments as one review, and say which of them landed, where they landed, and why they did not.
+
+    A summary is a review's body, so a submission carrying one goes out as a review. One that carries none goes out as
+    the comments alone, since a review would have to invent a body to hold them.
+    """
+    if not summary:
+        return post_comments(repo, number, sending)
+    review = {"event": "COMMENT", "body": summary, "comments": [anchored(note) for note in sending]}
     target = f"repos/{repo}/pulls/{number}/reviews"
     print(f"PUBLISH {len(review['comments'])} comment(s) -> {target}", flush=True)
     done = gen_diff_data.gh(
@@ -367,7 +393,7 @@ def post_review(repo, number, summary, sending):
     landed = done.returncode == 0
     url = json.loads(done.stdout or "{}").get("html_url", "") if landed else ""
     error = "" if landed else " ".join((done.stderr or done.stdout).split())[:400]
-    return landed, url, error, not landed and is_refusal(error)
+    return [note["seq"] for note in sending] if landed else [], url, error, not landed and is_refusal(error)
 
 
 def serve_payload(payload):
@@ -1192,24 +1218,30 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True, "sent": 0, "owed": 0})
             return
         landed, url, error, refused = post_review(order["repo"], order["pr"], order.get("summary"), sending)
-        marked = {note["seq"] for note in sending}
+        # Comments go out one at a time when they go out without a review, so a failure part way leaves the ones
+        # already on the pull request standing as posted rather than owed again.
+        marked = set(landed)
+        owed = {note["seq"] for note in sending} - marked
         # Read again now the call is over: comments recorded while it ran must not be written away.
         with changing() as rows:
             for row in rows:
+                if row["seq"] not in marked and row["seq"] not in owed:
+                    continue
                 if row["seq"] in marked:
-                    row["github"] = "posted" if landed else "refused" if refused else "failed"
-                    # Where it was sent, so a later sweep for another pull request leaves it alone.
-                    row["prRepo"], row["prNumber"] = order["repo"], order["pr"]
-                    if landed:
-                        row["reviewUrl"] = url
-                        row.pop("error", None)
-                    else:
-                        row["error"] = error
-                    touched(rows, row, "session")
+                    row["github"] = "posted"
+                    row["reviewUrl"] = url
+                    row.pop("error", None)
+                else:
+                    row["github"] = "refused" if refused else "failed"
+                    row["error"] = error
+                # Where it was sent, so a later sweep for another pull request leaves it alone.
+                row["prRepo"], row["prNumber"] = order["repo"], order["pr"]
+                touched(rows, row, "session")
             waiting = [row for row in rows if row.get("github") in ("pending", "failed")]
             still = len([row for row in waiting if under_review(row, order)])
-        print(f"{'PUBLISHED ' + url if landed else 'PUBLISH FAILED ' + error} ({still} still owed)", flush=True)
-        self._json({"ok": landed, "url": url, "error": error, "sent": len(sending) if landed else 0, "owed": still})
+        told = f"PUBLISHED {len(marked)} comment(s) {url}" if marked else f"PUBLISH FAILED {error}"
+        print(f"{told} ({still} still owed)", flush=True)
+        self._json({"ok": not owed, "url": url, "error": error, "sent": len(marked), "owed": still})
 
     def _send_thread(self):
         """Send one thread to the pull request, in the state it is in when the reader asks.
@@ -1264,6 +1296,7 @@ class Handler(BaseHTTPRequestHandler):
     def _post_remark(self, order, found):
         """Put the remark that opens a thread on the pull request, and say why it did not go when it did not."""
         landed, url, error, refused = post_review(order["repo"], order["pr"], order.get("summary"), [found])
+        landed = bool(landed)
         with changing() as fresh:
             for row in fresh:
                 if row["seq"] != found["seq"]:

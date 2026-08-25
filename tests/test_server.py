@@ -265,7 +265,54 @@ def test_a_comment_bound_for_github_waits_rather_than_being_lost(desk):
     assert posted["reviewUrl"].endswith("pullrequestreview-42")
     assert "error" not in posted
 
+    # A summary is a review's body, so a submission carrying one goes out as a review, comments and all. Without one
+    # they go out as themselves, a request each, and a failure part way leaves what already landed standing as posted.
+    pair = desk.post(
+        "/comments",
+        {
+            "comments": [
+                {"branch": "feature", "path": "sample.py", "line": 14, "side": "new", "text": "first of two"},
+                {"branch": "feature", "path": "sample.py", "line": 15, "side": "new", "text": "second of two"},
+            ],
+            "github": True,
+        },
+    )["seqs"]
+    desk.github_answers(out=json.dumps({"html_url": "https://github.com/x/y/pull/1#pullrequestreview-43"}))
+    before = len(desk.github_calls())
+    assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 1, "seq": pair, "summary": "the whole lot"})["ok"]
+    review = json.loads([call for call in desk.github_calls()[before:] if "/reviews" in call][-1].split(" <<< ", 1)[1])
+    assert review["body"] == "the whole lot"
+    assert [comment["body"] for comment in review["comments"]] == ["first of two", "second of two"]
+
+    stopping = desk.post(
+        "/comments",
+        {
+            "comments": [
+                {"branch": "feature", "path": "sample.py", "line": 16, "side": "new", "text": "goes out"},
+                {"branch": "feature", "path": "sample.py", "line": 17, "side": "new", "text": "does not"},
+            ],
+            "github": True,
+        },
+    )["seqs"]
+    desk.github_answers(
+        rules=[
+            {"match": "--jq", "out": "c0ffee2"},
+            {
+                "match": "/comments",
+                "out": json.dumps({"html_url": "https://github.com/x/y/pull/1#comment-7"}),
+                "times": 1,
+            },
+            {"match": "/comments", "code": 1, "err": "gh: Unprocessable Entity (HTTP 422)"},
+        ]
+    )
+    outcome = desk.post("/publish", {"repo": "someone/somewhere", "pr": 1, "seq": stopping})
+    assert (outcome["ok"], outcome["sent"]) == (False, 1)
+    told = {row["seq"]: row for row in desk.get("/comments")}
+    assert told[stopping[0]]["github"] == "posted"
+    assert told[stopping[1]]["github"] == "refused"
+
     # A sequence nobody owes anything for is not a post at all.
+    desk.github_answers(out=json.dumps({"html_url": "https://github.com/x/y/pull/1#pullrequestreview-42"}))
     assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 1, "seq": [99999]}) == {
         "ok": True,
         "sent": 0,
@@ -1014,11 +1061,20 @@ def test_a_file_comment_is_posted_against_the_file_and_no_line(desk):
             "github": True,
         },
     )
-    desk.github_answers(out=json.dumps({"html_url": "https://github.com/x/y/pull/13#review-1"}))
+    desk.github_answers(
+        rules=[
+            {"match": "--jq", "out": "c0ffee1"},
+            {"match": "/comments", "out": json.dumps({"html_url": "https://github.com/x/y/pull/13#comment-1"})},
+        ]
+    )
+    before = len(desk.github_calls())
     assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 13, "seq": made["seqs"]})["ok"]
-    # What went out, read from what the stand-in was given: the file named, and no line beside it.
-    sent = json.loads([call for call in desk.github_calls() if "/reviews" in call][-1].split(" <<< ", 1)[1])
-    assert sent["comments"][-1] == {"path": "sample.py", "body": "about the file", "subject_type": "file"}
+    # Submitted with no summary, so it goes out as the comment alone: no review wraps it, and it names the file, no
+    # line beside it, and the commit a comment has to be anchored to.
+    asked = desk.github_calls()[before:]
+    assert not [call for call in asked if "/reviews" in call]
+    sent = json.loads([call for call in asked if "/comments" in call][-1].split(" <<< ", 1)[1])
+    assert sent == {"path": "sample.py", "body": "about the file", "subject_type": "file", "commit_id": "c0ffee1"}
     posted = {row["seq"]: row for row in desk.get("/comments")}[made["seqs"][0]]
     assert posted["github"] == "posted"
     assert posted["side"] == "file"
