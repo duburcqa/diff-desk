@@ -454,29 +454,54 @@ def test_a_comment_keeps_its_code_and_its_line_breaks(page, desk):
 
 def test_a_local_comment_can_be_turned_towards_the_pull_request(page, desk):
     branch = page.evaluate("() => data.branches[0].ref")
-    made = desk.post(
-        "/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": "local first"}]
+    # Turning a comment towards a pull request needs one to be there, so this arms its own rather than reading
+    # whichever one another test happened to leave bound.
+    # The pull request is there to be turned towards; posting to it is refused, which is the standing this reads back.
+    desk.github_answers(
+        code=1,
+        err="gh: Not Found (HTTP 404)",
+        rules=[
+            {"match": "repos/someone/somewhere --jq", "out": "someone/somewhere"},
+            {"match": "pr list", "out": json.dumps([{"number": 18, "url": "u", "title": "t", "headRefName": branch}])},
+        ],
     )
-    page.reload(wait_until="load")
-    page.wait_for_selector("section.file")
-    thread = page.locator(f"#note-{made['seq']}")
-    standing = thread.locator("button.mark").first
-    assert standing.inner_text() == "local only"
-    # The decision is changeable after the fact, so a comment written before deciding does not have to be rewritten.
-    standing.click()
-    page.wait_for_function(
-        f"() => document.querySelector('#note-{made['seq']} button.mark').textContent !== 'local only'"
-    )
-    assert {row["seq"]: row for row in desk.get("/comments")}[made["seq"]]["github"] in ("pending", "failed", "refused")
-    page.reload(wait_until="load")
-    page.wait_for_selector("section.file")
-    back = page.locator(f"#note-{made['seq']} button.mark").first
-    assert back.inner_text() != "local only"
-    back.click()
-    page.wait_for_function(
-        f"() => document.querySelector('#note-{made['seq']} button.mark').textContent === 'local only'"
-    )
-    assert {row["seq"]: row for row in desk.get("/comments")}[made["seq"]]["github"] == "none"
+    gen_diff_data.run(desk.repo, "remote", "add", "origin", "https://github.com/someone/somewhere.git")
+    try:
+        assert desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})["ok"]
+        made = desk.post(
+            "/comments",
+            [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": "local first"}],
+        )
+        page.reload(wait_until="load")
+        page.wait_for_selector("section.file")
+        thread = page.locator(f"#note-{made['seq']}")
+        standing = thread.locator("button.mark").first
+        assert standing.inner_text() == "local only"
+        # The decision is changeable after the fact, so a comment written before deciding does not have to be
+        # rewritten.
+        standing.click()
+        # A draw replaces the mark rather than rewriting it, so what is waited for is the text of whichever is there.
+        page.wait_for_function(
+            "(seq) => { const mark = document.querySelector(`#note-${seq} button.mark`);"
+            " return mark !== null && mark.textContent.trim() !== 'local only'; }",
+            arg=made["seq"],
+        )
+        standing = {row["seq"]: row for row in desk.get("/comments")}[made["seq"]]["github"]
+        assert standing in ("pending", "failed", "refused")
+        page.reload(wait_until="load")
+        page.wait_for_selector("section.file")
+        back = page.locator(f"#note-{made['seq']} button.mark").first
+        assert back.inner_text() != "local only"
+        back.click()
+        page.wait_for_function(
+            "(seq) => document.querySelector(`#note-${seq} button.mark`)?.textContent.trim() === 'local only'",
+            arg=made["seq"],
+        )
+        assert {row["seq"]: row for row in desk.get("/comments")}[made["seq"]]["github"] == "none"
+    finally:
+        gen_diff_data.run(desk.repo, "remote", "remove", "origin")
+        desk.github_answers(code=1, err="gh: Not Found (HTTP 404)")
+        desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})
 
 
 def test_a_folded_thread_says_what_it_is_about_even_when_it_is_only_code(page, desk):
@@ -725,7 +750,7 @@ def test_the_comments_panel_reads_by_batch_or_by_what_moved_last(page, desk):
              notes.sent.some((note) => note.seq === seq && (note.replies || []).length)""",
         arg=made[0],
     )
-    page.select_option("#logsort", "recent")
+    page.select_option("#logsort", "thread")
     # Read by what moved last, the thread just answered comes first, wherever its remark was submitted.
     assert "the older batch" in page.locator("#logrows .logrow").first.inner_text()
     assert page.locator("#logrows .batch").count() == 0
@@ -734,7 +759,7 @@ def test_the_comments_panel_reads_by_batch_or_by_what_moved_last(page, desk):
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
     page.locator("#logopen").click()
-    assert page.locator("#logsort").input_value() == "recent"
+    assert page.locator("#logsort").input_value() == "thread"
     page.select_option("#logsort", "batch")
 
 
@@ -1122,8 +1147,9 @@ def test_a_file_can_be_commented_on_as_a_whole(page, desk):
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
     again = sample(page)
-    # Shown under the file's own header, where it was written, rather than against a line it does not have.
-    thread = again.locator(".filenote .thread").first
+    # Shown under the file's own header, where it was written, rather than against a line it does not have. Named by
+    # the comment it is, since a file may carry remarks written before this one.
+    thread = again.locator(f'.filenote[data-seq="{note["seq"]}"] .thread').first
     assert "this file wants splitting in two" in thread.inner_text()
     assert "the file" in thread.locator(".who").first.inner_text()
     page.locator("#logopen").click()
@@ -2337,7 +2363,7 @@ def test_a_thread_says_what_it_owes_the_pull_request_and_sends_it_when_asked(pag
         # A note is written into the thread and stays there: it is read as a note rather than as somebody's answer,
         # it carries no standing, and what the thread owes the pull request is what it was without it.
         page.locator(f"#note-{made} .filehead, #note-{made} .line").first.hover()
-        page.locator(f"#note-{made} .line:not(.reply) button.tiny").filter(has_text="Note").click()
+        page.locator(f"#note-{made} .line:not(.reply) button.tiny").filter(has_text="Whisper").click()
         page.locator(f"#note-{made} .line.actions.aside textarea").fill("come back to this after the rebase")
         page.locator(f"#note-{made} .line.actions.aside button").filter(has_text="Keep").click()
         page.wait_for_selector(f"#note-{made} .line.reply.aside:not(.actions)")
@@ -2349,7 +2375,7 @@ def test_a_thread_says_what_it_owes_the_pull_request_and_sends_it_when_asked(pag
         # nothing stands on it.
         assert page.locator(f"#note-{made} button.tiny").filter(has_text="whisper").count() == 2
         assert aside.locator("button.tiny").filter(has_text="whisper").count() == 1
-        aside.locator("button.tiny").filter(has_text="Note").click()
+        aside.locator("button.tiny").filter(has_text="Whisper").click()
         page.locator(f"#note-{made} .line.actions.aside textarea").fill("done.")
         page.locator(f"#note-{made} .line.actions.aside button").filter(has_text="Keep").click()
         page.wait_for_function(
