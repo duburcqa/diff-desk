@@ -1628,7 +1628,7 @@ def test_syncing_takes_in_the_comments_written_on_the_pull_request(desk):
     assert len([row for row in desk.get("/comments") if row["text"] == "could we document this?"]) == 1
 
 
-def test_a_note_stays_on_the_desk_whatever_the_thread_sends(desk):
+def test_a_whisper_stays_on_the_desk_whatever_the_thread_sends(desk):
     made = desk.post(
         "/comments",
         {
@@ -1640,9 +1640,9 @@ def test_a_note_stays_on_the_desk_whatever_the_thread_sends(desk):
     desk.github_answers(out=json.dumps({"html_url": "https://github.com/x/y/pull/31#review-1"}))
     assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 31, "seq": [seq]})["ok"]
 
-    desk.post("/reply", {"seq": seq, "text": "come back to this after the rebase", "who": "you", "note": True})
+    desk.post("/reply", {"seq": seq, "text": "come back to this after the rebase", "who": "you", "whisper": True})
     desk.post("/reply", {"seq": seq, "text": "answered on the pull request", "who": "session"})
-    desk.post("/reply", {"seq": seq, "text": "and the session is to widen the test", "who": "you", "note": True})
+    desk.post("/reply", {"seq": seq, "text": "and the session is to widen the test", "who": "you", "whisper": True})
 
     thread = {
         "id": "T_note",
@@ -1678,15 +1678,15 @@ def test_a_note_stays_on_the_desk_whatever_the_thread_sends(desk):
     # A note stands on the remark or on a reply, and one more note on a note carries that sub-thread on rather than
     # standing inside it. A reply is never turned into a note: it cannot hang on what the pull request has never seen.
     # An anchor naming a note is read through it, so a thread written before that rule reads as it did.
-    assert desk.post("/reply", {"seq": seq, "text": "done.", "who": "session", "note": True, "on": 1})["ok"]
-    assert desk.post("/reply", {"seq": seq, "text": "and again", "who": "you", "note": True, "on": 0})["ok"]
+    assert desk.post("/reply", {"seq": seq, "text": "done.", "who": "session", "whisper": True, "on": 1})["ok"]
+    assert desk.post("/reply", {"seq": seq, "text": "and again", "who": "you", "whisper": True, "on": 0})["ok"]
     assert not desk.post("/reply", {"seq": seq, "text": "out loud", "who": "session", "on": 0})["ok"]
     assert not desk.post("/reply", {"seq": seq, "text": "nowhere", "who": "you", "on": 9})["ok"]
 
     # A note never left, so it is forgotten without asking the pull request anything - but only the last of them, as
     # for a reply: letting go of one further up leaves what stands under it standing against nothing. A session says
     # which comment and the desk works out which note that is, since the last is the only one it could mean.
-    assert not desk.post("/forget", {"seq": seq, "note": 0})["ok"]
+    assert not desk.post("/forget", {"seq": seq, "whisper": 0})["ok"]
     told = desk.cli("forget", str(seq)).communicate(timeout=30)[0]
     assert "forgot the last note" in told
     assert [reply["text"] for reply in {row["seq"]: row for row in desk.get("/comments")}[seq]["replies"]] == [
@@ -1700,9 +1700,9 @@ def test_a_note_stays_on_the_desk_whatever_the_thread_sends(desk):
     row = {row["seq"]: row for row in desk.get("/comments")}[seq]
     # What each note is about: the reply it was written on, and the ones with no anchor at all, which stand on the
     # remark.
-    assert (row["replies"][3]["who"], row["replies"][3]["note"], row["replies"][3]["on"]) == ("session", True, 1)
-    assert (row["replies"][0]["who"], row["replies"][0]["note"], "on" in row["replies"][0]) == ("you", True, False)
-    assert [(reply.get("note", False), reply["github"]) for reply in row["replies"]] == [
+    assert (row["replies"][3]["who"], row["replies"][3]["whisper"], row["replies"][3]["on"]) == ("session", True, 1)
+    assert (row["replies"][0]["who"], row["replies"][0]["whisper"], "on" in row["replies"][0]) == ("you", True, False)
+    assert [(reply.get("whisper", False), reply["github"]) for reply in row["replies"]] == [
         (True, "none"),
         (False, "posted"),
         (True, "none"),

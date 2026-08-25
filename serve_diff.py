@@ -309,7 +309,7 @@ def sent_out(wanted, answers):
 def note_trouble(row, trouble):
     """Say on the comment why a send did not land: on the replies it would have carried, and on its resolution."""
     for answer in row["replies"]:
-        if not answer.get("note") and answer["github"] != "posted":
+        if not answer.get("whisper") and answer["github"] != "posted":
             answer["github"] = "failed"
             answer["error"] = trouble
     if row.get("state") == "resolved":
@@ -321,7 +321,7 @@ def settle_sent(row, thread, going, step):
     """Write what a send came to onto the comment it was asked for: its replies, and where its resolution stands."""
     spoken = {node["body"] for node in thread["comments"]["nodes"]}
     for answer in row["replies"]:
-        if answer.get("note"):
+        if answer.get("whisper"):
             continue
         if answer["text"] in step.sent or answer["text"] in spoken:
             answer["github"] = "posted"
@@ -522,7 +522,7 @@ def settle(row, landed, incoming, resolved, stamps=()):
     if not row.get("at") and row["text"] in stamps:
         row["at"] = stamps[row["text"]]
     for answer in row.get("replies", []):
-        if answer.get("note"):
+        if answer.get("whisper"):
             continue
         if answer["text"] in landed:
             answer["github"] = "posted"
@@ -541,7 +541,7 @@ def landed_replies(row, said):
     return [
         answer["text"]
         for answer in row["replies"]
-        if not answer.get("note") and (answer["github"] == "posted" or answer["text"] in spoken)
+        if not answer.get("whisper") and (answer["github"] == "posted" or answer["text"] in spoken)
     ]
 
 
@@ -555,7 +555,7 @@ def going_out(row, said):
     return [
         answer["text"]
         for answer in row["replies"]
-        if not answer.get("note") and answer["github"] != "posted" and answer["text"] not in spoken
+        if not answer.get("whisper") and answer["github"] != "posted" and answer["text"] not in spoken
     ]
 
 
@@ -1015,13 +1015,13 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": True, "seq": found["seq"], "reply": index, "edits": len(said["edits"])})
 
     def _reply(self):
-        """Add a reply to a comment, from whichever side wrote it, or a note that stays here. A reply leaves the thread
-        open.
+        """Add a reply to a comment, from whichever side wrote it, or a whisper that stays here. A reply leaves the
+        thread open.
 
-        Recorded here and nowhere else: what a thread says reaches the pull request when the reader sends that thread,
-        never as a consequence of somebody answering in it. A note goes further and never leaves at all: it is written
-        for this side of the desk - what to look at again, what a session is to do - so nothing that decides what a
-        thread owes the pull request looks at it.
+        Recorded here and nowhere else: what a thread says reaches the pull request when the reader sends that
+        thread, never as a consequence of somebody answering in it. A whisper goes further and never leaves at all: it
+        is written for this side of the desk - what to look at again, what a session is to do - so nothing that decides
+        what a thread owes the pull request looks at it.
         """
         order = self._body()
         text = (order.get("text") or "").strip()
@@ -1030,7 +1030,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         who = "you" if order.get("who") == "you" else "session"
         # What it hangs under: the remark it answers, or one of the words already said in the thread, by its place in
-        # it. Nothing that hangs under a note can leave either, the pull request holding no such thing to answer.
+        # it. Nothing that hangs under a whisper can leave either, the pull request holding no such thing to answer.
         on = order.get("on")
         said = {"who": who, "text": text, "at": time.strftime("%Y-%m-%d %H:%M:%S"), "github": "none"}
         if on is not None:
@@ -1038,33 +1038,34 @@ class Handler(BaseHTTPRequestHandler):
         with changing() as rows:
             found = next((row for row in rows if row["seq"] == order.get("seq")), None)
             if found is None:
-                is_note = bool(order.get("note"))
+                is_whisper = bool(order.get("whisper"))
             else:
                 said_before = found["replies"]
                 if on is not None and not 0 <= on < len(said_before):
                     self._json({"ok": False, "error": f"comment {found['seq']} has nothing said at [{on}]"})
                     return
-                is_note = bool(order.get("note"))
-                if on is not None and said_before[on].get("note"):
-                    # A reply is never turned into a note, nor a note into a reply: what is bound for the pull request
-                    # cannot hang on something the pull request has never seen.
-                    if not is_note:
-                        self._json({"ok": False, "error": f"[{on}] is a note, which the pull request holds none of"})
+                is_whisper = bool(order.get("whisper"))
+                if on is not None and said_before[on].get("whisper"):
+                    # A reply is never turned into a whisper, nor a whisper into a reply: what is bound for the
+                    # pull request cannot hang on something the pull request has never seen.
+                    if not is_whisper:
+                        self._json({"ok": False, "error": f"[{on}] is a whisper, which the pull request holds none of"})
                         return
-                    # One more note on a note carries on where that note stands, so notes never stand inside notes.
-                    while on is not None and said_before[on].get("note"):
+                    # A whisper on a whisper carries on where that one stands, so none of them stands inside
+                    # another.
+                    while on is not None and said_before[on].get("whisper"):
                         on = said_before[on].get("on")
                     said.pop("on", None)
                     if on is not None:
                         said["on"] = on
-                if is_note:
-                    said["note"] = True
+                if is_whisper:
+                    said["whisper"] = True
                 said_before.append(said)
                 touched(rows, found, who)
         if found is None:
             self._json({"ok": False, "error": f"no comment numbered {order.get('seq')}"})
             return
-        print(f"{'NOTE' if is_note else 'REPLY'} [{found['seq']}] {who}: {' '.join(text.split())}", flush=True)
+        print(f"{'NOTE' if is_whisper else 'REPLY'} [{found['seq']}] {who}: {' '.join(text.split())}", flush=True)
         self._json({"ok": True, "seq": found["seq"], "replies": len(found["replies"])})
 
     def _resolve(self):
@@ -1089,18 +1090,18 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": True, "resolved": closed, "state": "resolved" if closing else "open"})
 
     def _forget(self):
-        """Forget the last note of a thread, named by its place in it.
+        """Forget the last whisper of a thread, named by its place in it.
 
-        A note never left this desk, so nothing has to be asked of the pull request - which is what tells it apart
+        A whisper never left this desk, so nothing has to be asked of the pull request - which is what tells it apart
         from a reply, where a posted one has to be deleted there as well. What they share is that only the last of
         them can go: letting go of one further up leaves what stands under it standing against nothing.
         """
         order = self._body()
-        seq, at = order.get("seq"), order.get("note")
+        seq, at = order.get("seq"), order.get("whisper")
         with changing() as rows:
             found = next((row for row in rows if row["seq"] == seq), None)
             said = (found or {}).get("replies") or []
-            if found is None or at != len(said) - 1 or not said[at].get("note"):
+            if found is None or at != len(said) - 1 or not said[at].get("whisper"):
                 found = None
             else:
                 said.pop(at)
@@ -1116,10 +1117,10 @@ class Handler(BaseHTTPRequestHandler):
                         answer["on"] = on - 1
                 touched(rows, found, "you")
         if found is None:
-            self._json({"ok": False, "error": f"[{at}] is not the last note of comment {seq}"})
+            self._json({"ok": False, "error": f"[{at}] is not the last whisper of comment {seq}"})
             return
-        print(f"FORGOT note [{at}] of [{seq}]", flush=True)
-        self._json({"ok": True, "seq": seq, "note": at})
+        print(f"FORGOT whisper [{at}] of [{seq}]", flush=True)
+        self._json({"ok": True, "seq": seq, "whisper": at})
 
     def _drop(self):
         """Delete a comment, or only its last reply, here and on the pull request when it was posted.

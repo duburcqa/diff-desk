@@ -4,9 +4,9 @@ desk.py serve --dir <repo> --base <ref> [refs ...]   collect the diffs and serve
 desk.py watch [--since N] [--once]                   print whatever the reviewer says, as they say it
 desk.py comments [--all]                             what has been submitted, unresolved unless --all
 desk.py reply 3 "why it happens ..."                 answer a comment without closing it
-desk.py reply 3 --note "look at this again"          leave a note, which never reaches the pull request
-desk.py reply 3 --note --on 0 "done."                answer what was said at [0], here and nowhere else
-desk.py forget 3                                     let go of the last note on a comment
+desk.py reply 3 --whisper "look at this again"       leave a whisper, which never reaches the pull request
+desk.py reply 3 --whisper --on 0 "done."             answer what was said at [0], here and nowhere else
+desk.py forget 3                                     let go of the last whisper on a comment
 desk.py edit 3 "what I actually meant ..."           rewrite a comment, keeping what it said before
 desk.py edit 3 --reply 0 "worded better ..."         rewrite one reply of a comment, by its place in the thread
 desk.py bind 3 4 [--local]                           aim comments at the pull request, or keep them local
@@ -125,7 +125,7 @@ def show(note, since=None):
         # Numbered as the desk addresses it, so the reply to reword, or the note to answer, is named by what is
         # printed here. A note is said to be one: it is written for this side of the desk, so it guides the work
         # rather than answering the remark, and what it hangs under is said when it is not the remark itself.
-        kind = "note " if answer.get("note") else ""
+        kind = "whisper " if answer.get("whisper") else ""
         on = f" on [{answer['on']}]" if answer.get("on") is not None else ""
         said = f"{kind}{answer['who']}{on}"
         # What woke the session, marked: a thread is printed whole, so without this the line that is news reads like
@@ -282,7 +282,7 @@ def edit(args):
 
 
 def reply(args):
-    order = {"seq": args.seq, "text": " ".join(args.text), "who": "session", "note": args.note}
+    order = {"seq": args.seq, "text": " ".join(args.text), "who": "session", "whisper": args.whisper}
     if args.on is not None:
         order["on"] = args.on
     outcome = ask("/reply", order)
@@ -290,7 +290,7 @@ def reply(args):
         sys.exit("nothing is serving")
     if not outcome.get("ok"):
         sys.exit(outcome.get("error", "the reply was refused"))
-    said = "left a note on" if args.note else "replied to"
+    said = "whispered on" if args.whisper else "replied to"
     print(f"{said} [{outcome['seq']}], now {outcome['replies']} reply(ies) on it")
 
 
@@ -303,7 +303,7 @@ def forget(args):
     said = next((row.get("replies") or [] for row in held if row["seq"] == args.seq), None)
     if said is None:
         sys.exit(f"no comment numbered {args.seq}")
-    outcome = ask("/forget", {"seq": args.seq, "note": len(said) - 1})
+    outcome = ask("/forget", {"seq": args.seq, "whisper": len(said) - 1})
     if not (outcome or {}).get("ok"):
         sys.exit((outcome or {}).get("error", "the note is still there"))
     print(f"forgot the last note on [{args.seq}], {len(said) - 1} thing(s) still said in it")
@@ -381,11 +381,13 @@ job.set_defaults(run=edit)
 job = jobs.add_parser("reply", help="answer a comment without closing it")
 job.add_argument("seq", type=int)
 job.add_argument("text", nargs="+", help="the reply, shown under the comment on the page")
-job.add_argument("--note", action="store_true", help="leave it as a note, which stays on this desk whatever is sent")
+job.add_argument(
+    "--whisper", action="store_true", help="leave it as a whisper, which stays on this desk whatever is sent"
+)
 job.add_argument("--on", type=int, help="answer what was said at this place in the thread rather than the remark")
 job.set_defaults(run=reply)
 
-job = jobs.add_parser("forget", help="let go of the last note on a comment")
+job = jobs.add_parser("forget", help="let go of the last whisper on a comment")
 job.add_argument("seq", type=int)
 job.set_defaults(run=forget)
 

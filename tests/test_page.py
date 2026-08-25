@@ -2342,13 +2342,13 @@ def test_a_thread_says_what_it_owes_the_pull_request_and_sends_it_when_asked(pag
         page.locator(f"#note-{made} .line.actions.aside button").filter(has_text="Keep").click()
         page.wait_for_selector(f"#note-{made} .line.reply.aside:not(.actions)")
         aside = page.locator(f"#note-{made} .line.reply.aside:not(.actions)")
-        assert aside.locator(".mark.aside").inner_text() == "note"
+        assert aside.locator(".mark.aside").inner_text() == "whisper"
         assert aside.locator(".who").inner_text() == "you"
 
         # One for every comment: the note about the remark carries the remark's, and the reply carries its own while
         # nothing stands on it.
-        assert page.locator(f"#note-{made} button.tiny").filter(has_text="note").count() == 2
-        assert aside.locator("button.tiny").filter(has_text="note").count() == 1
+        assert page.locator(f"#note-{made} button.tiny").filter(has_text="whisper").count() == 2
+        assert aside.locator("button.tiny").filter(has_text="whisper").count() == 1
         aside.locator("button.tiny").filter(has_text="Note").click()
         page.locator(f"#note-{made} .line.actions.aside textarea").fill("done.")
         page.locator(f"#note-{made} .line.actions.aside button").filter(has_text="Keep").click()
@@ -2409,7 +2409,7 @@ def test_a_thread_says_what_it_owes_the_pull_request_and_sends_it_when_asked(pag
         assert page.locator(f"#note-{made} .line.reply:not(.aside) .mark").first.inner_text() == "on the PR"
         row = {row["seq"]: row for row in desk.get("/comments")}[made]
         assert (row["github"], row["replies"][0]["github"]) == ("posted", "posted")
-        assert (row["replies"][1]["note"], row["replies"][1]["github"]) == (True, "none")
+        assert (row["replies"][1]["whisper"], row["replies"][1]["github"]) == (True, "none")
     finally:
         gen_diff_data.run(desk.repo, "remote", "remove", "origin")
         desk.github_answers(code=1, err="gh: Not Found (HTTP 404)")
