@@ -973,7 +973,7 @@
 <script>__HIGHLIGHT__</script>
 <script>
   let data = JSON.parse(document.getElementById("data").textContent);
-  const state = { branch: 0, scope: "all", query: "", current: 0 };
+  const state = { branch: 0, scope: "all", query: "", current: 0, reached: null };
   const notes = { sent: [], drafts: [], live: false };
   // A selection is a span of rendered rows, held as the row order within the file rather than as line numbers on one
   // side, which is what lets one range cover removed and added lines together.
@@ -1488,6 +1488,8 @@
       card;
     reaching = { card, thread };
     // Resolved and hidden away, it is still the thread being reached for, so it is shown, as a folded file is opened.
+    // Remembered as well as applied: the poll redraws the card every few seconds, which builds the thread anew.
+    state.reached = { seq: note.seq, path: note.path };
     if (thread !== card) thread.dataset.reveal = "true";
     for (const found of document.querySelectorAll(".thread.found")) found.classList.remove("found");
     const box = thread.querySelector ? thread.querySelector(".thread") : null;
@@ -1966,6 +1968,7 @@
     const row = document.createElement("tr");
     row.className = "noterow";
     row.id = `note-${note.seq || "draft"}`;
+    if (state.reached && note.seq === state.reached.seq) row.dataset.reveal = "true";
     const cell = document.createElement("td");
     cell.colSpan = 5;
     const answers = (note.replies || []).length;
@@ -3168,6 +3171,7 @@
     const status = seenState(file);
     const wrap = document.createElement("section");
     wrap.className = "file";
+    if (state.reached && state.reached.path === file.path) wrap.dataset.reveal = "true";
     const held = folds.get(file.path);
     // A comment that arrived after the reader put the file down outranks the fold: it is news, and news is shown. One
     // they had already left unread does not, or saying "I am done with this file" would never hold.
@@ -3295,6 +3299,7 @@
       holder.dataset.seq = note.seq;
       const built = noteRow(note);
       if (built.dataset.done) holder.dataset.done = built.dataset.done;
+      if (built.dataset.reveal) holder.dataset.reveal = built.dataset.reveal;
       holder.append(built.querySelector(".thread"));
       wrap.append(holder);
     }
