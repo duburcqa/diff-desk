@@ -158,6 +158,20 @@
   .search { position: relative; display: flex; align-items: center; flex: 1 1 12ch; min-width: 8ch; margin-right: auto; }
   .search input { width: 100%; min-width: 0; padding-left: 26px; }
   .search svg { position: absolute; left: 8px; width: 13px; height: 13px; color: var(--faint); }
+  .search input::-webkit-search-cancel-button { display: none; }
+  #qx {
+    position: absolute;
+    right: 6px;
+    padding: 0 4px;
+    border: 0;
+    background: none;
+    color: var(--faint);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  #qx:hover { color: var(--ink); }
+  body.picking #qx { display: none; }
   /* What the filter matches, listed under it for picking by name: a review of seventy files is steered by name sooner
      than by scrolling. The list floats rather than the box growing, since a box that grew would move every control
      beside it in the bar. */
@@ -834,6 +848,7 @@
   <label class="search">
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2 14 14"/></svg>
     <input id="q" type="search" placeholder="Filter paths" aria-label="Filter paths" />
+    <button id="qx" type="button" aria-label="Clear path filter" hidden>&#215;</button>
   </label>
   <button class="toggle" id="ctx" aria-pressed="false" title="Show only added and removed lines">Changes only</button>
   <button class="toggle" id="hidedone" aria-pressed="false" title="Hide the files marked reviewed">Hide reviewed</button>
@@ -981,7 +996,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "ctx", "hidedone", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "logresolved", "brand", "repo", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
+  for (const id of ["tabs", "scope", "q", "qx", "ctx", "hidedone", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "logresolved", "brand", "repo", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -2940,6 +2955,11 @@
     if (on) on.scrollIntoView({ block: "nearest" });
   }
 
+  // The cross stands only while there is a filter to drop.
+  function showClear() {
+    els.qx.hidden = els.q.value === "";
+  }
+
   function openPicker() {
     // The overlay carries the box being typed in, so what the reader looks at while picking is one panel rather than a
     // list hanging off the bar. The filter already typed comes with it, and goes back to the bar when it closes.
@@ -2960,6 +2980,7 @@
     els.palette.hidden = true;
     document.body.classList.remove("picking");
     els.q.value = els.pq.value;
+    showClear();
   }
 
   function movePick(step) {
@@ -3627,6 +3648,18 @@
   els.q.addEventListener("input", (event) => {
     state.query = event.target.value;
     state.current = 0;
+    showClear();
+    render();
+  });
+  // Emptying the filter is all the cross asks for: pressing the box is what asks for the overlay, so the press on the
+  // cross must not reach it.
+  els.qx.addEventListener("pointerdown", (event) => event.preventDefault());
+  els.qx.addEventListener("click", () => {
+    els.q.value = "";
+    els.pq.value = "";
+    state.query = "";
+    state.current = 0;
+    showClear();
     render();
   });
   // Pressing the box in the bar is what asks for the overlay; the caret belongs to the box inside it.

@@ -913,6 +913,19 @@ def test_the_path_filter_lists_what_it_matches_for_picking_by_name(page):
     reached(page, wanted)
     assert page.evaluate(NEAREST) == wanted
 
+    # Emptying the filter through the cross of the box asks for nothing else: the filter goes, and no panel opens
+    # behind it for the reader to dismiss.
+    page.keyboard.press("/")
+    page.wait_for_selector("#palette:not([hidden])")
+    page.locator("#pq").fill("deep")
+    page.keyboard.press("Escape")
+    page.wait_for_selector("#palette", state="hidden")
+    assert page.locator("#q").input_value() == "deep"
+    page.locator("#qx").click()
+    page.wait_for_function("() => document.querySelector('#q').value === ''")
+    assert page.locator("#palette").get_attribute("hidden") is not None
+    assert page.evaluate("() => state.query") == ""
+
     # Escape closes the list and leaves the review as it was.
     keys_reach(page)
     page.keyboard.press("/")
