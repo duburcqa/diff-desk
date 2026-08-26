@@ -1324,6 +1324,10 @@ def test_the_log_reaches_a_comment_and_leaves_what_is_settled_out(page, desk):
     page.locator("#logrows .logrow").filter(has_text=saying).first.click()
     page.locator(f"#note-{made}").wait_for(state="visible")
     assert page.locator("#hideclosed").get_attribute("aria-pressed") == "true"
+    # The page redraws itself every few seconds, and what the reader was brought to has to survive that: a reveal held
+    # on the row alone goes with the row.
+    page.evaluate("() => render()")
+    page.locator(f"#note-{made}").wait_for(state="visible")
     page.locator("#hideclosed").click()
     page.locator("#logopen").click()
     page.wait_for_selector("#log[data-open='true']")
