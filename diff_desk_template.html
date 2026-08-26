@@ -2735,7 +2735,10 @@
     if (!last) return;
     const slice = await readLines(file, last[2] + 1, last[2] + CONTEXT_STEP, [[last[2], last[3]]]);
     if (slice.stale) return sayStale(file);
-    if (!slice.lines.length) return;
+    // What the file measures is remembered, so the last press is the one that reaches the end and the offer goes with
+    // it. A file whose end was already reached answers with nothing, and the offer goes on the redraw.
+    if (slice.total) file.total = slice.total;
+    if (!slice.lines.length) return redrawCard(file, index);
     const offset = last[1] - last[2];
     file.lines.push(...slice.lines.map((text, step) => ["c", last[2] + 1 + step + offset, last[2] + 1 + step, text]));
     redrawCard(file, index);
@@ -3447,7 +3450,8 @@
       for (const note of stranded.filter((note) => !hangs.has(note.seq))) {
         tbody.append(noteRow({ ...note, outdated: true }));
       }
-      if (notes.live && lastNumbered(file.lines)) {
+      const tail = lastNumbered(file.lines);
+      if (notes.live && tail && !(file.total && tail[2] >= file.total)) {
         const row = document.createElement("tr");
         row.className = "h";
         const cell = document.createElement("td");

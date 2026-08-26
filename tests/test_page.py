@@ -1538,8 +1538,8 @@ def test_expanding_every_gap_reaches_the_whole_file(page):
         buttons = card.locator("button.expand")
         if not buttons.count():
             break
-        # Waited on the answer rather than on the rows: a file already whole still offers its last gap, and the click
-        # that fills nothing has only the answer to show for itself.
+        # Waited on the answer rather than on the rows, since the last press of all fills nothing: it is the one that
+        # learns where the file ends, and what it has to show for itself is the offer going away.
         with page.expect_response(lambda answer: "/lines" in answer.url):
             buttons.first.click()
         settle(page)
@@ -1552,6 +1552,8 @@ def test_expanding_every_gap_reaches_the_whole_file(page):
     }""")
     assert shown["first"] == 1
     assert shown["lines"] >= SECOND_EDIT
+    # Nothing below the last line, so nothing is offered: a button that answers with nothing reads as a dead one.
+    assert card.locator("button.expand").count() == 0
 
     # One click asks for the same thing the walk above spelled out gap by gap, so the file reads whole either way.
     page.reload(wait_until="load")
