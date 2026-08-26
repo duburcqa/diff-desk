@@ -707,6 +707,15 @@ def test_a_pending_comment_can_be_sent_on_its_own_from_the_tray(page, desk):
     assert page.locator("#traylist li").count() == 2
     before = len(desk.get("/comments"))
 
+    # Pressing a pending remark goes to the lines it was written on, wherever the reader had scrolled to.
+    page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+    page.locator("#traylist li .goes").first.click()
+    page.wait_for_selector(".thread.found")
+    page.wait_for_function(
+        "() => { const box = document.querySelector('.thread.found').getBoundingClientRect();"
+        " return box.top > 0 && box.top < window.innerHeight; }"
+    )
+
     page.locator("#traylist li button.tiny").first.click()
     # One leaves, the rest stay pending: a review is not held up by the comment still being thought about.
     page.wait_for_function("() => document.querySelectorAll('#traylist li').length === 1")
