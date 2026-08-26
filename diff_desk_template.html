@@ -740,7 +740,7 @@
     display: none;
     flex-direction: column;
     gap: 8px;
-    width: min(370px, calc(100vw - 40px));
+    width: min(560px, calc(100vw - 40px));
     padding: 12px;
     background: var(--surface);
     border: 1px solid var(--rule-strong);
@@ -750,9 +750,12 @@
   .tray[data-open="true"] { display: flex; }
   .tray .head { display: flex; align-items: center; gap: 8px; }
   .tray .head strong { font-size: 13px; }
-  .tray ol { margin: 0; padding-left: 18px; max-height: 170px; overflow-y: auto; font-size: 12px; color: var(--muted); }
+  .tray ol { margin: 0; padding-left: 18px; max-height: 45vh; overflow-y: auto; font-size: 12px; color: var(--muted); }
   .tray li { margin-bottom: 3px; }
   .tray li b { color: var(--ink); font-family: var(--mono); font-size: 11px; font-weight: 600; }
+  /* Pressing a pending remark goes to the lines it was written on, as pressing one in the log does. */
+  .tray li .goes { flex: 1; display: flex; align-items: baseline; gap: 6px; overflow: hidden; cursor: pointer; }
+  .tray li .goes:hover b, .tray li .goes:hover .said { color: var(--accent); }
   .tray .actions { display: flex; gap: 8px; }
 
   .source {
@@ -1730,13 +1733,18 @@
       where.textContent = `${draft.path.split("/").pop()} ${span(draft)}`;
       const said = document.createElement("span");
       said.className = "said";
-      said.textContent = ` ${outline(draft.text).slice(0, 70)}`;
+      said.textContent = ` ${outline(draft.text).slice(0, 110)}`;
+      const goes = document.createElement("div");
+      goes.className = "goes";
+      goes.title = "Go to the lines this was written on";
+      goes.append(where, said);
+      goes.addEventListener("click", () => reach(draft));
       const alone = document.createElement("button");
       alone.className = "tiny";
       alone.textContent = "Send";
       alone.title = "Send this one now and keep the rest pending";
       alone.addEventListener("click", () => sendAll([draft], ""));
-      item.append(where, said, alone);
+      item.append(goes, alone);
       els.traylist.append(item);
     }
   }
