@@ -586,7 +586,7 @@
   .thread.done > .line:first-child .said { color: var(--muted); }
   .thread .reply { padding-left: 10px; border-left: 1px solid currentColor; }
   .thread .reply.session { color: var(--accent); }
-  /* A note is set apart from the answers around it: it stays on this desk whatever the thread sends. */
+  /* A whisper is set apart from the answers around it: it stays on this desk whatever the thread sends. */
   .thread .reply.aside { border-left-style: dashed; }
   .thread .reply.aside .who { font-style: italic; }
   .thread .mark.aside { color: var(--muted); background: var(--stale-bg); font-style: italic; }
@@ -630,7 +630,7 @@
     opacity: 0;
   }
   .dot[data-on="true"] { opacity: 1; }
-  .thread blockquote, .note blockquote {
+  .thread blockquote, .whisper blockquote {
     display: block;
     margin: 4px 0;
     padding: 1px 0 1px 9px;
@@ -643,7 +643,7 @@
   body.hide-done .file[data-done="true"][data-reveal="true"] { display: block; }
 
   .thread .drop { margin-left: auto; border: 0; background: transparent; color: var(--faint); font: inherit; font-size: 15px; line-height: 1; cursor: pointer; }
-  .note .drop { margin-left: auto; border: 0; background: transparent; color: var(--faint); font: inherit; font-size: 15px; line-height: 1; cursor: pointer; }
+  .whisper .drop { margin-left: auto; border: 0; background: transparent; color: var(--faint); font: inherit; font-size: 15px; line-height: 1; cursor: pointer; }
 
   .log {
     position: fixed;
@@ -903,10 +903,10 @@
     <strong>Comments</strong>
     <span class="status" id="logcount"></span>
     <label class="seen" id="logorder" title="Read the list by the submission each remark went out in, or by what moved last">
-      <span>Sort</span>
+      <span>Group by</span>
       <select id="logsort">
         <option value="batch">batch</option>
-        <option value="recent">recent</option>
+        <option value="thread">thread</option>
       </select>
     </label>
     <label class="seen" id="logshow" title="List what is resolved, and include it when syncing with the pull request">
@@ -1273,10 +1273,10 @@
 
   // A note written where it belongs: on the remark, or on a reply. Several may stand on one reply, and they are read
   // in the order they were written, so notes never stand inside notes.
-  function noteOn(note, on) {
+  function whisperOn(note, on) {
     const open = document.createElement("button");
     open.className = "tiny";
-    open.textContent = "note";
+    open.textContent = "whisper";
     open.title = "Keep a note here, on this desk";
     open.addEventListener("click", () => {
       // One at a time: a second press goes back to the box already open rather than opening another beside it.
@@ -1311,7 +1311,7 @@
       keep.addEventListener("click", async () => {
         const wanted = written.value.trim();
         if (!wanted) return render();
-        await post("reply", { seq: note.seq, text: wanted, who: "you", note: true, on });
+        await post("reply", { seq: note.seq, text: wanted, who: "you", whisper: true, on });
         await loadNotes();
         render();
       });
@@ -1322,7 +1322,7 @@
   function owedThere(note) {
     if (note.pending || !notes.live) return "";
     // A note never goes: it is written for this side of the desk, so it is no part of what a thread owes.
-    const said = (note.replies || []).filter((answer) => !answer.note && answer.github !== "posted").length;
+    const said = (note.replies || []).filter((answer) => !answer.whisper && answer.github !== "posted").length;
     const owes = [];
     if (note.github !== "posted") owes.push("the remark");
     if (said) owes.push(`${said} repl${said === 1 ? "y" : "ies"}`);
@@ -1410,7 +1410,7 @@
     els.logsend.disabled = !branch().pr || !alreadyThere().length;
 
     els.logrows.innerHTML = "";
-    if (els.logsort.value === "recent") {
+    if (els.logsort.value === "thread") {
       // Most recently touched first, threads and their replies together: a reply carries no batch of its own, so this
       // is where the answer just written into a batch of long ago is found.
       const moved = [...rows].sort((one, other) => (other.event || 0) - (one.event || 0));
@@ -2124,22 +2124,22 @@
     // What a note stands on, read through the notes between: one written on a note stands where that note stands, and
     // one whose anchor says nothing this thread holds stands on the thread itself.
     const standsOn = ({ answer }) => {
-      let on = answer.note ? (answer.on ?? null) : null;
-      while (on !== null && said_of[on] && said_of[on].answer.note) on = said_of[on].answer.on ?? null;
-      return said_of[on] && !said_of[on].answer.note ? on : null;
+      let on = answer.whisper ? (answer.on ?? null) : null;
+      while (on !== null && said_of[on] && said_of[on].answer.whisper) on = said_of[on].answer.on ?? null;
+      return said_of[on] && !said_of[on].answer.whisper ? on : null;
     };
-    const notesOn = (on) => said_of.filter((entry) => entry.answer.note && standsOn(entry) === on);
+    const whispersOn = (on) => said_of.filter((entry) => entry.answer.whisper && standsOn(entry) === on);
     const ordered = [
-      ...notesOn(null),
-      ...said_of.filter(({ answer }) => !answer.note).flatMap((entry) => [entry, ...notesOn(entry.index)]),
+      ...whispersOn(null),
+      ...said_of.filter(({ answer }) => !answer.whisper).flatMap((entry) => [entry, ...whispersOn(entry.index)]),
     ];
     // Every comment carries one way to add a note about it, the remark included: it stands on the last note about
     // that comment, or on the comment itself while none stands there.
-    if (!note.pending && notes.live && !notesOn(null).length) head.append(noteOn(note, null));
+    if (!note.pending && notes.live && !whispersOn(null).length) head.append(whisperOn(note, null));
     // Nothing said is left unread, whatever an anchor written before this says.
     for (const entry of said_of) if (!ordered.includes(entry)) ordered.push(entry);
     // What each thing said belongs to: a reply is its own, and a note belongs to what it stands on.
-    const groupOf = (entry) => (entry.answer.note ? standsOn(entry) : entry.index);
+    const groupOf = (entry) => (entry.answer.whisper ? standsOn(entry) : entry.index);
     box.append(head);
     ordered.forEach((entry, place) => {
       const { answer, index } = entry;
@@ -2147,10 +2147,10 @@
       const said = document.createElement("div");
       // Read as the reader's own where they wrote it, whichever side of the pull request they were on at the time. A
       // note is nobody's word to the pull request: it is written for this side of the desk, so it opens as one.
-      said.className = `line reply ${isReader(answer.who) ? "you" : answer.who}${answer.note ? " aside" : ""}`;
+      said.className = `line reply ${isReader(answer.who) ? "you" : answer.who}${answer.whisper ? " aside" : ""}`;
       // A note stands one step in, however deep the notes it answers go, and what is said to the pull request is read
       // back at the margin: a run of notes reads as an aside, and the thread resumes where it left off.
-      said.style.marginLeft = answer.note ? "12px" : "0";
+      said.style.marginLeft = answer.whisper ? "12px" : "0";
       said.dataset.on = groupOf(entry) === null ? "" : String(groupOf(entry));
       // The tail of what stands on one comment carries the way to add to it, so it is always where the next will read.
       const carries = !ordered[place + 1] || groupOf(ordered[place + 1]) !== groupOf(entry);
@@ -2160,15 +2160,15 @@
       from.textContent = spokenBy(answer.who);
       // When it was said and where it stands, kept for the asking: in the line they say little and take the room the
       // reply is read in.
-      from.title = answer.note ? `${answer.at}, kept here` : saidWhen(answer.at, answer.who);
+      from.title = answer.whisper ? `${answer.at}, kept here` : saidWhen(answer.at, answer.who);
       const body = document.createElement("span");
       body.className = "said";
       // Said once for a run of them: the first note says what the ones under it are, and repeating it on each says
       // nothing the step in has not already said.
-      if (answer.note && !(place > 0 && answers[place - 1].note)) {
+      if (answer.whisper && !(place > 0 && answers[place - 1].note)) {
         const kind = document.createElement("span");
         kind.className = "mark aside";
-        kind.textContent = "note";
+        kind.textContent = "whisper";
         kind.title = "Kept on this desk, whatever the thread sends";
         body.append(kind);
       }
@@ -2177,7 +2177,7 @@
       said.append(body);
       // Whether the pull request holds this reply, shown on the reply itself: what a thread still owes is what its own
       // Sync would carry, and a reader deciding whether to press it reads that off the replies.
-      if (!note.pending && !answer.note && answer.github !== "none") {
+      if (!note.pending && !answer.whisper && answer.github !== "none") {
         const standing = document.createElement("span");
         standing.className = `mark ${answer.github}`;
         standing.textContent = GITHUB_MARK[answer.github] || answer.github;
@@ -2188,7 +2188,7 @@
       // reply itself while nothing stands on it yet. A note on the thread is written from the box at the foot.
       // Only what was written here can be reworded: a reply carried back from the pull request is its author's word,
       // said on the copy everyone else reads, so this desk shows it and leaves it alone.
-      if (!note.pending && notes.live && carries) said.append(noteOn(note, groupOf(entry)));
+      if (!note.pending && notes.live && carries) said.append(whisperOn(note, groupOf(entry)));
       if (!note.pending && notes.live && (isReader(answer.who) || answer.who === "session")) {
         const change = document.createElement("button");
         change.className = "tiny";
@@ -2229,21 +2229,21 @@
       }
       // The last of what stands on one comment is what can go, note or reply alike: forgetting one further up would
       // leave the ones under it standing against nothing.
-      if (!note.pending && notes.live && answer.note && carries) {
+      if (!note.pending && notes.live && answer.whisper && carries) {
         const forget = document.createElement("button");
         forget.className = "drop";
         forget.textContent = "\u00d7";
         forget.title = "Forget this note";
         forget.addEventListener("click", async () => {
           if (!window.confirm("Forget this note?")) return;
-          await post("forget", { seq: note.seq, note: index });
+          await post("forget", { seq: note.seq, whisper: index });
           await loadNotes();
           drawLog();
           render();
         });
         said.append(forget);
       }
-      if (!note.pending && notes.live && !answer.note && place === answers.length - 1) {
+      if (!note.pending && notes.live && !answer.whisper && place === answers.length - 1) {
         const undo = document.createElement("button");
         undo.className = "drop";
         undo.textContent = "\u00d7";
@@ -3814,7 +3814,7 @@
   takeHeard();
   takeTucked();
   // How the panel was last read, kept across reloads the way its other choices are.
-  els.logsort.value = localStorage.getItem("diffdesk.logsort") === "recent" ? "recent" : "batch";
+  els.logsort.value = localStorage.getItem("diffdesk.logsort") === "thread" ? "thread" : "batch";
   takeDrafts();
   showSource();
   renderTabs();
