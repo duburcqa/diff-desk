@@ -1688,6 +1688,51 @@ def test_a_file_changed_since_it_was_reviewed_says_so_where_the_count_is(page, d
     card.locator("input[type=checkbox]").uncheck()
 
 
+def test_the_progress_counts_the_files_the_filter_leaves(page):
+    total = page.evaluate("() => view().files.length")
+    assert f"/{total} reviewed" in page.locator("#ptext").inner_text().lower()
+
+    # Filtered down to one file, the header describes that file rather than a set the reader cannot reach, and says
+    # how many it is holding back.
+    page.keyboard.press("/")
+    page.wait_for_selector("#palette:not([hidden])")
+    page.locator("#pq").fill("sample.py")
+    page.keyboard.press("Escape")
+    page.wait_for_selector("#palette", state="hidden")
+    page.wait_for_function("() => document.querySelectorAll('#filelist .fileitem').length === 1")
+    assert "0/1 reviewed" in page.locator("#ptext").inner_text().lower()
+    assert f"{total - 1} more the filter is holding back" in page.locator("#ptext").get_attribute("title")
+
+    page.keyboard.press("/")
+    page.wait_for_selector("#palette:not([hidden])")
+    page.locator("#pq").fill("nothing matches this")
+    page.keyboard.press("Escape")
+    page.wait_for_selector("#palette", state="hidden")
+    page.wait_for_function("() => document.querySelectorAll('section.file').length === 0")
+    assert "0/0 reviewed" in page.locator("#ptext").inner_text().lower()
+
+    # Cleared the way a reader clears it, by the cross the box carries.
+    page.locator("#qx").click()
+    page.wait_for_function("() => document.querySelector('#q').value === ''")
+    assert f"/{total} reviewed" in page.locator("#ptext").inner_text().lower()
+    assert "holding back" not in page.locator("#ptext").get_attribute("title")
+
+
+def test_a_box_that_grows_to_fit_shows_no_bar_to_drag(page, desk):
+    line = sample(page).locator("tr.a[data-line]").first
+    line.locator("td.code").first.hover()
+    line.locator("button.pin").first.click()
+    written = page.locator("tr[data-composer='true'] textarea")
+    bar = "() => getComputedStyle(document.querySelector(\"tr[data-composer='true'] textarea\")).overflowY"
+    written.fill("short enough to fit")
+    assert page.evaluate(bar) == "hidden"
+
+    # Longer than the box may grow: the bar comes back, since there is then something left to reach.
+    written.fill("\n".join(f"line {index} of a remark that goes past what the box may grow to" for index in range(80)))
+    assert page.evaluate(bar) == "auto"
+    page.keyboard.press("Escape")
+
+
 @pytest.mark.parametrize("width", [1900, 1400, 1100, 900, 760])
 def test_the_top_bar_keeps_every_control_in_the_window(page, width):
     page.set_viewport_size({"width": width, "height": 900})

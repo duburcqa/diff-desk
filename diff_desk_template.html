@@ -1675,7 +1675,12 @@
     // nothing to measure, and bounded so a long remark scrolls inside it rather than pushing the diff off screen.
     const fit = () => {
       box.style.height = "auto";
-      box.style.height = `${Math.min(box.scrollHeight, Math.round(window.innerHeight * 0.45))}px`;
+      const cap = Math.round(window.innerHeight * 0.45);
+      const wanted = box.scrollHeight;
+      box.style.height = `${Math.min(wanted, cap)}px`;
+      // A bar to drag only where there is something left to reach: the box is the size of what was written until it
+      // hits the cap, and a bar on a box that already shows everything is furniture.
+      box.style.overflowY = wanted > cap ? "auto" : "hidden";
     };
     box.addEventListener("input", fit);
     requestAnimationFrame(fit);
@@ -3018,21 +3023,24 @@
 
   function render() {
     const { files, commit } = view();
-    const staleCount = countStale(files);
+    // Counted over what the filter leaves, so the header describes the files the reader can actually reach; how many
+    // it holds back is said in the tooltip, which is the only place a hidden file can still be accounted for.
     const shown = visible(files);
-    const added = files.reduce((sum, file) => sum + file.added, 0);
-    const removed = files.reduce((sum, file) => sum + file.removed, 0);
-    const done = files.filter((file) => seenState(file) === "done").length;
+    const staleCount = countStale(shown);
+    const added = shown.reduce((sum, file) => sum + file.added, 0);
+    const removed = shown.reduce((sum, file) => sum + file.removed, 0);
+    const done = shown.filter((file) => seenState(file) === "done").length;
+    const held = files.length - shown.length;
     els.tplus.textContent = `+${added.toLocaleString()}`;
     els.tminus.textContent = `−${removed.toLocaleString()}`;
     els.ptext.textContent = staleCount
-      ? `${done}/${files.length} reviewed\n${staleCount} reopened`
-      : `${done}/${files.length} reviewed`;
+      ? `${done}/${shown.length} reviewed\n${staleCount} reopened`
+      : `${done}/${shown.length} reviewed`;
     els.ptext.dataset.stale = String(Boolean(staleCount));
-    els.ptext.title = staleCount
-      ? `${staleCount} file(s) changed since they were reviewed, so their ticks were dropped`
-      : "Files marked reviewed";
-    els.pfill.style.width = files.length ? `${Math.round((done / files.length) * 100)}%` : "0%";
+    const reads = [staleCount ? `${staleCount} file(s) changed since they were reviewed, and are marked as such` : "Files marked reviewed"];
+    if (held) reads.push(`${held} more the filter is holding back`);
+    els.ptext.title = reads.join(" · ");
+    els.pfill.style.width = shown.length ? `${Math.round((done / shown.length) * 100)}%` : "0%";
     if (!els.palette.hidden) drawPicks();
     sayWhereToStep();
     showStatus(staleCount);
@@ -3702,7 +3710,9 @@
       takePick();
     }
     if (event.key === "Escape") {
-      // Stopped here, or the page's own Escape would take the box's focus away before the list closed.
+      // Stopped here, or the page's own Escape would take the box's focus away before the list closed. Refused as
+      // well, since a search box empties itself on Escape and would leave the bar showing a filter that was dropped.
+      event.preventDefault();
       event.stopPropagation();
       closePicker();
     }
