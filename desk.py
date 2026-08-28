@@ -213,6 +213,9 @@ def watch(args):
     # and all, so one armed against the run before it is reading something that no longer exists.
     running = serving()
     if running is not None and armed_against() not in (None, running):
+        # Held against the desk now answering, so that arming again is what the word says it is: left as it was, every
+        # watch after this one would read the run before it and stop on the same breath.
+        stop_at(since, running)
         print("the desk has been restarted since this watch was armed; arm it again", flush=True)
         return
     print(f"watching for anything said past event {since}", flush=True)
