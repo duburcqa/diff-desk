@@ -486,6 +486,10 @@
   .filenote.writing textarea { font: inherit; font-family: var(--sans); font-size: 12.5px; min-height: 52px; padding: 7px 8px; color: var(--ink); background: var(--surface); border: 1px solid var(--rule-strong); border-radius: 6px; resize: vertical; }
   .filenote.writing .row { display: flex; align-items: center; gap: 8px; }
 
+  /* Stands in for the lines of a card let go of, holding what they reached across and nothing else. A box of no
+     height at all is not counted as reaching anywhere by every engine, so it takes a line and gives it straight back. */
+  .held { height: 1px; margin-bottom: -1px; }
+
   .noterow td { padding: 0; background: var(--surface-sunk); }
   /* Held at the left of what is on screen and sized to it. Sticky would say this, but a sticky box inside a table cell
      is not honoured everywhere, so the offset is taken from the body's own scrolling instead. */
@@ -3093,6 +3097,7 @@
   // What a file's lines take up, so a card whose lines are not built still stands as tall as it will: without it the
   // page grows under the reader as they go, and the scrollbar means nothing until they have been everywhere.
   const heights = new Map();
+  const widths = new Map();
   let rowRoom = 0;
 
   function roomPerRow() {
@@ -3316,6 +3321,7 @@
     body.className = "body";
     // As tall as its lines will be, until they are built and it is exactly as tall as they are.
     if (!file.binary) body.style.minHeight = `${heights.get(file.path) || roomForLines(file)}px`;
+    if (!file.binary && widths.has(file.path)) body.append(spacer(widths.get(file.path)));
     roomFor.observe(body);
     body.addEventListener("scroll", () => follow(body), { passive: true });
     wrap.append(body);
@@ -3329,6 +3335,7 @@
     if (!body || body.dataset.filled === "true") return;
     body.dataset.filled = "true";
     body.style.minHeight = "";
+    body.replaceChildren();
     if (file.binary) {
       const note = document.createElement("div");
       note.className = "empty";
@@ -3487,14 +3494,27 @@
     if (!body || body.dataset.filled !== "true") return;
     // The height it had stands in for the lines let go of, so the scrollbar says the same thing before and after.
     const held = Math.round(body.getBoundingClientRect().height);
+    const across = Math.round(body.scrollWidth);
     const of = drawn.get(wrap);
     if (held && of) {
       // What it measured while it was built, which is what it stands at from now on however often it comes and goes.
       heights.set(of.file.path, held);
       body.style.minHeight = `${held}px`;
     }
+    if (across && of) widths.set(of.file.path, across);
     delete body.dataset.filled;
     body.replaceChildren();
+    // Its lines reached this far across, so something has to go on reaching it: emptied, the card would scroll no
+    // further than its own edge, and the horizontal scrollbar would come and go with every settle as the reader
+    // passes - on a card they never scrolled sideways at all.
+    if (across && of) body.append(spacer(across));
+  }
+
+  function spacer(across) {
+    const held = document.createElement("div");
+    held.className = "held";
+    held.style.width = `${across}px`;
+    return held;
   }
 
   function nearReader(wrap) {
