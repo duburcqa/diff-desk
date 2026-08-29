@@ -1,6 +1,7 @@
 """One entry point for the diff desk: serve a branch for review, then pick up the comments it collects.
 
 desk.py serve --dir <repo> --base <ref> [refs ...]   collect the diffs and serve them (blocks)
+desk.py serve ... --take                             serve it even where a desk holds another review
 desk.py watch [--since N] [--once]                   print whatever the reviewer says, as they say it
 desk.py comments [--all]                             what has been submitted, unresolved unless --all
 desk.py reply 3 "why it happens ..."                 answer a comment without closing it
@@ -162,8 +163,48 @@ def armed_against():
     return json.loads(kept.read_text()).get("desk") if kept.exists() else None
 
 
+PULL_REF = re.compile(r"^refs/diffdesk/pull/(\d+)$")
+
+
+def one_ref(ref):
+    """A ref as the review it names, so the several ways of asking for one pull request compare as one thing.
+
+    A pull request is served from a ref fetched by number, so the same review is asked for as '3243' by a session, comes
+    back as 'refs/diffdesk/pull/3243' in the payload, and is sent as either by the page. Compared verbatim, a desk would
+    read as holding somebody else's review every time it was asked for its own.
+    """
+    named = PULL_REF.match(str(ref).strip())
+    number = int(named.group(1)) if named else gen_diff_data.pull_number(ref)
+    return f"#{number}" if number is not None else str(ref).strip()
+
+
+def held_elsewhere(root, base, refs):
+    """The review a running desk is already showing, when that is not the one being asked for.
+
+    The desk is one resource for the whole machine - one port, one store - so a second review served on it takes the
+    page away from whoever was reading the first, and says nothing to either of them. What is already being shown is
+    therefore asked for before anything is collected.
+
+    Only what a session runs is held this way. The reader switching source from the page is the point of that panel, so
+    a scan asked for there is never refused.
+    """
+    held = (ask("/state") or {}).get("source")
+    if held is None:
+        return None
+    mine = (pathlib.Path(root).resolve(), base, sorted(one_ref(ref) for ref in refs))
+    theirs = (pathlib.Path(held["root"]).resolve(), held["base"], sorted(one_ref(ref) for ref in held["refs"]))
+    return None if mine == theirs else held
+
+
 def serve(args):
     refresh()
+    held = held_elsewhere(args.dir, args.base, args.refs)
+    if held is not None and not args.take:
+        shown = ", ".join(held["refs"]) or "every branch ahead"
+        sys.exit(
+            f"a desk is already serving {shown} from {held['root']} against {held['base']}; serving this would take "
+            f"the page away from whoever is reading that. Ask them, or pass --take to serve it anyway."
+        )
     payload = gen_diff_data.collect(args.dir, args.base, args.refs)
     if not payload["branches"]:
         sys.exit(f"nothing ahead of {args.base} in {args.dir}")
@@ -345,6 +386,11 @@ job.add_argument(
 )
 job.add_argument("--dir", default=".", help="the repository to read")
 job.add_argument("--base", default="upstream/main", help="the ref to diff against")
+job.add_argument(
+    "--take",
+    action="store_true",
+    help="serve this even where a desk is already holding another review, replacing what it shows",
+)
 job.set_defaults(run=serve)
 
 job = jobs.add_parser(

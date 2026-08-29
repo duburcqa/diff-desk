@@ -14,6 +14,7 @@ import pytest
 
 import gen_diff_data
 from conftest import FILE_LINES, ROOT, SECOND_EDIT, until
+from desk import one_ref
 from serve_diff import is_refusal
 
 # What one of these records the next reads back out of the same desk, so they belong to one worker of a parallel run
@@ -1163,6 +1164,34 @@ def test_rescanning_switches_what_is_reviewed(desk):
     assert desk.get("/data")["branches"][0]["ref"] == "feature"
     # The page is rebuilt around the new payload, so a reload shows it without another command.
     assert "feature" in (desk.home / "diff_desk.html").read_text()
+
+
+def test_serving_over_a_desk_holding_another_review_is_refused(desk):
+    elsewhere = desk.cli("serve", "--dir", str(desk.repo), "--base", "feature", "main")
+    said = elsewhere.communicate(timeout=180)[0]
+    # Refused before a single diff is collected, so what the reader has open is exactly as they left it.
+    assert desk.get("/data")["branches"][0]["ref"] == "feature"
+    assert elsewhere.returncode != 0
+    assert "already serving" in said and "--take" in said
+    # What it is holding, and not merely that it is holding something, is what tells one review from another.
+    assert desk.get("/state")["source"]["refs"] == ["feature"]
+
+    # Asking for the review the desk is already showing is nobody else's, and rebuilds its page as it always did.
+    again = desk.cli("serve", "--dir", str(desk.repo), "--base", "main", "feature")
+    assert "page rebuilt" in again.communicate(timeout=180)[0]
+    assert desk.get("/data")["branches"][0]["ref"] == "feature"
+
+    taken = desk.cli("serve", "--dir", str(desk.repo), "--base", "feature", "main", "--take")
+    assert "page rebuilt" in taken.communicate(timeout=180)[0]
+    assert desk.get("/data")["branches"][0]["ref"] == "main"
+    desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": ["feature"]})
+
+
+def test_one_pull_request_asked_for_either_way_is_one_review():
+    # A pull request is asked for by number, comes back as the ref it was fetched into, and is sent as either by the
+    # page. Read verbatim, a desk would refuse to rebuild the very review it is holding.
+    assert len({one_ref(ref) for ref in ("3243", "#3243", "pr/3243", "refs/diffdesk/pull/3243")}) == 1
+    assert one_ref("feature") != one_ref("3243")
 
 
 def test_a_ref_with_nothing_to_review_is_reported_not_served(desk):
