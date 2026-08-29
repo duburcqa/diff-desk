@@ -696,6 +696,34 @@ def test_a_comment_stays_inside_the_view_when_the_diff_is_scrolled(page, desk):
     page.set_viewport_size({"width": 1500, "height": 900})
 
 
+def test_a_card_reaches_as_far_across_once_its_lines_are_let_go_of(page):
+    # Narrow enough that the lines overflow, short enough that a card leaves the reach that keeps it built.
+    page.set_viewport_size({"width": 200, "height": 400})
+    page.reload(wait_until="load")
+    page.wait_for_selector("tr[data-line]")
+    held = page.evaluate(
+        """() => new Promise((done) => {
+          const body = document.querySelector('section.file .body');
+          const rows = () => body.querySelectorAll('tr[data-line]').length;
+          const across = () => Math.round(body.scrollWidth);
+          const built = {rows: rows(), across: across(), room: Math.round(body.clientWidth)};
+          window.scrollTo(0, document.body.scrollHeight);
+          setTimeout(() => {
+            const gone = {rows: rows(), across: across()};
+            window.scrollTo(0, 0);
+            setTimeout(() => done({built, gone, back: {rows: rows(), across: across()}}), 400);
+          }, 400);
+        })"""
+    )
+    page.set_viewport_size({"width": 1500, "height": 900})
+    # The lines have to overflow for the question to mean anything, and the card has to have been let go of.
+    assert held["built"]["across"] > held["built"]["room"]
+    assert held["built"]["rows"] and not held["gone"]["rows"]
+    # However often it comes and goes, it reaches the same distance, so its scrollbar never appears on its own.
+    assert held["gone"]["across"] == held["built"]["across"]
+    assert held["back"]["across"] == held["built"]["across"]
+
+
 def test_a_pending_comment_can_be_sent_on_its_own_from_the_tray(page, desk):
     lines = sample(page).locator("tr.a[data-line]")
     for index, text in ((0, "the first remark"), (1, "the second remark")):
