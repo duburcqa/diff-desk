@@ -33,6 +33,8 @@ A thread is printed whole and the line that woke the session is marked with a `*
 
 `--once` stops it after the first report, and where it stopped is remembered, so the way to be woken rather than to keep looking is to arm `watch --once` in the background, answer what it reports, and arm it again: the same reply never wakes a session twice, and nothing said while it was answering is lost. `--since N` overrides where it resumes from.
 
+One desk holds every review it was given, so a session working one of them arms `watch --branch <ref>`, repeatable, and hears only what is said about those. It is what keeps two sessions out of each other's way: where a watch stopped is remembered per review, so one is never carried past what another has yet to hear. Armed without it, a watch hears everything the desk holds - right for a session that is the only one reading it.
+
 Each comment prints as `[seq] branch path:line-endLine (side) text`, followed by its state and any replies, each numbered `[0]`, `[1]` ... by its place in the thread. Answer in the thread, and close what is done - the page shows both without a reload:
 
     python3 ~/.claude/skills/diff-desk/desk.py reply 3 "it happens because ..."

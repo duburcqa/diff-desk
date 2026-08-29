@@ -139,16 +139,27 @@ def show(note, since=None):
         print(f"      was {earlier['at']}: {' '.join(earlier['text'].split())[:80]}", flush=True)
 
 
-def heard_upto():
-    """The event the last watch stopped at, or None if nothing has ever watched this desk."""
+def watched_key(branches):
+    """What a watch of these branches is held under: one desk holds every review, and a session watching one of them
+    must not carry the others past what another session has yet to hear."""
+    return "|".join(sorted(branches)) if branches else "event"
+
+
+def heard_upto(branches=()):
+    """The event the last watch of these branches stopped at, or None if none ever has."""
     kept = gen_diff_data.home() / "watched.json"
-    return json.loads(kept.read_text())["event"] if kept.exists() else None
+    if not kept.exists():
+        return None
+    held = json.loads(kept.read_text())
+    return held.get(watched_key(branches))
 
 
-def stop_at(event, desk=None):
+def stop_at(event, desk=None, branches=()):
     kept = gen_diff_data.home() / "watched.json"
     held = json.loads(kept.read_text()) if kept.exists() else {}
-    kept.write_text(json.dumps({"event": event, "desk": desk if desk is not None else held.get("desk")}))
+    held[watched_key(branches)] = event
+    held["desk"] = desk if desk is not None else held.get("desk")
+    kept.write_text(json.dumps(held))
 
 
 def serving():
@@ -238,10 +249,15 @@ def watch(args):
     if ask("/data") is None:
         sys.exit("nothing is serving; start with 'desk.py serve' first")
     sent = ask("/comments") or []
+    # One desk holds every review it was given, so a session works one of them: what the others say is another
+    # session's to answer, and waking on it would carry that session's news past it unheard.
+    branches = tuple(args.branch or ())
+    if branches:
+        sent = [row for row in sent if row.get("branch") in branches]
     # Anything still open is unaddressed, whenever it arrived, so a first watch starts before it rather than after: a
     # cursor set to the end swallows whatever was written while the last batch was being worked on.
     waiting = [row.get("event", row["seq"]) for row in sent if row.get("state") == "open"]
-    stopped = heard_upto()
+    stopped = heard_upto(branches)
     if args.since is not None:
         since = args.since
     elif stopped is not None:
@@ -256,23 +272,25 @@ def watch(args):
     if running is not None and armed_against() not in (None, running):
         # Held against the desk now answering, so that arming again is what the word says it is: left as it was, every
         # watch after this one would read the run before it and stop on the same breath.
-        stop_at(since, running)
+        stop_at(since, running, branches)
         print("the desk has been restarted since this watch was armed; arm it again", flush=True)
         return
-    print(f"watching for anything said past event {since}", flush=True)
-    stop_at(since, running)
+    print(f"watching {', '.join(branches) if branches else 'every review'} for anything said past event {since}", flush=True)
+    stop_at(since, running, branches)
     deadline = time.monotonic() + args.timeout if args.timeout else None
     # Never returns of its own accord: a reviewer says one thing, then another, and a watch that stopped at the first
     # left every word after it unheard - which is what happened before it kept going.
     while deadline is None or time.monotonic() < deadline:
         # The session's own writes bump the cursor too, so what it is waiting for is told from what it just did.
         fresh = [row for row in (ask(f"/comments?event={since}") or []) if row.get("eventBy") == "you"]
+        if branches:
+            fresh = [row for row in fresh if row.get("branch") in branches]
         if fresh:
             print(f"{len(fresh)} comment(s) with news:", flush=True)
             for note in fresh:
                 show(note, since)
             since = max(row.get("event", row["seq"]) for row in fresh)
-            stop_at(since, running)
+            stop_at(since, running, branches)
             if args.once:
                 return
         if serving() not in (None, running):
@@ -401,6 +419,11 @@ job = jobs.add_parser(
 )
 job.add_argument(
     "--since", type=int, default=None, help="event to resume from; where the last watch stopped by default"
+)
+job.add_argument(
+    "--branch",
+    action="append",
+    help="only wake on what is said about this review, and leave the rest to whoever is watching it; repeatable",
 )
 job.add_argument("--once", action="store_true", help="stop after the first thing said, rather than keeping watch")
 job.add_argument("--every", type=float, default=10.0, help="seconds between polls")
