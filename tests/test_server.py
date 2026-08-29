@@ -1427,6 +1427,44 @@ def test_the_branch_has_moved_on_when_a_modified_file_changes_again(desk):
         desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": ["feature"]})
 
 
+def test_a_watch_on_one_review_leaves_what_is_said_about_the_others(desk):
+    stopped = desk.home / "watched.json"
+    kept = stopped.read_text() if stopped.exists() else None
+    try:
+        # Started past everything already said, so what this test says is the only thing that can wake it.
+        spoken = max((row["event"] for row in desk.get("/comments")), default=0)
+        stopped.unlink(missing_ok=True)
+        watching = desk.cli("watch", "--branch", "feature", "--once", "--every", "0.2", "--since", str(spoken), "--timeout", "25")
+        try:
+            # One desk holds every review it was given. What is said about another is another session's to answer.
+            desk.post(
+                "/comments",
+                [{"branch": "elsewhere", "path": "sample.py", "line": 71, "side": "new", "text": "on the other review"}],
+            )
+            desk.post(
+                "/comments",
+                [{"branch": "feature", "path": "sample.py", "line": 71, "side": "new", "text": "on this review"}],
+            )
+            said = watching.communicate(timeout=40)[0]
+        finally:
+            watching.terminate()
+        assert "on this review" in said
+        assert "on the other review" not in said
+        # And it left that one where it stood: a session watching the other review still hears it, which it would not
+        # if a cursor shared between them had been carried past it.
+        # Reading where a watch of that review stopped, which is nowhere: told from the one just held on this review,
+        # it hears what was said. Sharing one cursor between them, it would be carried past it and hear nothing.
+        other = desk.cli(
+            "watch", "--branch", "elsewhere", "--once", "--every", "0.2", "--timeout", "25"
+        ).communicate(timeout=40)[0]
+        assert "on the other review" in other
+    finally:
+        if kept is None:
+            stopped.unlink(missing_ok=True)
+        else:
+            stopped.write_text(kept)
+
+
 def test_watching_hears_everything_said_not_only_the_first(desk):
     # Where a watch stopped is written down, so what it has heard is asked of that rather than guessed at from a pause.
     stopped = desk.home / "watched.json"
