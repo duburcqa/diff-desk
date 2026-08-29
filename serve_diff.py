@@ -4,7 +4,8 @@ Endpoints, all on 127.0.0.1 so nothing is exposed off the machine:
   GET  /                      the page
   GET  /data                  the payload the page renders
   GET  /refs?dir=&base=       branches ahead of a base, for the source picker
-  GET  /state                 what the served diffs are built from, so a page can tell the branch has moved on
+  GET  /state                 what the served diffs are built from, so a page can tell the branch has moved on,
+                              and the source they came from, so a session can tell whose review it is holding
   POST /scan                  {dir, base, refs} - regenerate the payload and return it
   GET  /reviewed              which files have been read, so a tick outlives the browser it was made in
   POST /reviewed              {marks, drop} - tick files at the digest they were read at, or untick them
@@ -795,7 +796,9 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/state":
             source = Serving.source
             marked = gen_diff_data.stamp(source.root, source.base, source.refs) if source else None
-            self._json({"stamp": marked})
+            # The source, and not only the stamp it hashes to: a session about to serve has to tell a desk showing
+            # another review from one showing the review it is itself here for, which a stamp alone cannot say.
+            self._json({"stamp": marked, "source": source._asdict() if source else None})
         elif path == "/lines":
             self._lines(query)
         elif path == "/favicon.ico":
