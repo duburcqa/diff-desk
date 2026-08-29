@@ -2999,6 +2999,10 @@
 
   function closePicker() {
     if (els.palette.hidden) return;
+    // Handed back before the box goes, and not left to the engine: this page's shortcuts are refused while a field has
+    // the keyboard, so a box hidden with the caret still in it takes '/' and every other letter with it. Where hiding
+    // it is what releases the caret this changes nothing, and where it is not, the bar answers again.
+    els.pq.blur();
     els.veil.hidden = true;
     els.palette.hidden = true;
     document.body.classList.remove("picking");
