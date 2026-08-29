@@ -1727,6 +1727,9 @@ def test_the_progress_counts_the_files_the_filter_leaves(page):
     page.locator("#pq").fill("sample.py")
     page.keyboard.press("Escape")
     page.wait_for_selector("#palette", state="hidden")
+    # Closed, the keyboard is the page's again: a caret left in the box that has just gone swallows every shortcut,
+    # and the next '/' would be typed into something the reader cannot see rather than opening the picker.
+    assert page.evaluate("() => document.activeElement.id") != "pq"
     page.wait_for_function("() => document.querySelectorAll('#filelist .fileitem').length === 1")
     assert "0/1 reviewed" in page.locator("#ptext").inner_text().lower()
     assert f"{total - 1} more the filter is holding back" in page.locator("#ptext").get_attribute("title")
