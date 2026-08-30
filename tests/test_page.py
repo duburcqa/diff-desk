@@ -1016,6 +1016,20 @@ def test_stepping_lands_on_the_file_left_to_review_nearest_the_reader(page):
         page.locator(f"section.file[data-path='{path}'] input[type=checkbox]").uncheck()
 
 
+def test_a_page_on_its_way_out_asks_for_nothing_more(page, desk):
+    # Gone means gone: a request still in flight as the context is torn down is reported by some engines as an error
+    # against the page rather than to the caller that caught it, so nothing new is asked for once it is leaving.
+    page.evaluate("() => window.dispatchEvent(new PageTransitionEvent('pagehide'))")
+    held = len(desk.get("/comments"))
+    page.evaluate(
+        "() => post('comments', [{branch: 'feature', path: 'sample.py', line: 71, side: 'new', text: 'after it left'}])"
+    )
+    assert len(desk.get("/comments")) == held
+    # And a round of its own asks for nothing either, rather than being stopped only from starting another.
+    page.evaluate("() => tick()")
+    assert len(desk.get("/comments")) == held
+
+
 def test_a_file_changed_since_it_was_reviewed_opens_itself(page, desk):
     branch = page.evaluate("() => data.branches[0].ref")
     card = page.locator("section.file[data-path='added.py']")

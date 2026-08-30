@@ -1341,6 +1341,21 @@ def test_a_dropped_comment_is_deleted_on_the_pull_request_and_leaves_the_log_beh
     assert desk.post("/drop", {"seq": seq, "repo": "someone/somewhere", "pr": 7})["ok"] is False
 
 
+def test_a_drop_says_whose_doing_it_was_like_every_other_change(desk):
+    made = desk.post(
+        "/comments", [{"branch": "feature", "path": "sample.py", "line": 31, "side": "new", "text": "dropped by whom"}]
+    )["seq"]
+    desk.post("/reply", {"seq": made, "text": "an answer to let go of", "who": "session"})
+    # A session dropping its own words is its own doing, so the watch it armed is not woken by what it just did.
+    desk.post("/drop", {"seq": made, "reply": True})
+    assert {row["seq"]: row for row in desk.get("/comments")}[made]["eventBy"] == "session"
+
+    # The reader's press is theirs, and news for this side.
+    desk.post("/reply", {"seq": made, "text": "another to let go of", "who": "session"})
+    desk.post("/drop", {"seq": made, "reply": True, "who": "you"})
+    assert {row["seq"]: row for row in desk.get("/comments")}[made]["eventBy"] == "you"
+
+
 def test_dropping_the_last_reply_leaves_the_comment_and_what_was_said_before_it(desk):
     made = desk.post(
         "/comments",
