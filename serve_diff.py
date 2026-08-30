@@ -18,7 +18,7 @@ Endpoints, all on 127.0.0.1 so nothing is exposed off the machine:
                               keeping what it said before
   POST /reply                 {seq, text, who} - add a reply to a comment, from the session or from the reviewer
   POST /resolve               {seq: [...], answer, resolved, who} - close comments, or reopen them
-  POST /drop                  {seq, reply, repo, pr} - delete a comment, or only its last reply, here and there
+  POST /drop                  {seq, reply, who, repo, pr} - delete a comment, or only its last reply, here and there
   POST /publish               {repo, pr, summary, seq, resolved} - send those threads whole: the remark if it is not
                               there yet, the replies the pull request does not hold, and the resolution of one closed
                               here. Naming none of them carries on with what a send already failed at, and never sends
@@ -1152,6 +1152,9 @@ class Handler(BaseHTTPRequestHandler):
         order = self._body()
         seq = order.get("seq")
         last_only = bool(order.get("reply"))
+        # Told apart like every other change: a reader's press is theirs, and what a session drops is its own doing, so
+        # a watch is not woken by the very session that ran it.
+        who = "you" if order.get("who") == "you" else "session"
         with CHANGING:
             rows = read_notes()
         found = next((row for row in rows if row["seq"] == seq), None)
@@ -1205,7 +1208,7 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     row["state"] = "deleted"
                     row["prResolve"] = "none"
-                touched(fresh, row, "you")
+                touched(fresh, row, who)
         print(
             f"DROPPED {'the last reply of' if last_only else ''} [{seq}] ({gone} deleted on the pull request)",
             flush=True,

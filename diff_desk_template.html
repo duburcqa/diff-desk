@@ -1188,7 +1188,12 @@
 
   /* ---------- comments ---------- */
 
+  // Set once the page is on its way out. A request still in flight when it goes is reported as an error by some
+  // engines - and by the suite, which holds every page to raising none - so nothing new is asked for after it.
+  let leaving = false;
+
   async function post(route, payload) {
+    if (leaving) return { ok: false, error: "the page is going" };
     try {
       const answer = await fetch(route, {
         method: "POST",
@@ -1225,6 +1230,7 @@
   async function watchBranch() {
     // Offered rather than taken: rebuilding the diff under the reader moves the ground they are on, so when the branch
     // has moved on - a commit, a fixup, work saved on disk - the page says so and waits to be asked.
+    if (leaving) return;
     try {
       const answer = await fetch("state", { cache: "no-store" });
       if (!answer.ok) return;
@@ -1236,6 +1242,7 @@
   }
 
   async function loadNotes() {
+    if (leaving) return;
     try {
       const response = await fetch("comments", { cache: "no-store" });
       if (!response.ok) throw new Error("no endpoint");
@@ -2150,7 +2157,7 @@
         const answers = (note.replies || []).length;
         const also = answers ? ` and ${answers} repl${answers === 1 ? "y" : "ies"}` : "";
         if (!window.confirm(`Delete this comment${also}${posted ? ", on the pull request as well" : ""}?`)) return;
-        const outcome = await post("drop", { seq: note.seq, ...where() });
+        const outcome = await post("drop", { seq: note.seq, who: "you", ...where() });
         if (!outcome.ok) window.alert(`It is still there: ${outcome.error || "GitHub unreachable"}`);
         await loadNotes();
         drawLog();
@@ -2290,7 +2297,7 @@
         undo.title = note.github === "posted" ? "Delete this reply, here and on the pull request" : "Delete this reply";
         undo.addEventListener("click", async () => {
           if (!window.confirm("Delete the last reply?")) return;
-          const outcome = await post("drop", { seq: note.seq, reply: true, ...where() });
+          const outcome = await post("drop", { seq: note.seq, reply: true, who: "you", ...where() });
           if (!outcome.ok) window.alert(`It is still there: ${outcome.error || "GitHub unreachable"}`);
           await loadNotes();
           drawLog();
@@ -3870,7 +3877,7 @@
   async function tick() {
     // Never redraw under a gesture: rebuilding the table destroys the pin holding the pointer, and the release that
     // would have opened the comment box is delivered to a node that is no longer in the page.
-    if (drag.on) return;
+    if (drag.on || leaving) return;
     await watchBranch();
     // Every box a comment is written in, whichever it is: a redraw rebuilds the card and takes the box with it.
     if (!notes.live || document.querySelector("tr[data-composer], .filenote.writing") || notes.drafts.length) return;
@@ -3886,10 +3893,15 @@
     }
   }
 
-  const polling = setInterval(tick, 10000);
-  // A page on its way out stops asking: a request still in flight when it goes is reported as an error by some engines,
-  // and there is nobody left to tell anyway.
-  addEventListener("pagehide", () => clearInterval(polling));
+  // Whatever a round comes to is nobody's business by the time it fails: a rejection let out of a timer is an
+  // unhandled one, which is a page error even where every request inside it was caught.
+  const polling = setInterval(() => tick().catch(() => {}), 10000);
+  // A page on its way out stops asking. Clearing the timer stops the rounds to come; the flag stops the one already
+  // under way, which is the one whose request is still in flight as the page goes.
+  addEventListener("pagehide", () => {
+    leaving = true;
+    clearInterval(polling);
+  });
 
   const measureHead = () => {
     const box = document.querySelector("header").getBoundingClientRect();
