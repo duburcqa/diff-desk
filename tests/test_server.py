@@ -1663,21 +1663,17 @@ def test_watching_hears_everything_said_not_only_the_first(desk):
     assert "and a third word" in heard
     assert heard.count("comment(s) with news") == 1
 
-    # A watch outlives the desk it was armed against, and a restarted desk carries whatever the tool has become, so
-    # one armed against the run before it says so and stops rather than reading a page that no longer exists.
+    # A desk restarted since the last watch is said once and then followed: a watch armed now is armed against the
+    # desk now answering, so it reads what exists rather than the run before it, and hears what was said meanwhile
+    # instead of spending itself on the restart.
     armed = json.loads(stopped.read_text())
     assert armed["desk"] == desk.get("/serving")["desk"]
     stopped.write_text(json.dumps({**armed, "desk": "some run before this one"}))
-    told = desk.cli("watch", "--once", "--every", "0.2", "--timeout", "20").communicate(timeout=40)[0]
-    assert "arm it again" in told
-
-    # Being told to arm it again means arming it again works: the desk that answered is written down as it says so,
-    # and where the refused watch would have resumed from is kept, so the next one hears what was said meanwhile.
-    assert json.loads(stopped.read_text())["desk"] == desk.get("/serving")["desk"]
     desk.post("/reply", {"seq": first, "text": "and a fourth word", "who": "you"})
-    again_armed = desk.cli("watch", "--once", "--every", "0.2", "--timeout", "20").communicate(timeout=40)[0]
-    assert "arm it again" not in again_armed
-    assert "and a fourth word" in again_armed
+    told = desk.cli("watch", "--once", "--every", "0.2", "--timeout", "20").communicate(timeout=40)[0]
+    assert "the desk has been restarted" in told
+    assert "and a fourth word" in told
+    assert json.loads(stopped.read_text())["desk"] == desk.get("/serving")["desk"]
 
 
 def test_the_desk_updates_itself_over_https_when_ssh_cannot_be_reached(tmp_path):
