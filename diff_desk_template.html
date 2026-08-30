@@ -705,6 +705,8 @@
     cursor: pointer;
   }
   .logrow:hover { border-color: var(--accent); }
+  .logrow[data-unread="true"] { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+  .logrow[data-unread="true"] b { color: var(--accent); }
   .logrow[data-state="resolved"] { background: var(--add-bg); border-color: color-mix(in srgb, var(--add-ink) 35%, transparent); }
   .logrow b { flex: none; font-family: var(--mono); font-size: 11px; }
   .logrow .said { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
@@ -931,6 +933,10 @@
         <option value="thread">thread</option>
       </select>
     </label>
+    <label class="seen" id="logonlynew" title="List only the threads holding something not yet read">
+      <input type="checkbox" id="logunread" />
+      <span>Only unread</span>
+    </label>
     <label class="seen" id="logshow" title="List what is resolved, and include it when syncing with the pull request">
       <input type="checkbox" id="logresolved" />
       <span>Show resolved</span>
@@ -1003,7 +1009,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "qx", "ctx", "hidedone", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "logresolved", "brand", "repo", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
+  for (const id of ["tabs", "scope", "q", "qx", "ctx", "hidedone", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "logresolved", "logunread", "logonlynew", "brand", "repo", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -1420,7 +1426,8 @@
   function drawLog() {
     const keys = present();
     const all = mine();
-    const rows = withResolved() ? all : all.filter((note) => note.state !== "resolved");
+    const shown = withResolved() ? all : all.filter((note) => note.state !== "resolved");
+    const rows = els.logunread.checked ? shown.filter(unread) : shown;
     const owed = rows.filter((note) => OWED.includes(note.github));
     const counted = [
       `${all.filter((note) => note.state === "open").length} open`,
@@ -1563,10 +1570,17 @@
     render();
   }
 
+  function unread(note) {
+    return !(note.seq in heard) || (note.replies || []).length > heard[note.seq];
+  }
+
   function logRow(note, keys) {
     const item = document.createElement("button");
     item.className = "logrow";
     item.dataset.state = note.state;
+    item.dataset.seq = String(note.seq);
+    // Marked rather than only listed, so a reader sees at a glance which threads hold something they have not read.
+    item.dataset.unread = String(unread(note));
     const where = document.createElement("b");
     where.textContent = `${note.path.split("/").pop()} ${span(note)}`;
     const said = document.createElement("span");
@@ -2586,10 +2600,6 @@
     const row = document.createElement("tr");
     row.className = "noterow";
     row.dataset.composer = "true";
-    row.dataset.path = path;
-    row.dataset.line = String(line);
-    row.dataset.endLine = String(endLine);
-    row.dataset.side = side;
     const cell = document.createElement("td");
     cell.colSpan = 5;
     const box = document.createElement("div");
@@ -3046,51 +3056,7 @@
   const chevron = '<svg class="chev" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5"/></svg>';
   const tickMark = '<svg class="tick" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 6.5 4.7 9 10 3.5"/></svg>';
 
-  // A box holds what the reader has typed and nothing else does, so a redraw carries every open one across rather
-  // than taking the text down with the card it hung on. An empty box is left behind, having nothing to lose.
-  function heldBoxes() {
-    const held = [];
-    for (const box of document.querySelectorAll(".filenote.writing")) {
-      const card = box.closest("section.file");
-      if (card) held.push({ path: card.dataset.path, text: box.querySelector("textarea").value });
-    }
-    for (const row of document.querySelectorAll("tr[data-composer='true']")) {
-      held.push({
-        path: row.dataset.path,
-        line: Number(row.dataset.line),
-        endLine: Number(row.dataset.endLine),
-        side: row.dataset.side,
-        text: row.querySelector("textarea").value,
-      });
-    }
-    return held.filter((one) => one.text.trim());
-  }
-
-  function putBoxesBack(held) {
-    for (const one of held) {
-      const card = document.querySelector(`section.file[data-path="${CSS.escape(one.path)}"]`);
-      if (!card) continue;
-      if (one.line === undefined) {
-        const drew = drawn.get(card);
-        if (!drew) continue;
-        openFileComposer(card, drew.file);
-        const field = card.querySelector(".filenote.writing textarea");
-        if (field) field.value = one.text;
-        continue;
-      }
-      // The lines of a file out of reach are not built, and a box cannot hang on a row that is not there.
-      const anchor = [...card.querySelectorAll("tr[data-line]")].find(
-        (row) => row.dataset.side === one.side && Number(row.dataset.line) === one.endLine
-      );
-      if (!anchor) continue;
-      openComposer(anchor, one.path, one.line, one.endLine, one.side);
-      const field = anchor.nextElementSibling && anchor.nextElementSibling.querySelector("textarea");
-      if (field) field.value = one.text;
-    }
-  }
-
   function render() {
-    const boxes = heldBoxes();
     const { files, commit } = view();
     // Counted over what the filter leaves, so the header describes the files the reader can actually reach; how many
     // it holds back is said in the tooltip, which is the only place a hidden file can still be accounted for.
@@ -3137,7 +3103,6 @@
     shown.forEach((file, index) => els.main.append(card(file, index)));
     settleNear();
     for (const wrap of els.main.querySelectorAll("section.file")) nearby.observe(wrap);
-    putBoxesBack(boxes);
     fitNotes();
     markCurrent();
     paintSel();
@@ -3864,6 +3829,7 @@
     drawLog();
     render();
   });
+  els.logunread.addEventListener("change", () => drawLog());
   els.logsort.addEventListener("change", () => {
     localStorage.setItem("diffdesk.logsort", els.logsort.value);
     drawLog();
