@@ -2103,6 +2103,17 @@ def test_a_branch_that_has_moved_on_offers_a_refresh_that_keeps_the_place(page, 
         assert "SAID_ON_DISK" in page.locator("#main").inner_text()
         # The branch being read is still the one being read.
         assert page.evaluate("() => data.branches[state.branch].ref") == branch
+
+        # A desk published over since this page was rendered is the same news about the page itself, so the refresh
+        # is offered for that too - and taking it loads the page again, which is the only thing that can carry the
+        # script the desk has moved on to.
+        page.evaluate("() => { data.desk = 'a desk this page was never rendered by'; }")
+        page.evaluate("() => tick()")
+        page.wait_for_function("() => !document.getElementById('moved').disabled")
+        page.evaluate("() => { window.__stillHere = true; }")
+        page.locator("#moved").click()
+        page.wait_for_function("() => window.__stillHere === undefined")
+        assert page.evaluate("() => data.desk") is not None
     finally:
         written.write_text(kept)
         gen_diff_data.run(desk.repo, "checkout", "-q", "main")

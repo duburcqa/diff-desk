@@ -1522,6 +1522,10 @@ def test_loading_the_page_collects_the_diffs_as_they_now_stand(desk):
         fresh = desk.get("/data")
         assert fresh["stamp"] == moved
         assert "SAID_ON_DISK" in json.dumps(fresh)
+
+        # What the desk itself is, said beside what the review is: a page holds the script it was rendered with, and
+        # nothing about the branch says whether the desk has been published over since.
+        assert desk.get("/state")["desk"] == fresh["desk"] == gen_diff_data.desk_version()
     finally:
         written.write_text(kept)
         gen_diff_data.run(desk.repo, "checkout", "-q", "main")

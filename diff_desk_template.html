@@ -1238,6 +1238,10 @@
     return true;
   }
 
+  // Whether the desk serving this page has moved on from the script the page holds.
+  let behind = false;
+  const REFRESH_TITLE = "Refresh the diffs once the branch has moved on";
+
   async function watchBranch() {
     // Offered rather than taken: rebuilding the diff under the reader moves the ground they are on, so when the branch
     // has moved on - a commit, a fixup, work saved on disk - the page says so and waits to be asked.
@@ -1245,8 +1249,13 @@
     try {
       const answer = await fetch("state", { cache: "no-store" });
       if (!answer.ok) return;
-      const { stamp } = await answer.json();
-      if (stamp && data.stamp) els.moved.disabled = stamp === data.stamp;
+      const { stamp, desk } = await answer.json();
+      // The desk fast-forwards itself and restarts into what has been published since, which leaves this page holding
+      // the script it was rendered with while the review it shows is untouched. Taking the refresh then reloads the
+      // page rather than collecting the diffs again, since what is behind is the page itself.
+      behind = Boolean(desk && data.desk && desk !== data.desk);
+      els.moved.title = behind ? "Reload the page, which the desk has moved on from" : REFRESH_TITLE;
+      if (stamp && data.stamp) els.moved.disabled = stamp === data.stamp && !behind;
     } catch (error) {
       // Nothing is serving, which the comments already say.
     }
@@ -2940,6 +2949,12 @@
   }
 
   async function rescan(keep) {
+    // A page behind the desk cannot be brought up to date by anything it does itself: the script that would do it is
+    // the one that has moved on.
+    if (behind) {
+      window.location.reload();
+      return;
+    }
     // A refresh names no source: it asks the desk for what it is serving, so a page whose source has been replaced
     // since it was built loads the one in place rather than putting its own back.
     const order = keep ? {} : { dir: els.srcdir.value, base: els.srcbase.value, refs: [...source.picked] };
