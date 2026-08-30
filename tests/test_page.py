@@ -1226,6 +1226,45 @@ def test_the_panel_marks_what_holds_something_unread(page, desk):
     page.locator("#logclose").click()
 
 
+def test_a_thread_with_nowhere_to_go_is_read_in_the_panel(page, desk):
+    # Written on a file the diff no longer holds, which is what a comment becomes once the change it stands on is
+    # undone: there is no card to be taken to, and a row that answers a press with nothing reads as broken.
+    branch = page.evaluate("() => data.branches[0].ref")
+    made = desk.post(
+        "/comments",
+        {
+            "comments": [
+                {
+                    "branch": branch,
+                    "path": "gone/undone.py",
+                    "line": 3,
+                    "side": "new",
+                    "text": "written on a change that has gone",
+                }
+            ],
+            "github": False,
+        },
+    )
+    seq = made["seqs"][0]
+    desk.cli("reply", str(seq), "and answered afterwards").communicate(timeout=180)
+    page.wait_for_function(
+        f"() => ((mine().find((note) => note.seq === {seq}) || {{}}).replies || []).length === 1"
+    )
+
+    page.locator("#logopen").click()
+    page.wait_for_selector("#log[data-open='true']")
+    row = page.locator(f"#logrows .logrow[data-seq='{seq}']")
+    row.click()
+    # The thread opens where it is, so what was said in it can still be read.
+    thread = page.locator(".logthread")
+    thread.wait_for()
+    assert "and answered afterwards" in thread.inner_text()
+    row.click()
+    assert page.locator(".logthread").count() == 0
+    desk.post("/drop", {"seq": seq, "who": "you"})
+    page.locator("#logclose").click()
+
+
 def test_a_file_can_be_commented_on_as_a_whole(page, desk):
     card = sample(page)
     path = card.locator(".path").first.inner_text()
