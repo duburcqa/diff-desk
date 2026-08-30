@@ -279,8 +279,8 @@ def test_a_thread_can_be_answered_rewritten_closed_and_reopened_from_the_page(pa
     assert reopened["text"] == "the remark, rewritten"
     assert [reply["text"] for reply in reopened["replies"]] == ["a reply from the reviewer"]
 
-    # A second thread, open in front of the reader, that the session settles while they read it: the poll brings the
-    # resolution in and the thread stands as they left it, which is resolved and showing every word of itself.
+    # A second thread, open in front of the reader, that the session settles while they read it: a thread dealt with
+    # and holding nothing the reader has yet to hear folds itself away, and unfolds on being asked for.
     other = sample(page).locator("tr.a[data-line]").last
     other.locator("td.code").first.hover()
     other.locator("button.pin").first.click()
@@ -288,9 +288,11 @@ def test_a_thread_can_be_answered_rewritten_closed_and_reopened_from_the_page(pa
     settled = desk.get("/comments")[-1]["seq"]
     desk.post("/resolve", {"seq": [settled], "who": "session"})
     page.evaluate("() => tick()")
-    page.wait_for_selector(f"#note-{settled} .thread.done")
-    assert page.locator(f"#note-{settled} .thread.folded").count() == 0
+    page.wait_for_selector(f"#note-{settled} .thread.folded")
     assert "the remark the session settles" in page.locator(f"#note-{settled}").inner_text()
+    assert page.locator(f"#note-{settled} textarea").count() == 0
+    page.locator(f"#note-{settled} button.tiny").filter(has_text="resolved").click()
+    page.wait_for_selector(f"#note-{settled} .thread.folded", state="detached")
     assert page.locator(f"#note-{settled} textarea").count() == 1
 
 
@@ -1247,21 +1249,33 @@ def test_a_thread_with_nowhere_to_go_is_read_in_the_panel(page, desk):
     )
     seq = made["seqs"][0]
     desk.cli("reply", str(seq), "and answered afterwards").communicate(timeout=180)
+    # Resolved, which is how a thread reads once it has been dealt with, and how it is folded away to an outline.
+    desk.post("/resolve", {"seq": [seq], "resolved": True, "who": "you"})
     page.wait_for_function(
         f"() => ((mine().find((note) => note.seq === {seq}) || {{}}).replies || []).length === 1"
     )
 
     page.locator("#logopen").click()
     page.wait_for_selector("#log[data-open='true']")
+    page.locator("#logresolved").check()
     row = page.locator(f"#logrows .logrow[data-seq='{seq}']")
     row.click()
     # The thread opens where it is, so what was said in it can still be read.
     thread = page.locator(".logthread")
     thread.wait_for()
     assert "and answered afterwards" in thread.inner_text()
+
+    # Folded away, as a thread reads once it has been dealt with, and opened again: what it holds is what the reader
+    # pressed it for, so it is shown whole rather than as the outline it was folded to.
+    thread.locator("button.tiny", has_text="fold").click()
+    row.click()
+    row.click()
+    assert page.locator(".logthread").get_by_text("and answered afterwards").is_visible()
+
     row.click()
     assert page.locator(".logthread").count() == 0
     desk.post("/drop", {"seq": seq, "who": "you"})
+    page.locator("#logresolved").uncheck()
     page.locator("#logclose").click()
 
 
@@ -2339,12 +2353,12 @@ def test_a_file_holding_an_unread_comment_opens_itself(page, desk):
     assert card.get_attribute("data-open") == "false"
     assert card.locator(".body table").count() == 0
 
-    # Opened again, the thread is as wide open as the reader left it: what settled it was the session, and a resolution
-    # they did not make here folds nothing.
+    # Opened again, the thread is folded to its remark: it has been shown once and it is settled, so what is left of it
+    # is a line saying so rather than the whole exchange.
     card.locator(".filehead .grow").click()
     page.wait_for_selector(f"#note-{made} .thread")
     assert page.locator(f"#note-{made} .thread.done").count() == 1
-    assert page.locator(f"#note-{made} .thread.folded").count() == 0
+    assert page.locator(f"#note-{made} .thread.folded").count() == 1
     page.locator("section.file[data-path='added.py'] input[type=checkbox]").uncheck()
 
 
