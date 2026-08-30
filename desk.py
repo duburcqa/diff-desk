@@ -233,7 +233,32 @@ def serve(args):
     if ask("/data") is not None:
         print(f"already serving, page rebuilt: {URL}")
         return
-    serve_diff.main(serve_diff.Source(args.dir, args.base, args.refs))
+    serve_diff.main(serve_diff.Source(args.dir, args.base, args.refs), started_by=args.owner or None)
+
+
+def stop(args):
+    """Stop the desk, which is how one is put down: a signal leaves whoever is reading it with a page that answers
+    nothing, and takes with it every other review the same desk holds.
+
+    An owner names whoever started a desk, so a lifecycle that ends - a shell, a session, a job - stops the desk it
+    opened and leaves alone one that somebody else is still reading.
+    """
+    state = ask("/state")
+    if state is None:
+        print("nothing is serving")
+        return
+    if args.owner and state.get("startedBy") != args.owner:
+        print(f"left running: this desk was not started by {args.owner}")
+        return
+    held = state.get("source")
+    if not args.owner and held is not None and not args.take:
+        shown = ", ".join(held["refs"]) or "every branch ahead"
+        sys.exit(
+            f"the desk is serving {shown} from {held['root']} against {held['base']}; stopping it takes the page "
+            f"away from whoever is reading that. Ask them, or pass --take to stop it anyway."
+        )
+    ask("/stop", {})
+    print("stopped")
 
 
 def resume_from(asked, stopped, waiting, sent):
@@ -437,7 +462,27 @@ job.add_argument(
     action="store_true",
     help="serve this even where a desk is already holding another review, replacing what it shows",
 )
+job.add_argument(
+    "--owner",
+    default="",
+    help="a label for whoever is starting this desk, which 'stop --owner' matches against so that only they put it "
+    "down; anyone may stop an unowned desk",
+)
 job.set_defaults(run=serve)
+
+job = jobs.add_parser(
+    "stop",
+    help="stop the running desk",
+    description="A desk is put down this way rather than by signal: one desk holds every review it was given, so "
+    "killing it takes the page away from everyone reading any of them, with nothing said on either side.",
+)
+job.add_argument(
+    "--owner",
+    default="",
+    help="stop the desk only if it was started under this label, and leave anyone else's running",
+)
+job.add_argument("--take", action="store_true", help="stop it even though it is holding a review someone is reading")
+job.set_defaults(run=stop)
 
 job = jobs.add_parser(
     "watch",

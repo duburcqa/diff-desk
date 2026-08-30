@@ -13,7 +13,7 @@ import urllib.request
 import pytest
 
 import gen_diff_data
-from conftest import FILE_LINES, ROOT, SECOND_EDIT, until
+from conftest import FILE_LINES, ROOT, SECOND_EDIT, free_port, until
 from desk import one_ref
 from serve_diff import is_refusal
 
@@ -1265,6 +1265,53 @@ def test_a_ref_with_nothing_to_review_is_reported_not_served(desk):
     assert "nothing ahead" in outcome["error"]
     # What was being reviewed stays on screen, so a mistyped scan cannot empty the page.
     assert desk.get("/data")["branches"][0]["ref"] == "feature"
+
+
+def test_a_desk_is_put_down_by_whoever_opened_it(repo, tmp_path_factory):
+    home = tmp_path_factory.mktemp("standalone")
+    port = free_port()
+    told = (home / "serve.log").open("w")
+    env = {**os.environ, "DIFF_DESK_HOME": str(home), "DIFF_DESK_PORT": str(port)}
+    running = subprocess.Popen(
+        [
+            *(sys.executable, str(ROOT / "desk.py"), "serve"),
+            *("--dir", str(repo), "--base", "main", "feature", "--owner", "the shell that opened it"),
+        ],
+        cwd=ROOT,
+        env=env,
+        stdout=told,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+    def cli(*words):
+        return subprocess.run(
+            [sys.executable, str(ROOT / "desk.py"), *words], cwd=ROOT, env=env, capture_output=True, text=True
+        )
+
+    def answering():
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/data", timeout=2).read()
+            return True
+        except (urllib.error.URLError, OSError):
+            return False
+
+    try:
+        until(answering)
+        # A desk outlives a lifecycle that is not the one that opened it, since it holds that one's reviews.
+        assert "left running" in cli("stop", "--owner", "some other shell").stdout
+        assert answering()
+        # Asked for with nobody named, a desk holding a review says whose it is rather than going quiet under them.
+        refused = cli("stop")
+        assert refused.returncode != 0
+        assert "--take" in refused.stderr + refused.stdout
+        assert answering()
+        assert "stopped" in cli("stop", "--owner", "the shell that opened it").stdout
+        until(lambda: not answering())
+        assert "nothing is serving" in cli("stop").stdout
+    finally:
+        running.terminate()
+        told.close()
 
 
 def test_a_branch_behind_the_base_shows_the_difference_it_does_have(desk):

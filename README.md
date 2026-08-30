@@ -24,6 +24,7 @@ The page comes up on `127.0.0.1:8787`, each ref a tab, scoped to the whole range
 - **Local branches.** Omit the refs to be offered every branch ahead of the base. The checked-out branch carries its uncommitted work, so a review can start before a commit exists.
 - **Pull requests, by number** - `3243`, `#3243` or `pr/3243`. The head is fetched by number into `refs/diffdesk/pull/<number>`, so neither the fork it lives on nor its branch name has to be known, and a force-push since the last look is picked up. One fetched earlier stays reviewable while GitHub is unreachable.
 - Both are reviewed side by side as tabs, and the page's **Source** panel switches repository, base, branch and pull request without a restart.
+- **Stopping one** is `desk.py stop`, which says whose review it is holding rather than going quiet under whoever is reading it (`--take` stops it anyway). Prefer it to a signal: one desk holds every review it was given. Pass `serve --owner <label>` to name whoever opened it, and `stop --owner <label>` then puts down that desk and leaves anyone else's running - which is how a shell, a job or an editor session can clean up the desk it opened on its way out.
 
 ## Reading a diff
 
@@ -94,7 +95,7 @@ A review is identified by its pull request, not by the ref it is read from. The 
 
 | file | what it is |
 | --- | --- |
-| `desk.py` | the entry point: `serve`, `watch`, `comments`, `reply`, `edit`, `resolve`, `bind`, `sync`, `refs` |
+| `desk.py` | the entry point: `serve`, `stop`, `watch`, `comments`, `reply`, `edit`, `resolve`, `bind`, `sync`, `refs` |
 | `gen_diff_data.py` | turns a git range into the payload a page renders: hunks, digests, pull request threads |
 | `serve_diff.py` | the local server: the page, rescans, file slices, comments, resolutions, pull request posts |
 | `diff_desk_template.html` | the page itself, with `__DIFF_DATA__` and `__BUILD__` substituted at build time |
