@@ -11,6 +11,7 @@ desk.py forget 3                                     let go of the last whisper 
 desk.py edit 3 "what I actually meant ..."           rewrite a comment, keeping what it said before
 desk.py edit 3 --reply 0 "worded better ..."         rewrite one reply of a comment, by its place in the thread
 desk.py bind 3 4 [--local]                           aim comments at the pull request, or keep them local
+desk.py publish 3 4                                  send those comments to it, which nothing else does
 desk.py sync                                         bring back what the pull request holds
 desk.py resolve 3 4 --answer "fixed in abc1234"      answer and close; --reopen puts them back
 desk.py refs --dir <repo> --base <ref>               the branches ahead of a base, and the open pull requests
@@ -331,6 +332,26 @@ def sync(args):
     )
 
 
+def publish(args):
+    """Send the named comments to the pull request, which is the only way anything leaves this desk from here.
+
+    It names what it sends, every time. Recording a comment and binding one both say where a remark is meant to go;
+    neither sends it, and nothing sends it on a timer, so a review written here waits to be asked for.
+    """
+    data = ask("/data")
+    if data is None:
+        sys.exit("nothing is serving")
+    branch = next((entry for entry in data["branches"] if entry["pr"]), None)
+    if branch is None:
+        sys.exit("no branch under review has a pull request")
+    number = branch["pr"]["number"]
+    outcome = ask("/publish", {"repo": data["upstream"], "pr": number, "seq": args.seq})
+    if not outcome.get("ok"):
+        sys.exit(outcome.get("error", "the post was refused"))
+    where = f" {outcome['url']}" if outcome.get("url") else ""
+    print(f"sent {outcome['sent']} comment(s) to PR #{number}{where}")
+
+
 def bind(args):
     outcome = ask("/bind", {"seq": args.seq, "github": not args.local})
     if outcome is None:
@@ -438,6 +459,10 @@ job.set_defaults(run=watch)
 job = jobs.add_parser("comments", help="what has been submitted")
 job.add_argument("--all", action="store_true", help="include the ones already addressed")
 job.set_defaults(run=comments)
+
+job = jobs.add_parser("publish", help="send the named comments to the pull request")
+job.add_argument("seq", nargs="+", type=int, help="the comments to send, by number; nothing is sent unnamed")
+job.set_defaults(run=publish)
 
 job = jobs.add_parser("sync", help="bring back what the pull request holds")
 job.set_defaults(run=sync)

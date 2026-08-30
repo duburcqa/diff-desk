@@ -1634,8 +1634,16 @@
     render();
   }
 
-  async function retryOwed(loud) {
-    const owed = mine().filter((note) => OWED.includes(note.github));
+  // A press sends everything this desk is holding for the pull request; the clock sends only what a send already
+  // attempted and could not land. A remark nobody has pressed send on never leaves on a timer, however it came to be
+  // bound, which is what keeps what is written here from reaching the pull request unasked.
+  const RETRIED = ["failed"];
+
+  const sendWaiting = (loud) => flush(OWED, loud);
+  const retryFailed = () => flush(RETRIED, false);
+
+  async function flush(states, loud) {
+    const owed = mine().filter((note) => states.includes(note.github));
     const request = branch().pr;
     if (!owed.length || !request || !notes.live) {
       if (loud) els.logresult.textContent = request ? "Nothing is waiting." : "This branch has no pull request.";
@@ -2120,7 +2128,7 @@
         mark.addEventListener("click", async () => {
           await post("bind", { seq: [note.seq], github: note.github === "none", ...where() });
           await loadNotes();
-          if (note.github === "none") await retryOwed(false);
+          if (note.github === "none") await sendWaiting(false);
           drawLog();
           render();
         });
@@ -3794,7 +3802,7 @@
     els.log.dataset.open = "false";
   });
   els.logretry.addEventListener("click", async () => {
-    await retryOwed(true);
+    await sendWaiting(true);
   });
   els.logsync.addEventListener("click", () => syncThere(true));
   els.logsend.addEventListener("click", () => sendThreads(alreadyThere()));
@@ -3811,10 +3819,10 @@
     if (!local.length || !branch().pr) return;
     await post("bind", { seq: local.map((note) => note.seq), github: true, ...where() });
     await loadNotes();
-    await retryOwed(true);
+    await sendWaiting(true);
   });
   // Coming back online is the moment a post that could not be made becomes possible again.
-  window.addEventListener("online", () => retryOwed(false));
+  window.addEventListener("online", () => retryFailed());
   els.traydrop.addEventListener("click", () => {
     notes.drafts = [];
     els.traynote.value = "";
@@ -3876,7 +3884,7 @@
     render();
     // A post that could not be made is retried on its own, as long as the browser believes it is connected.
     if (navigator.onLine) {
-      await retryOwed(false);
+      await retryFailed();
       await syncThere(false);
     }
   }

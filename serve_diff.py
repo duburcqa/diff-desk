@@ -19,8 +19,9 @@ Endpoints, all on 127.0.0.1 so nothing is exposed off the machine:
   POST /reply                 {seq, text, who} - add a reply to a comment, from the session or from the reviewer
   POST /resolve               {seq: [...], answer, resolved, who} - close comments, or reopen them
   POST /drop                  {seq, reply, repo, pr} - delete a comment, or only its last reply, here and there
-  POST /publish               {repo, pr, summary, seq, resolved} - post those comments as one review; everything owed
-                              when seq is omitted, which is how a post that did not land is retried
+  POST /publish               {repo, pr, summary, seq, resolved} - post those comments as one review; naming none of
+                              them carries on with what a send already failed at, and never sends what was only bound,
+                              so nothing first reaches a pull request unasked
   POST /send                  {seq, repo, pr} - send one thread to the pull request as it now reads: the remark if it
                               is not there yet, the replies it does not hold, and its resolution when closed here
   POST /sync                  {repo, pr} - bring back what the pull request holds: replies, what it says is resolved,
@@ -1202,17 +1203,22 @@ class Handler(BaseHTTPRequestHandler):
     def _publish(self):
         """Post comments to a pull request as one review, and record where each of them now stands.
 
-        Called with `seq` for a batch just submitted, and without it to clear whatever is still owed, which is what
-        makes a post that did not land recoverable rather than lost.
+        Called with `seq` for what the reader asked to send, and without it to finish what a send already started: a
+        sweep carries what failed on its way out, never what has merely been bound. Binding says where a remark is
+        meant to go one day; it is not a word about sending it now, and reading it as one is how a comment reaches a
+        pull request nobody asked to send it to.
         """
         order = self._body()
         wanted = set(order.get("seq") or [])
+        # Named, a comment goes whatever state it is in - that naming is the asking. Unnamed, only a failed attempt is
+        # carried on with, so nothing first reaches the pull request without somebody saying so.
+        swept = ("pending", "failed") if wanted else ("failed",)
         with CHANGING:
             rows = read_notes()
         owed = [
             row
             for row in rows
-            if row.get("github") in ("pending", "failed")
+            if row.get("github") in swept
             and under_review(row, order)
             and row.get("state") != "deleted"
             and (order.get("resolved") or row.get("state") != "resolved")
