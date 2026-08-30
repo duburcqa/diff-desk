@@ -260,7 +260,10 @@ def test_a_comment_bound_for_github_waits_rather_than_being_lost(desk):
     landed = desk.post("/publish", {"repo": "someone/somewhere", "pr": 1})
     assert landed["ok"] is True
     assert landed["sent"] >= 1
-    assert landed["owed"] == 0
+    # This one is no longer waiting. What the sweep leaves behind is whatever was only bound, which stays waiting until
+    # somebody asks for it by name.
+    still = {row["seq"] for row in desk.get("/comments") if row["github"] in ("pending", "failed")}
+    assert made["seqs"][0] not in still
     posted = {row["seq"]: row for row in desk.get("/comments")}[made["seqs"][0]]
     assert posted["github"] == "posted"
     assert posted["reviewUrl"].endswith("pullrequestreview-42")
@@ -525,6 +528,11 @@ def test_one_review_never_reaches_another_review_comments(desk):
         },
     )
     near = here["seqs"][0]
+
+    # Its first attempt does not land, so the sweep below has one of this review's own to carry: what a sweep picks up
+    # is what a send already failed at.
+    desk.github_answers(code=1, err="dial tcp: lookup api.github.com: no such host")
+    desk.post("/publish", {"repo": "someone/somewhere", "pr": 12, "branch": "feature", "seq": [near]})
 
     # A post for this review must carry only this review's comments, not the one bound for another pull request.
     desk.github_answers(out=json.dumps({"html_url": "https://github.com/someone/somewhere/pull/12#review-1"}))
@@ -1103,9 +1111,38 @@ def test_a_comment_settled_here_is_not_sent_unless_it_is_asked_for(desk):
     assert row["github"] == "pending"
 
     # Asked for, it goes.
-    landed = desk.post("/publish", {"repo": "someone/somewhere", "pr": 14, "branch": "feature", "resolved": True})
+    landed = desk.post(
+        "/publish", {"repo": "someone/somewhere", "pr": 14, "branch": "feature", "resolved": True, "seq": [seq]}
+    )
     assert landed["ok"]
     assert {row["seq"]: row for row in desk.get("/comments")}[seq]["github"] == "posted"
+
+
+def test_a_sweep_carries_a_failure_on_and_leaves_what_was_only_bound(desk):
+    desk.github_answers(code=0, out='{"html_url": "https://github.com/owner/repo/pull/7#r1"}')
+    bound = desk.post(
+        "/comments",
+        {
+            "comments": [
+                {"branch": "feature", "path": "sample.py", "line": 71, "side": "new", "text": "waiting to be asked for"}
+            ],
+            "github": True,
+        },
+    )["seqs"][0]
+    assert {row["seq"]: row for row in desk.get("/comments")}[bound]["github"] == "pending"
+
+    # Binding says where a remark belongs, never that it may leave now, so a sweep passes it by. Read as permission to
+    # send, it is how a comment reaches a pull request nobody asked to send it to.
+    before = len(desk.github_calls())
+    swept = desk.post("/publish", {"repo": "owner/repo", "pr": 7})
+    assert swept["sent"] == 0
+    assert not [call for call in desk.github_calls()[before:] if "waiting to be asked for" in call]
+    assert {row["seq"]: row for row in desk.get("/comments")}[bound]["github"] == "pending"
+
+    # Named, it goes: naming it is the asking.
+    sent = desk.post("/publish", {"repo": "owner/repo", "pr": 7, "seq": [bound]})
+    assert sent["ok"] and sent["sent"] == 1
+    assert {row["seq"]: row for row in desk.get("/comments")}[bound]["github"] == "posted"
 
 
 def test_a_comment_not_bound_for_github_is_never_offered_to_it(desk):
