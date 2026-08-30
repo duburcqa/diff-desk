@@ -198,23 +198,6 @@ def test_dragging_lines_selects_the_range_and_opens_the_box(page, column, upward
     assert page.locator("tr[data-composer='true']").count() == 1
 
 
-def test_a_box_left_open_keeps_what_was_typed_when_another_comment_is_sent(page, desk):
-    card = sample(page)
-    # Two comments written at once: one about the file as a whole, one on a line of it.
-    card.locator(".filehead button[data-tip='Comment on this file']").click()
-    page.locator(".filenote.writing textarea").fill("still thinking about this one")
-    line = card.locator("tr.a[data-line]").first
-    line.locator("td.code").first.hover()
-    line.locator("button.pin").first.click()
-    page.locator("tr[data-composer='true'] textarea").fill("this one is ready")
-
-    page.locator("tr[data-composer='true'] button.solid.direct").click()
-    page.wait_for_function("() => document.querySelectorAll(\"tr[data-composer='true']\").length === 0")
-
-    # The one still being thought about was never sent, and what it holds is the reader's until they say otherwise.
-    assert page.locator(".filenote.writing textarea").input_value() == "still thinking about this one"
-
-
 def test_one_range_covers_removed_and_added_lines_together(page, desk):
     card = sample(page)
     removed = card.locator("tr.d[data-line]").first
@@ -1207,6 +1190,40 @@ def test_a_letter_held_with_a_modifier_is_left_to_the_browser(page):
     page.keyboard.press("Escape")
     for _ in range(page.locator("tr[data-composer='true']").count()):
         page.locator("tr[data-composer='true'] button.ghost").first.click()
+
+
+def test_the_panel_marks_what_holds_something_unread(page, desk):
+    lines = sample(page).locator("tr.a[data-line]")
+    for index, said in ((0, "the one that gets an answer"), (1, "the one that does not")):
+        line = lines.nth(index)
+        line.locator("td.code").first.hover()
+        line.locator("button.pin").first.click()
+        submit(page, said)
+    # The last of each: the desk keeps what every earlier test said, this one included when it is run again.
+    written = list(reversed(desk.get("/comments")))
+    answered = next(note for note in written if note["text"] == "the one that gets an answer")
+
+    page.locator("#logopen").click()
+    page.wait_for_selector("#log[data-open='true']")
+    # Both have been read, so neither is news.
+    # Only the two written here: the desk holds whatever the rest of the suite has said on this branch.
+    quiet = next(note for note in written if note["text"] == "the one that does not")
+    answered_row = page.locator(f"#logrows .logrow[data-seq='{answered['seq']}']")
+    quiet_row = page.locator(f"#logrows .logrow[data-seq='{quiet['seq']}']")
+    answered_row.wait_for()
+    assert answered_row.get_attribute("data-unread") == "false"
+    assert quiet_row.get_attribute("data-unread") == "false"
+
+    desk.cli("reply", str(answered["seq"]), "answered while the reader was elsewhere").communicate(timeout=180)
+    page.wait_for_selector(f"#logrows .logrow[data-seq='{answered['seq']}'][data-unread='true']")
+    assert quiet_row.get_attribute("data-unread") == "false"
+
+    # Asked for, only what is unread is listed. A thread counts as read once it has been in front of the reader, so
+    # what remains listed is what they have not seen, however few that is.
+    page.locator("#logunread").check()
+    assert page.locator("#logrows .logrow[data-unread='false']").count() == 0
+    page.locator("#logunread").uncheck()
+    page.locator("#logclose").click()
 
 
 def test_a_file_can_be_commented_on_as_a_whole(page, desk):
