@@ -2884,9 +2884,10 @@
   }
 
   async function rescan(keep) {
-    const refs = keep ? data.branches.map((entry) => entry.ref) : [...source.picked];
+    // A refresh names no source: it asks the desk for what it is serving, so a page whose source has been replaced
+    // since it was built loads the one in place rather than putting its own back.
+    const order = keep ? {} : { dir: els.srcdir.value, base: els.srcbase.value, refs: [...source.picked] };
     const reading = keep ? { ...state } : { branch: 0, scope: "all", current: 0 };
-    const where = keep ? { dir: data.root, base: data.baseRef } : { dir: els.srcdir.value, base: els.srcbase.value };
     els.srcstatus.textContent = "collecting diffs...";
     // Collecting the diffs takes a moment, so the button says it heard: it reports what it is doing and refuses a
     // second press until it is done.
@@ -2898,7 +2899,7 @@
         await fetch("scan", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...where, refs }),
+          body: JSON.stringify(order),
         })
       ).json();
       if (!outcome.ok) {

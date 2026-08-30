@@ -1314,6 +1314,24 @@ def test_a_desk_is_put_down_by_whoever_opened_it(repo, tmp_path_factory):
         told.close()
 
 
+def test_a_refresh_collects_what_the_desk_serves_rather_than_what_the_page_holds(desk):
+    # A session points the desk at another review while a page built on the first one is open.
+    gen_diff_data.run(desk.repo, "branch", "spur", "feature")
+    try:
+        moved = desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": ["spur"]})
+        assert moved["ok"]
+        assert desk.get("/state")["source"]["refs"] == ["spur"]
+
+        # The page refreshes, naming no source, and finds the review the desk holds rather than reinstating its own.
+        refreshed = desk.post("/scan", {})
+        assert refreshed["ok"]
+        assert [entry["ref"] for entry in refreshed["data"]["branches"]] == ["spur"]
+        assert desk.get("/state")["source"]["refs"] == ["spur"]
+    finally:
+        desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": ["feature"]})
+        gen_diff_data.run(desk.repo, "branch", "-D", "spur")
+
+
 def test_a_branch_behind_the_base_shows_the_difference_it_does_have(desk):
     outcome = desk.post("/scan", {"dir": str(desk.repo), "base": "feature", "refs": ["main"]})
     assert outcome["ok"]
