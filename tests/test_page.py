@@ -1451,10 +1451,14 @@ def test_the_log_reaches_a_comment_and_leaves_what_is_settled_out(page, desk):
     page.locator("#logrows .logrow").filter(has_text=saying).first.click()
     page.locator(f"#note-{made}").wait_for(state="visible")
     assert page.locator("#hideclosed").get_attribute("aria-pressed") == "true"
+    # Gone to in order to be read: a settled thread the reader has been shown is folded away to its outline, and
+    # arriving at it shows every word instead of folding it back under them.
+    assert page.locator(f"#note-{made} .thread.folded").count() == 0
     # The page redraws itself every few seconds, and what the reader was brought to has to survive that: a reveal held
     # on the row alone goes with the row.
     page.evaluate("() => render()")
     page.locator(f"#note-{made}").wait_for(state="visible")
+    assert page.locator(f"#note-{made} .thread.folded").count() == 0
     page.locator("#hideclosed").click()
     page.locator("#logopen").click()
     page.wait_for_selector("#log[data-open='true']")
