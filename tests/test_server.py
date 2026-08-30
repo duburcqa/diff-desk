@@ -1286,7 +1286,12 @@ def test_a_desk_is_put_down_by_whoever_opened_it(repo, tmp_path_factory):
 
     def cli(*words):
         return subprocess.run(
-            [sys.executable, str(ROOT / "desk.py"), *words], cwd=ROOT, env=env, capture_output=True, text=True
+            [sys.executable, str(ROOT / "desk.py"), *words],
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
         )
 
     def answering():

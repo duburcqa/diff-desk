@@ -104,6 +104,10 @@ A review is identified by its pull request, not by the ref it is read from. The 
     pip install pytest pytest-xdist playwright && playwright install chromium firefox webkit
     python3 -m pytest
 
+The workflow lints and formats before it tests, with a pinned ruff, so run the same on every commit:
+
+    pip install pre-commit && pre-commit install
+
 The suite builds its own repository to review and its own desk to serve it, so it touches neither your checkouts nor the network. Nothing is shared between the engines either, so its five groups - one per engine, one for the server, one for the collector - run side by side, about three times quicker:
 
     python3 -m pytest -n 5 --dist loadgroup
