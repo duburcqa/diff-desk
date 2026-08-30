@@ -1226,12 +1226,6 @@
       window.setTimeout(() => els.goto.classList.remove("lost"), 900);
       return false;
     }
-    // Resolved and folded away, or in a file marked reviewed: reach() shows whatever it takes to read the thread.
-    if (note.state === "resolved") {
-      unfolded.add(note.seq);
-      keepUnfolded();
-    }
-    render();
     reach(note);
     els.goto.value = "";
     els.goto.blur();
@@ -1507,6 +1501,13 @@
   }
 
   function reach(note) {
+    // Going to a thread is going to read it, so a resolved one is shown whole for as long as the reader keeps it.
+    // Arriving is what counts as having read it, and a thread left to fold on being read would fold under their eyes.
+    if (note.state === "resolved" && !unfolded.has(note.seq)) {
+      unfolded.add(note.seq);
+      keepUnfolded();
+      render();
+    }
     const card = document.querySelector(`section.file[data-path="${CSS.escape(note.path)}"]`);
     if (!card) return;
     // A file folded away, or hidden because it is reviewed, still holds the comment: it is opened and shown for this.
