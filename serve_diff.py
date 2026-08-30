@@ -82,9 +82,14 @@ class Serving:
     """What is being served, so a page load can collect it again and a page can be told it has moved on.
 
     Named at startup and renamed by every scan, since a scan is how the reader chooses what to review.
+
+    Who started it is kept beside what it holds, so a session on its way out can stop the desk it opened and leave
+    one opened by another session running, with the reviews that session is still reading.
     """
 
     source = None
+    started_by = None
+    server = None
 
 
 HERE = pathlib.Path(__file__).parent
@@ -812,7 +817,9 @@ class Handler(BaseHTTPRequestHandler):
             marked = gen_diff_data.stamp(source.root, source.base, source.refs) if source else None
             # The source, and not only the stamp it hashes to: a session about to serve has to tell a desk showing
             # another review from one showing the review it is itself here for, which a stamp alone cannot say.
-            self._json({"stamp": marked, "source": source._asdict() if source else None})
+            self._json(
+                {"stamp": marked, "source": source._asdict() if source else None, "startedBy": Serving.started_by}
+            )
         elif path == "/lines":
             self._lines(query)
         elif path == "/favicon.ico":
@@ -881,12 +888,22 @@ class Handler(BaseHTTPRequestHandler):
             "/forget": self._forget,
             "/publish": self._publish,
             "/sync": self._sync,
+            "/stop": self._stop,
         }
         serving = routes.get(path)
         if serving is None:
             self._send(404)
             return
         serving()
+
+    def _stop(self):
+        """Stop serving, once the answer is on its way out.
+
+        Shutting down blocks until every request in flight is answered, this one included, so it is asked for from a
+        thread of its own and this handler is left to finish.
+        """
+        self._json({"ok": True})
+        threading.Thread(target=Serving.server.shutdown, daemon=True).start()
 
     def _reviewed(self):
         """Record which files have been read, and which have been unticked.
@@ -1408,10 +1425,12 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-def main(source=None):
+def main(source=None, started_by=None):
     Serving.source = source
+    Serving.started_by = started_by
     print(f"diff desk on http://127.0.0.1:{PORT}/  (comments -> {NOTES})", flush=True)
-    ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+    Serving.server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    Serving.server.serve_forever()
 
 
 if __name__ == "__main__":
