@@ -477,9 +477,7 @@ job = jobs.add_parser(
     "killing it takes the page away from everyone reading any of them, with nothing said on either side.",
 )
 job.add_argument(
-    "--owner",
-    default="",
-    help="stop the desk only if it was started under this label, and leave anyone else's running",
+    "--owner", default="", help="stop the desk only if it was started under this label, and leave anyone else's running"
 )
 job.add_argument("--take", action="store_true", help="stop it even though it is holding a review someone is reading")
 job.set_defaults(run=stop)

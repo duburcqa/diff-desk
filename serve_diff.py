@@ -928,9 +928,15 @@ class Handler(BaseHTTPRequestHandler):
     def _scan(self):
         """Rebuild the payload for the requested repository, base and refs, and rebuild the page around it."""
         order = self._body()
-        root = order.get("dir") or "."
-        base = order.get("base") or "upstream/main"
-        refs = [ref for ref in (order.get("refs") or []) if ref]
+        # A refresh names no source and collects again whatever the desk is serving, so a page built on a source that
+        # has been replaced since loads the one in place instead of putting its own back.
+        serving = Serving.source
+        if order.get("dir") or serving is None:
+            root = order.get("dir") or "."
+            base = order.get("base") or "upstream/main"
+            refs = [ref for ref in (order.get("refs") or []) if ref]
+        else:
+            root, base, refs = serving.root, serving.base, list(serving.refs)
         print(f"SCAN {root} {base} {refs or '(every branch ahead)'}", flush=True)
         Serving.source = Source(root, base, refs)
         try:

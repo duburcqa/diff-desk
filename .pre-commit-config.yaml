@@ -1,0 +1,10 @@
+repos:
+- repo: https://github.com/astral-sh/ruff-pre-commit
+  # Pinned to what the workflow installs: a newer ruff changes both the rules in force and the formatting it expects,
+  # so an unpinned hook passes here and fails there.
+  rev: v0.15.7
+  hooks:
+    # Run the linter.
+    - id: ruff-check
+    # Run the formatter.
+    - id: ruff-format
