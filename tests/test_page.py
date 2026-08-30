@@ -2602,7 +2602,7 @@ def test_the_comments_panel_sends_one_thread_from_its_row_and_every_thread_the_p
         ]
         desk.github_answers(rules=answering)
         for seq in made:
-            assert desk.post("/send", {"seq": seq, "repo": "someone/somewhere", "pr": 42})["ok"]
+            assert desk.post("/publish", {"seq": [seq], "repo": "someone/somewhere", "pr": 42})["ok"]
         for seq in made:
             desk.post("/reply", {"seq": seq, "text": f"answered after the send, {seq}", "who": "session"})
         page.reload(wait_until="load")
