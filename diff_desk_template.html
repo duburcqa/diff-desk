@@ -2586,6 +2586,10 @@
     const row = document.createElement("tr");
     row.className = "noterow";
     row.dataset.composer = "true";
+    row.dataset.path = path;
+    row.dataset.line = String(line);
+    row.dataset.endLine = String(endLine);
+    row.dataset.side = side;
     const cell = document.createElement("td");
     cell.colSpan = 5;
     const box = document.createElement("div");
@@ -3042,7 +3046,51 @@
   const chevron = '<svg class="chev" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5"/></svg>';
   const tickMark = '<svg class="tick" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 6.5 4.7 9 10 3.5"/></svg>';
 
+  // A box holds what the reader has typed and nothing else does, so a redraw carries every open one across rather
+  // than taking the text down with the card it hung on. An empty box is left behind, having nothing to lose.
+  function heldBoxes() {
+    const held = [];
+    for (const box of document.querySelectorAll(".filenote.writing")) {
+      const card = box.closest("section.file");
+      if (card) held.push({ path: card.dataset.path, text: box.querySelector("textarea").value });
+    }
+    for (const row of document.querySelectorAll("tr[data-composer='true']")) {
+      held.push({
+        path: row.dataset.path,
+        line: Number(row.dataset.line),
+        endLine: Number(row.dataset.endLine),
+        side: row.dataset.side,
+        text: row.querySelector("textarea").value,
+      });
+    }
+    return held.filter((one) => one.text.trim());
+  }
+
+  function putBoxesBack(held) {
+    for (const one of held) {
+      const card = document.querySelector(`section.file[data-path="${CSS.escape(one.path)}"]`);
+      if (!card) continue;
+      if (one.line === undefined) {
+        const drew = drawn.get(card);
+        if (!drew) continue;
+        openFileComposer(card, drew.file);
+        const field = card.querySelector(".filenote.writing textarea");
+        if (field) field.value = one.text;
+        continue;
+      }
+      // The lines of a file out of reach are not built, and a box cannot hang on a row that is not there.
+      const anchor = [...card.querySelectorAll("tr[data-line]")].find(
+        (row) => row.dataset.side === one.side && Number(row.dataset.line) === one.endLine
+      );
+      if (!anchor) continue;
+      openComposer(anchor, one.path, one.line, one.endLine, one.side);
+      const field = anchor.nextElementSibling && anchor.nextElementSibling.querySelector("textarea");
+      if (field) field.value = one.text;
+    }
+  }
+
   function render() {
+    const boxes = heldBoxes();
     const { files, commit } = view();
     // Counted over what the filter leaves, so the header describes the files the reader can actually reach; how many
     // it holds back is said in the tooltip, which is the only place a hidden file can still be accounted for.
@@ -3089,6 +3137,7 @@
     shown.forEach((file, index) => els.main.append(card(file, index)));
     settleNear();
     for (const wrap of els.main.querySelectorAll("section.file")) nearby.observe(wrap);
+    putBoxesBack(boxes);
     fitNotes();
     markCurrent();
     paintSel();
