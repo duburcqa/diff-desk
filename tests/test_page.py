@@ -198,6 +198,23 @@ def test_dragging_lines_selects_the_range_and_opens_the_box(page, column, upward
     assert page.locator("tr[data-composer='true']").count() == 1
 
 
+def test_a_box_left_open_keeps_what_was_typed_when_another_comment_is_sent(page, desk):
+    card = sample(page)
+    # Two comments written at once: one about the file as a whole, one on a line of it.
+    card.locator(".filehead button[data-tip='Comment on this file']").click()
+    page.locator(".filenote.writing textarea").fill("still thinking about this one")
+    line = card.locator("tr.a[data-line]").first
+    line.locator("td.code").first.hover()
+    line.locator("button.pin").first.click()
+    page.locator("tr[data-composer='true'] textarea").fill("this one is ready")
+
+    page.locator("tr[data-composer='true'] button.solid.direct").click()
+    page.wait_for_function("() => document.querySelectorAll(\"tr[data-composer='true']\").length === 0")
+
+    # The one still being thought about was never sent, and what it holds is the reader's until they say otherwise.
+    assert page.locator(".filenote.writing textarea").input_value() == "still thinking about this one"
+
+
 def test_one_range_covers_removed_and_added_lines_together(page, desk):
     card = sample(page)
     removed = card.locator("tr.d[data-line]").first
