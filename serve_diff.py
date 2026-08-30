@@ -19,11 +19,10 @@ Endpoints, all on 127.0.0.1 so nothing is exposed off the machine:
   POST /reply                 {seq, text, who} - add a reply to a comment, from the session or from the reviewer
   POST /resolve               {seq: [...], answer, resolved, who} - close comments, or reopen them
   POST /drop                  {seq, reply, repo, pr} - delete a comment, or only its last reply, here and there
-  POST /publish               {repo, pr, summary, seq, resolved} - post those comments as one review; naming none of
-                              them carries on with what a send already failed at, and never sends what was only bound,
-                              so nothing first reaches a pull request unasked
-  POST /send                  {seq, repo, pr} - send one thread to the pull request as it now reads: the remark if it
-                              is not there yet, the replies it does not hold, and its resolution when closed here
+  POST /publish               {repo, pr, summary, seq, resolved} - send those threads whole: the remark if it is not
+                              there yet, the replies the pull request does not hold, and the resolution of one closed
+                              here. Naming none of them carries on with what a send already failed at, and never sends
+                              what was only bound, so nothing first reaches a pull request unasked
   POST /sync                  {repo, pr} - bring back what the pull request holds: replies, what it says is resolved,
                               and the comments written there that this desk has none of
 
@@ -277,6 +276,20 @@ class Sent(NamedTuple):
     sent: list
     resolved: bool
     trouble: str
+
+
+def owes_there(row):
+    """Whether a thread may still have something of this desk's to carry: a reply the pull request has not been told,
+    or a resolution made here. A whisper is written for this side of the desk and is no part of what a thread owes.
+
+    Asked before the pull request is read, so a remark with nothing written under it costs no look at the threads and
+    cannot be held to have failed for want of one. It answers on what is written here alone, and errs towards looking:
+    whether a resolution is really owed is the thread's word, `prResolve` being only what this desk was last told, and
+    a desk that believed a resolution had gone would never ask again.
+    """
+    if any(not answer.get("whisper") and answer.get("github") != "posted" for answer in row.get("replies") or ()):
+        return True
+    return row.get("state") == "resolved"
 
 
 def thread_of(threads, text):
@@ -867,7 +880,6 @@ class Handler(BaseHTTPRequestHandler):
             "/drop": self._drop,
             "/forget": self._forget,
             "/publish": self._publish,
-            "/send": self._send_thread,
             "/sync": self._sync,
         }
         serving = routes.get(path)
@@ -1201,126 +1213,132 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": True, "seq": seq, "reply": last_only, "deleted": gone})
 
     def _publish(self):
-        """Post comments to a pull request as one review, and record where each of them now stands.
+        """Send threads to a pull request: their remarks, the replies it does not yet hold, and their resolutions.
 
         Called with `seq` for what the reader asked to send, and without it to finish what a send already started: a
         sweep carries what failed on its way out, never what has merely been bound. Binding says where a remark is
         meant to go one day; it is not a word about sending it now, and reading it as one is how a comment reaches a
         pull request nobody asked to send it to.
+
+        A thread goes out whole, and that is the only sending there is. Naming one already on the pull request carries
+        what has been written in it since, so there is one door out rather than two answering for different parts of
+        the same thread - and one answer for what became of it.
         """
         order = self._body()
         wanted = set(order.get("seq") or [])
-        # Named, a comment goes whatever state it is in - that naming is the asking. Unnamed, only a failed attempt is
-        # carried on with, so nothing first reaches the pull request without somebody saying so.
-        swept = ("pending", "failed") if wanted else ("failed",)
         with CHANGING:
             rows = read_notes()
-        owed = [
+        # Named, a thread goes whatever state it is in - naming it is the asking. Unnamed, only a failed attempt is
+        # carried on with, so nothing first reaches the pull request without somebody saying so.
+        chosen = [
             row
             for row in rows
-            if row.get("github") in swept
-            and under_review(row, order)
+            if under_review(row, order)
             and row.get("state") != "deleted"
-            and (order.get("resolved") or row.get("state") != "resolved")
+            and (
+                row["seq"] in wanted
+                if wanted
+                else row.get("github") == "failed" and (order.get("resolved") or row.get("state") != "resolved")
+            )
         ]
-        sending = [row for row in owed if row["seq"] in wanted] if wanted else owed
-        if not sending:
-            self._json({"ok": True, "sent": 0, "owed": 0})
+        if wanted and not chosen:
+            self._json({"ok": False, "error": f"no comment numbered {', '.join(map(str, sorted(wanted)))}"})
             return
-        landed, url, error, refused = post_review(order["repo"], order["pr"], order.get("summary"), sending)
+        if not chosen:
+            self._json({"ok": True, "sent": 0, "owed": 0, "replies": 0, "resolved": 0})
+            return
+        landed, url, error, missed = self._put_remarks(order, chosen)
+        carrying = [row for row in chosen if row["seq"] not in missed and owes_there(row)]
+        replies, resolved, trouble = self._carry_threads(order, carrying)
+        with CHANGING:
+            rows = read_notes()
+        still = len([row for row in rows if row.get("github") in ("pending", "failed") and under_review(row, order)])
+        told = f"PUBLISHED {len(landed)} comment(s), {replies} reply(ies)" if landed or replies else "PUBLISHED nothing"
+        print(f"{told} ({still} still owed) {url}".rstrip(), flush=True)
+        self._json(
+            {
+                "ok": not missed and not trouble,
+                "url": url,
+                "error": error or trouble,
+                "sent": len(landed),
+                "owed": still,
+                "replies": replies,
+                "resolved": resolved,
+            }
+        )
+
+    def _put_remarks(self, order, chosen):
+        """Put on the pull request the remarks of these threads that are not there yet, and record where each stands.
+
+        A remark written on the pull request is its author's word and is already there, so what this desk sends of such
+        a thread is only what this desk wrote in it.
+        """
+        posting = [row for row in chosen if not row.get("who") and row.get("github") != "posted"]
+        if not posting:
+            return set(), "", "", set()
+        went, url, error, refused = post_review(order["repo"], order["pr"], order.get("summary"), posting)
         # Comments go out one at a time when they go out without a review, so a failure part way leaves the ones
         # already on the pull request standing as posted rather than owed again.
-        marked = set(landed)
-        owed = {note["seq"] for note in sending} - marked
+        landed = set(went)
+        missed = {row["seq"] for row in posting} - landed
         # Read again now the call is over: comments recorded while it ran must not be written away.
         with changing() as rows:
             for row in rows:
-                if row["seq"] not in marked and row["seq"] not in owed:
-                    continue
-                if row["seq"] in marked:
+                if row["seq"] in landed:
                     row["github"] = "posted"
                     row["reviewUrl"] = url
                     row.pop("error", None)
-                else:
+                elif row["seq"] in missed:
                     row["github"] = "refused" if refused else "failed"
                     row["error"] = error
+                else:
+                    continue
                 # Where it was sent, so a later sweep for another pull request leaves it alone.
                 row["prRepo"], row["prNumber"] = order["repo"], order["pr"]
                 touched(rows, row, "session")
-            waiting = [row for row in rows if row.get("github") in ("pending", "failed")]
-            still = len([row for row in waiting if under_review(row, order)])
-        told = f"PUBLISHED {len(marked)} comment(s) {url}" if marked else f"PUBLISH FAILED {error}"
-        print(f"{told} ({still} still owed)", flush=True)
-        self._json({"ok": not owed, "url": url, "error": error, "sent": len(marked), "owed": still})
+        return landed, url, error, missed
 
-    def _send_thread(self):
-        """Send one thread to the pull request, in the state it is in when the reader asks.
+    def _carry_threads(self, order, carrying):
+        """Carry out what these threads owe the pull request: the replies it does not hold, and their resolutions.
 
-        What goes out is this thread as it now reads: the remark if it is this desk's and not there yet, every reply the
-        thread does not hold, and its resolution when it is closed here. A reply written after this has answered waits
-        for the reader to ask again - what leaves this desk is their decision, never a consequence of somebody writing
-        in a thread.
+        Every thread is read in one look at the pull request and asked for in one request, so sending several costs
+        what sending one does.
         """
-        order = self._body()
-        with CHANGING:
-            rows = read_notes()
-        found = next((row for row in rows if row["seq"] == order.get("seq")), None)
-        if found is None or found.get("state") == "deleted":
-            self._json({"ok": False, "error": f"no comment numbered {order.get('seq')}"})
-            return
-        # A remark written on the pull request is its author's word and is already there, so what this desk sends of
-        # that thread is what this desk wrote in it: the replies made here, and its resolution.
-        if not found.get("who") and found.get("github") != "posted":
-            trouble = self._post_remark(order, found)
-            if trouble:
-                print(f"SEND FAILED {trouble}", flush=True)
-                self._json({"ok": False, "error": trouble, "sent": 0, "resolved": False})
-                return
+        if not carrying:
+            return 0, 0, ""
         reviewed, trouble = review_threads(order["repo"], order["pr"])
-        thread = None if reviewed is None else thread_of(reviewed.threads, found["text"])
-        if thread is None:
-            trouble = trouble or NOWHERE
-            # Written onto the comment, so the reader sees on the thread why the last send did not land: nothing sweeps
-            # up after them, and a failure said only in a log they may not have open is a failure said nowhere.
-            with changing() as fresh:
-                for row in fresh:
-                    if row["seq"] == found["seq"]:
-                        note_trouble(row, trouble)
-                        touched(fresh, row, "session")
-            print(f"SEND FAILED {trouble}", flush=True)
-            self._json({"ok": False, "error": trouble, "sent": 0, "resolved": False})
-            return
-
-        going = going_out(found, thread["comments"]["nodes"])
-        wanted = owed_by(found, thread, going)
-        step = sent_out(wanted, carry_out(order["repo"], order["pr"], wanted))
+        owing, plans = [], []
+        for row in carrying:
+            thread = None if reviewed is None else thread_of(reviewed.threads, row["text"])
+            if thread is None:
+                trouble = trouble or NOWHERE
+                # Written onto the comment, so the reader sees on the thread why the last send did not land: nothing
+                # sweeps up after them, and a failure said only in a log they may not have open is said nowhere.
+                with changing() as fresh:
+                    for held in fresh:
+                        if held["seq"] == row["seq"]:
+                            note_trouble(held, trouble)
+                            touched(fresh, held, "session")
+                continue
+            going = going_out(row, thread["comments"]["nodes"])
+            asked = owed_by(row, thread, going)
+            plans.append((row["seq"], thread, going, len(owing), len(asked)))
+            owing.extend(asked)
+        answers = carry_out(order["repo"], order["pr"], owing)
+        replies, resolved = 0, 0
         with changing() as fresh:
-            for row in fresh:
-                if row["seq"] == found["seq"]:
-                    settle_sent(row, thread, going, step)
-                    touched(fresh, row, "session")
-        told = f"[{found['seq']}] {len(step.sent)} reply(ies)" + (", resolved there" if step.resolved else "")
-        print(f"SENT {told}", flush=True)
-        self._json({"ok": not step.trouble, "error": step.trouble, "sent": len(step.sent), "resolved": step.resolved})
-
-    def _post_remark(self, order, found):
-        """Put the remark that opens a thread on the pull request, and say why it did not go when it did not."""
-        landed, url, error, refused = post_review(order["repo"], order["pr"], order.get("summary"), [found])
-        landed = bool(landed)
-        with changing() as fresh:
-            for row in fresh:
-                if row["seq"] != found["seq"]:
-                    continue
-                row["github"] = "posted" if landed else "refused" if refused else "failed"
-                # Where it was sent, so a later sweep for another pull request leaves it alone.
-                row["prRepo"], row["prNumber"] = order["repo"], order["pr"]
-                if landed:
-                    row["reviewUrl"] = url
-                    row.pop("error", None)
-                else:
-                    row["error"] = error
-                touched(fresh, row, "session")
-        return "" if landed else error
+            for seq, thread, going, at, count in plans:
+                step = sent_out(owing[at : at + count], answers[at : at + count])
+                replies += len(step.sent)
+                resolved += 1 if step.resolved else 0
+                trouble = trouble or step.trouble
+                for held in fresh:
+                    if held["seq"] == seq:
+                        settle_sent(held, thread, going, step)
+                        touched(fresh, held, "session")
+        if replies or resolved:
+            print(f"SENT {replies} reply(ies)" + (f", {resolved} resolved there" if resolved else ""), flush=True)
+        return replies, resolved, trouble
 
     def _sync(self):
         """Bring this desk and the pull request to the same state.

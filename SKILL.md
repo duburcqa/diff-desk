@@ -55,7 +55,7 @@ Nothing said here has left the desk until the reader sends the thread, so an ans
 
 A comment brought in that way is answered and resolved like any other, and is the one kind that cannot be reworded or deleted from here: the remark is its author's, on the copy everyone reads.
 
-Nothing a session writes reaches the pull request. `desk.py sync` only brings back what the pull request holds; sending a thread out - the remark, the replies it does not hold, its resolution - is a press on that thread's **Sync**, on the thread itself or on its row in the Comments panel, and the reader's alone. The panel also sends every thread already on the pull request at once. So working through a review leaves no trace there unless they put it there, and a reply written after they sent a thread waits for them to send it again - a resolution too: closing a thread here is local until sent.
+Nothing a session writes reaches the pull request. `desk.py sync` only brings back what the pull request holds; sending a thread out - the remark, the replies it does not hold, its resolution - is a press on that thread's **Sync**, on the thread itself or on its row in the Comments panel, and the reader's alone. A thread goes out whole and by that one door, so `desk.py publish <seq...>` sends exactly what a press sends. The panel also sends every thread already on the pull request at once. So working through a review leaves no trace there unless they put it there, and a reply written after they sent a thread waits for them to send it again - a resolution too: closing a thread here is local until sent.
 
 ## Behaviour to know
 

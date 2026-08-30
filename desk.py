@@ -11,7 +11,7 @@ desk.py forget 3                                     let go of the last whisper 
 desk.py edit 3 "what I actually meant ..."           rewrite a comment, keeping what it said before
 desk.py edit 3 --reply 0 "worded better ..."         rewrite one reply of a comment, by its place in the thread
 desk.py bind 3 4 [--local]                           aim comments at the pull request, or keep them local
-desk.py publish 3 4                                  send those comments to it, which nothing else does
+desk.py publish 3 4                                  send those threads to it whole, which nothing else does
 desk.py sync                                         bring back what the pull request holds
 desk.py resolve 3 4 --answer "fixed in abc1234"      answer and close; --reopen puts them back
 desk.py refs --dir <repo> --base <ref>               the branches ahead of a base, and the open pull requests
@@ -349,7 +349,9 @@ def publish(args):
     if not outcome.get("ok"):
         sys.exit(outcome.get("error", "the post was refused"))
     where = f" {outcome['url']}" if outcome.get("url") else ""
-    print(f"sent {outcome['sent']} comment(s) to PR #{number}{where}")
+    carried = f", {outcome['replies']} reply(ies)" if outcome.get("replies") else ""
+    closed = f", {outcome['resolved']} resolved there" if outcome.get("resolved") else ""
+    print(f"sent {outcome['sent']} comment(s){carried}{closed} to PR #{number}{where}")
 
 
 def bind(args):

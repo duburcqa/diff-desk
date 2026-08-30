@@ -1543,16 +1543,13 @@
     const request = branch().pr;
     if (!request || !held.length) return;
     els.logresult.textContent = `Sending ${held.length} thread(s) to PR #${request.number}...`;
-    let sent = 0;
-    let refused = "";
-    for (const note of held) {
-      const outcome = await post("send", { seq: note.seq, ...where() });
-      if (outcome.ok) sent += 1;
-      else refused = refused || outcome.error || "GitHub unreachable";
-    }
+    // Asked for in one request, all of them: the pull request is read once and answered once however many threads go,
+    // where a thread at a time paid for the whole round trip each.
+    const outcome = await post("publish", { seq: held.map((note) => note.seq), ...where() });
+    const refused = outcome.ok ? "" : outcome.error || "GitHub unreachable";
     els.logresult.textContent = refused
-      ? `Sent ${sent} of ${held.length}: ${refused}`
-      : `Sent ${sent} thread(s) to PR #${request.number}`;
+      ? `Could not send every thread: ${refused}`
+      : `Sent ${held.length} thread(s) to PR #${request.number}`;
     if (refused) announce("sync", `PR #${request.number}`, refused);
     await loadNotes();
     drawLog();
@@ -2355,7 +2352,7 @@
         out.textContent = "Sync";
         out.title = `Send ${owes} to PR #${branch().pr.number}`;
         out.addEventListener("click", async () => {
-          const outcome = await post("send", { seq: note.seq, ...where() });
+          const outcome = await post("publish", { seq: [note.seq], ...where() });
           if (!outcome.ok) announce("sync", `PR #${branch().pr.number}`, outcome.error || "GitHub unreachable");
           await loadNotes();
           drawLog();
