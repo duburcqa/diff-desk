@@ -707,6 +707,9 @@
   .logrow:hover { border-color: var(--accent); }
   .logrow[data-unread="true"] { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
   .logrow[data-unread="true"] b { color: var(--accent); }
+  .logthread { border: 1px solid var(--rule); border-radius: 6px; background: var(--surface-sunk); overflow: hidden; }
+  .logthread table { width: 100%; border-collapse: collapse; }
+  .logthread .noterow td { padding: 0; }
   .logrow[data-state="resolved"] { background: var(--add-bg); border-color: color-mix(in srgb, var(--add-ink) 35%, transparent); }
   .logrow b { flex: none; font-family: var(--mono); font-size: 11px; }
   .logrow .said { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
@@ -1450,7 +1453,10 @@
       // Most recently touched first, threads and their replies together: a reply carries no batch of its own, so this
       // is where the answer just written into a batch of long ago is found.
       const moved = [...rows].sort((one, other) => (other.event || 0) - (one.event || 0));
-      for (const note of moved) els.logrows.append(logRow(note, keys));
+      for (const note of moved) {
+        els.logrows.append(logRow(note, keys));
+        if (unmoored === note.seq) els.logrows.append(panelThread(note));
+      }
       if (!moved.length) drawEmpty(all);
       return;
     }
@@ -1474,7 +1480,10 @@
       title.append(name, size);
       group.append(title);
       els.logrows.append(group);
-      for (const note of held) group.append(logRow(note, keys));
+      for (const note of held) {
+        group.append(logRow(note, keys));
+        if (unmoored === note.seq) group.append(panelThread(note));
+      }
     }
     if (!rows.length) drawEmpty(all);
   }
@@ -1570,6 +1579,21 @@
     render();
   }
 
+  // The thread a reader opened in the panel, for a comment with nowhere to be gone to. Held by its number rather than
+  // as an element, so the panel builds it again on every draw and an answer written while it is open reaches it.
+  let unmoored = null;
+
+  function panelThread(note) {
+    const holder = document.createElement("div");
+    holder.className = "logthread";
+    const table = document.createElement("table");
+    const body = document.createElement("tbody");
+    body.append(noteRow(note));
+    table.append(body);
+    holder.append(table);
+    return holder;
+  }
+
   function unread(note) {
     return !(note.seq in heard) || (note.replies || []).length > heard[note.seq];
   }
@@ -1619,7 +1643,17 @@
       });
       item.append(out);
     }
-    item.addEventListener("click", () => reach(note));
+    item.addEventListener("click", () => {
+      // A thread stands on a change: one written on a change since undone, or on a file the reader has filtered away,
+      // has nowhere to be gone to, and a row that answers a press with nothing reads as broken. It opens here instead.
+      if (document.querySelector(`section.file[data-path="${CSS.escape(note.path)}"]`)) {
+        reach(note);
+        return;
+      }
+      unmoored = unmoored === note.seq ? null : note.seq;
+      drawLog();
+    });
+
     return item;
   }
 
