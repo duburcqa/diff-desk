@@ -168,6 +168,21 @@ def fetch_pull(root, upstream, number):
     return local, request
 
 
+def desk_version():
+    """What this desk is, as a digest of the code serving it, so a page can tell it is behind the tool.
+
+    A page holds the script it was rendered with, and serving fast-forwards the desk and restarts into whatever has
+    been published since. Nothing about the review changes when that happens, so the branch stamp says nothing, and
+    the reader is left pressing a page that was fixed hours ago.
+    """
+    here = pathlib.Path(__file__).parent
+    said = hashlib.sha1()
+    for name in ("diff_desk_template.html", "gen_diff_data.py", "serve_diff.py", "desk.py"):
+        held = here / name
+        said.update(held.read_bytes() if held.exists() else b"")
+    return said.hexdigest()[:12]
+
+
 def render_page(template, payload):
     """The page as served: the payload and the grammar inlined, stamped with the moment it was built.
 
@@ -297,6 +312,7 @@ def collect(root, base, refs, upstream=None):
         "branches": [],
     }
     data["stamp"] = stamp(root, base, refs)
+    data["desk"] = desk_version()
     for wanted in refs:
         number = pull_number(wanted)
         request = None

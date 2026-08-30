@@ -818,7 +818,12 @@ class Handler(BaseHTTPRequestHandler):
             # The source, and not only the stamp it hashes to: a session about to serve has to tell a desk showing
             # another review from one showing the review it is itself here for, which a stamp alone cannot say.
             self._json(
-                {"stamp": marked, "source": source._asdict() if source else None, "startedBy": Serving.started_by}
+                {
+                    "stamp": marked,
+                    "desk": gen_diff_data.desk_version(),
+                    "source": source._asdict() if source else None,
+                    "startedBy": Serving.started_by,
+                }
             )
         elif path == "/lines":
             self._lines(query)
