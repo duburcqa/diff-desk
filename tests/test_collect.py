@@ -139,6 +139,25 @@ def test_a_branch_the_base_moved_past_shows_only_its_own_work(repo):
         gen_diff_data.run(repo, "reset", "-q", "--hard", "HEAD~1")
 
 
+def test_a_branch_the_base_has_taken_in_is_not_offered_again(repo):
+    gen_diff_data.run(repo, "checkout", "-q", "main")
+    # The base takes the work in as one commit of its own, which is what a squashed merge leaves behind: the same
+    # content, under none of the commits the branch carries.
+    gen_diff_data.run(repo, "merge", "--squash", "feature")
+    gen_diff_data.run(repo, "commit", "-q", "-m", "the work, landed")
+    try:
+        assert gen_diff_data.collect(str(repo), "main", ["feature"])["branches"] == []
+        # Work of its own the base cannot have keeps it reviewable.
+        gen_diff_data.run(repo, "checkout", "-q", "feature")
+        (repo / "sample.py").write_text("written after the merge\n")
+        entry = gen_diff_data.collect(str(repo), "main", ["feature"])["branches"][0]
+        assert [row["path"] for row in entry["files"]] == ["sample.py"]
+    finally:
+        gen_diff_data.run(repo, "checkout", "-q", "--", "sample.py")
+        gen_diff_data.run(repo, "checkout", "-q", "main")
+        gen_diff_data.run(repo, "reset", "-q", "--hard", "HEAD~1")
+
+
 def test_the_page_is_built_around_the_payload(payload):
     page = gen_diff_data.render_page("<b>__BUILD__</b><script>__DIFF_DATA__</script>", payload)
     assert "__DIFF_DATA__" not in page and "__BUILD__" not in page

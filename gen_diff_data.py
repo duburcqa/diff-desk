@@ -310,20 +310,28 @@ def collect(root, base, refs, upstream=None):
             commits.append(
                 {"sha": sha, "subject": subject, "files": parse(run(root, "show", "--format=", "--unified=3", sha))}
             )
-        # A ref is read from where it forked, so a base that moved on since does not appear in it backwards. One the
-        # base already holds in full has only the base to be read against, which is the difference it has.
         fork = run(root, "merge-base", base, ref).strip()
-        if fork == run(root, "rev-parse", ref).strip():
-            fork = base
-        # The checked-out branch is shown as it stands on disk, uncommitted work included.
-        whole = (
-            run(root, "diff", "--unified=3", fork)
-            if ref == current
-            else run(root, "diff", "--unified=3", fork, ref)
-        )
+        # What the ref has committed, read from the ref rather than from disk, so work saved there says nothing about
+        # where the base stands.
+        touched = [row for row in run(root, "diff", "--name-only", fork, ref).split("\n") if row]
+        carried = bool(touched) and not run(root, "diff", "--name-only", base, ref, "--", *touched).strip()
+        if carried:
+            # The base stands where this ref stands everywhere it touched, so it has taken the work in, squashed or
+            # rebased or not. What is left to review is what no commit carries, and reading from the fork point would
+            # hand the base its own work back as though it were new.
+            whole = run(root, "diff", "--unified=3", "HEAD") if ref == current else ""
+        else:
+            # A ref is read from where it forked, so a base that moved on since does not appear in it backwards. One
+            # carrying no commit of its own has only the base to be read against, which is the difference it has.
+            start = fork if commits else base
+            whole = (
+                run(root, "diff", "--unified=3", start)
+                if ref == current
+                else run(root, "diff", "--unified=3", start, ref)
+            )
         files = parse(whole)
-        # A ref holding neither a commit nor an uncommitted change has nothing to review, so it is not offered.
-        if not commits and not files:
+        # A ref that differs from the base nowhere has nothing to review, whatever it carries in commits.
+        if not files:
             continue
         data["branches"].append(
             {
