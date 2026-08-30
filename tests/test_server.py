@@ -1434,12 +1434,22 @@ def test_a_watch_on_one_review_leaves_what_is_said_about_the_others(desk):
         # Started past everything already said, so what this test says is the only thing that can wake it.
         spoken = max((row["event"] for row in desk.get("/comments")), default=0)
         stopped.unlink(missing_ok=True)
-        watching = desk.cli("watch", "--branch", "feature", "--once", "--every", "0.2", "--since", str(spoken), "--timeout", "25")
+        watching = desk.cli(
+            "watch", "--branch", "feature", "--once", "--every", "0.2", "--since", str(spoken), "--timeout", "25"
+        )
         try:
             # One desk holds every review it was given. What is said about another is another session's to answer.
             desk.post(
                 "/comments",
-                [{"branch": "elsewhere", "path": "sample.py", "line": 71, "side": "new", "text": "on the other review"}],
+                [
+                    {
+                        "branch": "elsewhere",
+                        "path": "sample.py",
+                        "line": 71,
+                        "side": "new",
+                        "text": "on the other review",
+                    }
+                ],
             )
             desk.post(
                 "/comments",
@@ -1454,9 +1464,9 @@ def test_a_watch_on_one_review_leaves_what_is_said_about_the_others(desk):
         # if a cursor shared between them had been carried past it.
         # Reading where a watch of that review stopped, which is nowhere: told from the one just held on this review,
         # it hears what was said. Sharing one cursor between them, it would be carried past it and hear nothing.
-        other = desk.cli(
-            "watch", "--branch", "elsewhere", "--once", "--every", "0.2", "--timeout", "25"
-        ).communicate(timeout=40)[0]
+        other = desk.cli("watch", "--branch", "elsewhere", "--once", "--every", "0.2", "--timeout", "25").communicate(
+            timeout=40
+        )[0]
         assert "on the other review" in other
     finally:
         if kept is None:

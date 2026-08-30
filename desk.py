@@ -235,6 +235,18 @@ def serve(args):
     serve_diff.main(serve_diff.Source(args.dir, args.base, args.refs))
 
 
+def resume_from(asked, stopped, waiting, sent):
+    """Where a watch picks up: what it was told to read from, else where the last one stopped, else before the oldest
+    thing still open, else the end of what has been said."""
+    if asked is not None:
+        return asked
+    if stopped is not None:
+        return stopped
+    if waiting:
+        return min(waiting) - 1
+    return max((row.get("event", row["seq"]) for row in sent), default=0)
+
+
 def watch(args):
     """Block until the reviewer says something, then print it. This is how a session picks up a review.
 
@@ -257,15 +269,7 @@ def watch(args):
     # Anything still open is unaddressed, whenever it arrived, so a first watch starts before it rather than after: a
     # cursor set to the end swallows whatever was written while the last batch was being worked on.
     waiting = [row.get("event", row["seq"]) for row in sent if row.get("state") == "open"]
-    stopped = heard_upto(branches)
-    if args.since is not None:
-        since = args.since
-    elif stopped is not None:
-        since = stopped
-    elif waiting:
-        since = min(waiting) - 1
-    else:
-        since = max((row.get("event", row["seq"]) for row in sent), default=0)
+    since = resume_from(args.since, heard_upto(branches), waiting, sent)
     # A watch outlives the desk it was armed against: a restarted desk carries whatever the tool has become, wording
     # and all, so one armed against the run before it is reading something that no longer exists.
     running = serving()
@@ -275,7 +279,8 @@ def watch(args):
         stop_at(since, running, branches)
         print("the desk has been restarted since this watch was armed; arm it again", flush=True)
         return
-    print(f"watching {', '.join(branches) if branches else 'every review'} for anything said past event {since}", flush=True)
+    reviews = ", ".join(branches) if branches else "every review"
+    print(f"watching {reviews} for anything said past event {since}", flush=True)
     stop_at(since, running, branches)
     deadline = time.monotonic() + args.timeout if args.timeout else None
     # Never returns of its own accord: a reviewer says one thing, then another, and a watch that stopped at the first
