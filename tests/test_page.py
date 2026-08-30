@@ -1251,9 +1251,7 @@ def test_a_thread_with_nowhere_to_go_is_read_in_the_panel(page, desk):
     desk.cli("reply", str(seq), "and answered afterwards").communicate(timeout=180)
     # Resolved, which is how a thread reads once it has been dealt with, and how it is folded away to an outline.
     desk.post("/resolve", {"seq": [seq], "resolved": True, "who": "you"})
-    page.wait_for_function(
-        f"() => ((mine().find((note) => note.seq === {seq}) || {{}}).replies || []).length === 1"
-    )
+    page.wait_for_function(f"() => ((mine().find((note) => note.seq === {seq}) || {{}}).replies || []).length === 1")
 
     page.locator("#logopen").click()
     page.wait_for_selector("#log[data-open='true']")
