@@ -122,6 +122,23 @@ def test_the_checked_out_branch_shows_its_uncommitted_work(repo):
         gen_diff_data.run(repo, "checkout", "--", "sample.py")
 
 
+def test_a_branch_the_base_moved_past_shows_only_its_own_work(repo):
+    gen_diff_data.run(repo, "checkout", "-q", "main")
+    (repo / "elsewhere.py").write_text("the base moved on\n")
+    gen_diff_data.run(repo, "add", "-A")
+    gen_diff_data.run(repo, "commit", "-m", "work the branch forked before")
+    try:
+        for standing in ("main", "feature"):
+            gen_diff_data.run(repo, "checkout", "-q", standing)
+            branch = gen_diff_data.collect(str(repo), "main", ["feature"])["branches"][0]
+            touched = [entry["path"] for entry in branch["files"]]
+            assert "elsewhere.py" not in touched
+            assert sorted(touched) == ["added.py", "notes.txt", "pkg/sub/deep.py", "sample.py", "wide.py"]
+    finally:
+        gen_diff_data.run(repo, "checkout", "-q", "main")
+        gen_diff_data.run(repo, "reset", "-q", "--hard", "HEAD~1")
+
+
 def test_the_page_is_built_around_the_payload(payload):
     page = gen_diff_data.render_page("<b>__BUILD__</b><script>__DIFF_DATA__</script>", payload)
     assert "__DIFF_DATA__" not in page and "__BUILD__" not in page

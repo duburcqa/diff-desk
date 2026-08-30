@@ -310,11 +310,16 @@ def collect(root, base, refs, upstream=None):
             commits.append(
                 {"sha": sha, "subject": subject, "files": parse(run(root, "show", "--format=", "--unified=3", sha))}
             )
+        # A ref is read from where it forked, so a base that moved on since does not appear in it backwards. One the
+        # base already holds in full has only the base to be read against, which is the difference it has.
+        fork = run(root, "merge-base", base, ref).strip()
+        if fork == run(root, "rev-parse", ref).strip():
+            fork = base
         # The checked-out branch is shown as it stands on disk, uncommitted work included.
         whole = (
-            run(root, "diff", "--unified=3", base)
+            run(root, "diff", "--unified=3", fork)
             if ref == current
-            else run(root, "diff", "--unified=3", f"{base}...{ref}")
+            else run(root, "diff", "--unified=3", fork, ref)
         )
         files = parse(whole)
         # A ref holding neither a commit nor an uncommitted change has nothing to review, so it is not offered.
