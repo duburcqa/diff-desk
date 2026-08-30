@@ -296,16 +296,14 @@ def watch(args):
     # cursor set to the end swallows whatever was written while the last batch was being worked on.
     waiting = [row.get("event", row["seq"]) for row in sent if row.get("state") == "open"]
     since = resume_from(args.since, heard_upto(branches), waiting, sent)
-    # A watch outlives the desk it was armed against: a restarted desk carries whatever the tool has become, wording
-    # and all, so one armed against the run before it is reading something that no longer exists.
+    # A desk restarted since the last watch is said once and then watched: this one is being armed now, against the
+    # desk now answering, so it is reading what exists rather than the run before it. Stopping here instead would
+    # cost every session an arming cycle after each restart, and a session that does not spend it hears nothing.
     running = serving()
-    if running is not None and armed_against() not in (None, running):
-        # Held against the desk now answering, so that arming again is what the word says it is: left as it was, every
-        # watch after this one would read the run before it and stop on the same breath.
-        stop_at(since, running, branches)
-        print("the desk has been restarted since this watch was armed; arm it again", flush=True)
-        return
+    restarted = running is not None and armed_against() not in (None, running)
     reviews = ", ".join(branches) if branches else "every review"
+    if restarted:
+        print("the desk has been restarted since the last watch; this one follows the desk now serving", flush=True)
     print(f"watching {reviews} for anything said past event {since}", flush=True)
     stop_at(since, running, branches)
     deadline = time.monotonic() + args.timeout if args.timeout else None
