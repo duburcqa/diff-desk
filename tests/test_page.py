@@ -279,22 +279,6 @@ def test_a_thread_can_be_answered_rewritten_closed_and_reopened_from_the_page(pa
     assert reopened["text"] == "the remark, rewritten"
     assert [reply["text"] for reply in reopened["replies"]] == ["a reply from the reviewer"]
 
-    # A second thread, open in front of the reader, that the session settles while they read it: a thread dealt with
-    # and holding nothing the reader has yet to hear folds itself away, and unfolds on being asked for.
-    other = sample(page).locator("tr.a[data-line]").last
-    other.locator("td.code").first.hover()
-    other.locator("button.pin").first.click()
-    submit(page, "the remark the session settles")
-    settled = desk.get("/comments")[-1]["seq"]
-    desk.post("/resolve", {"seq": [settled], "who": "session"})
-    page.evaluate("() => tick()")
-    page.wait_for_selector(f"#note-{settled} .thread.folded")
-    assert "the remark the session settles" in page.locator(f"#note-{settled}").inner_text()
-    assert page.locator(f"#note-{settled} textarea").count() == 0
-    page.locator(f"#note-{settled} button.tiny").filter(has_text="resolved").click()
-    page.wait_for_selector(f"#note-{settled} .thread.folded", state="detached")
-    assert page.locator(f"#note-{settled} textarea").count() == 1
-
 
 def test_one_comment_can_be_sent_without_a_batch(page, desk):
     line = sample(page).locator("tr.a[data-line]").first
@@ -1091,8 +1075,12 @@ def test_a_resolved_thread_answered_since_opens_itself(page, desk):
     assert page.locator(f"#note-{made} .thread.folded").count() == 0
     assert "one more thing about it" in page.locator(f"#note-{made}").inner_text()
 
-    # Read now, so it folds again.
+    # Read now, and folded when they come back to it: what was brought to them stands whole while they are on the
+    # page it was brought to, so nothing they are reading closes under them.
     read(page, made)
+    assert page.locator(f"#note-{made} .thread.folded").count() == 0
+    page.reload(wait_until="load")
+    page.wait_for_selector("section.file")
     page.wait_for_selector(f"#note-{made} .thread.folded")
     assert page.locator(f"#note-{made} .thread.folded").count() == 1
 
@@ -1269,6 +1257,32 @@ def test_a_thread_with_nowhere_to_go_is_read_in_the_panel(page, desk):
     row.click()
     row.click()
     assert page.locator(".logthread").get_by_text("and answered afterwards").is_visible()
+
+    # Listed thread by thread, where a thread opened in the panel stands among the rows rather than inside a batch of
+    # its own, and with more rows than the panel can hold, which is what a review looks like by the end of one.
+    filling = desk.post(
+        "/comments",
+        [
+            {"branch": branch, "path": "added.py", "line": 1, "side": "new", "text": f"one of many, {index}"}
+            for index in range(24)
+        ],
+    )["seqs"]
+    page.locator("#logsort").select_option("thread")
+    page.wait_for_function("() => document.querySelectorAll('#logrows .logrow').length > 20")
+    # Shown at the height of what it holds: a scrolling list is free to shrink what it holds, and a thread shrunk to
+    # its border reads as a press that did nothing.
+    stood = page.evaluate(
+        """() => {
+          const holder = document.querySelector('.logthread');
+          const said = holder.querySelector('.thread');
+          return { holder: holder.getBoundingClientRect().height, said: said.getBoundingClientRect().height };
+        }"""
+    )
+    assert stood["said"] > 0
+    assert stood["holder"] >= stood["said"]
+    for gone in filling:
+        desk.post("/drop", {"seq": gone, "who": "you"})
+    page.locator("#logsort").select_option("batch")
 
     row.click()
     assert page.locator(".logthread").count() == 0
@@ -2493,8 +2507,11 @@ def test_a_reply_below_the_fold_is_not_taken_for_read(page, desk):
     assert away == [False, False]
     assert "settled it" in page.locator(f"#note-{made}").inner_text()
 
-    # Brought in front of the reader, it counts as read and folds away on the next redraw.
+    # Brought in front of the reader, it counts as read, and reads as dealt with when they come back to it.
     read(page, made)
+    assert page.locator(f"#note-{made} .thread.folded").count() == 0
+    page.reload(wait_until="load")
+    page.wait_for_selector("section.file")
     page.wait_for_selector(f"#note-{made} .thread.folded")
     assert page.locator(f"#note-{made} .thread.folded").count() == 1
 
