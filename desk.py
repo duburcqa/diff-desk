@@ -208,6 +208,16 @@ def held_elsewhere(root, base, refs):
     return None if mine == theirs else held
 
 
+def _said(payload):
+    """What was collected, branch by branch, which is what a session reads to know the review it just served."""
+    files = sum(len(entry["files"]) for entry in payload["branches"])
+    print(f"{files} file diffs across {len(payload['branches'])} branch(es), base {payload['base']}")
+    for entry in payload["branches"]:
+        request = entry["pr"]
+        named = f" -> PR #{request['number']} {request['title']}" if request else ""
+        print(f"  {entry['ref']}: {len(entry['files'])} files{named}")
+
+
 def serve(args):
     refresh()
     held = held_elsewhere(args.dir, args.base, args.refs)
@@ -217,6 +227,19 @@ def serve(args):
             f"a desk is already serving {shown} from {held['root']} against {held['base']}; serving this would take "
             f"the page away from whoever is reading that. Ask them, or pass --take to serve it anyway."
         )
+    # A live desk serves the source it holds, collecting again on every page load, so a payload written here would
+    # be replaced by the next load: what was asked for is what it must be told to serve. Collecting server-side is
+    # also what makes the branch stamp move, which is how the page in front of a reader offers them the refresh.
+    if ask("/data") is not None:
+        answer = ask("/scan", {"dir": args.dir, "base": args.base, "refs": args.refs})
+        if answer is None:
+            sys.exit("the desk stopped answering while it was asked to serve this")
+        if not answer.get("ok"):
+            sys.exit(answer.get("error", "the desk refused to serve this"))
+        _said(answer["data"])
+        print(f"already serving, now on base {answer['data']['base']}: {URL}")
+        return
+
     payload = gen_diff_data.collect(args.dir, args.base, args.refs)
     if not payload["branches"]:
         sys.exit(f"nothing ahead of {args.base} in {args.dir}")
@@ -224,15 +247,7 @@ def serve(args):
     (home / "diff_data.json").write_text(json.dumps(payload, separators=(",", ":")))
     template = (HERE / "diff_desk_template.html").read_text()
     (home / "diff_desk.html").write_text(gen_diff_data.render_page(template, payload))
-    files = sum(len(entry["files"]) for entry in payload["branches"])
-    print(f"{files} file diffs across {len(payload['branches'])} branch(es), base {payload['base']}")
-    for entry in payload["branches"]:
-        request = entry["pr"]
-        named = f" -> PR #{request['number']} {request['title']}" if request else ""
-        print(f"  {entry['ref']}: {len(entry['files'])} files{named}")
-    if ask("/data") is not None:
-        print(f"already serving, page rebuilt: {URL}")
-        return
+    _said(payload)
     serve_diff.main(serve_diff.Source(args.dir, args.base, args.refs), started_by=args.owner or None)
 
 
