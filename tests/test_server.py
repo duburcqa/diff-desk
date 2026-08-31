@@ -2023,6 +2023,124 @@ def test_sending_a_thread_carries_what_it_holds_and_leaves_what_comes_after(desk
     assert [answer["github"] for answer in row["replies"]] == ["posted", "posted"]
 
 
+def test_a_file_offered_to_a_box_is_kept_beside_the_log_and_read_back_from_it(desk, shot):
+    held = desk.attach("shot.window.png", shot)["image"]
+    assert held["kind"] == "image/png"
+    # Named by what it holds, so the same screenshot offered twice is one file beside the log.
+    assert desk.attach("offered again.png", shot)["image"]["file"] == held["file"]
+    # The words that stand in for it are its own name, the extension gone and the dots left reading as spaces.
+    assert held["alt"] == "shot window"
+    assert read(desk, f"/media/{held['file']}") == (200, shot)
+    with pytest.raises(urllib.error.HTTPError) as raised:
+        read(desk, "/media/nothing-was-kept.png")
+    assert raised.value.code == 404
+    # A name carrying a path of its own reaches nothing: every file here is named by its digest.
+    with pytest.raises(urllib.error.HTTPError) as climbing:
+        read(desk, "/media/..%2Fcomments.jsonl")
+    assert climbing.value.code == 404
+    # What GitHub renders nothing of, and a file with nothing in it, are refused as they are offered.
+    assert desk.attach("notes.txt", shot)["ok"] is False
+    assert desk.attach("empty.png", b"")["ok"] is False
+
+
+def test_a_comment_carries_a_file_to_the_pull_request_and_keeps_a_local_one_here(desk, shot):
+    held = desk.attach("shot.window.png", shot)["image"]
+    carrying = {"branch": "feature", "path": "sample.py", "line": 44, "side": "new", "text": "this is what I see"}
+    seq = desk.post("/comments", {"comments": [{**carrying, "images": [held]}], "github": True})["seqs"][0]
+    alone = desk.attach("kept here.png", shot + b"\n")["image"]
+    desk.post("/comments", {"comments": [{**carrying, "line": 46, "text": "for me alone", "images": [alone]}]})
+
+    given = "https://github.com/user-attachments/assets/c0ffee01"
+    desk.github_answers(
+        rules=[
+            {"match": "--jq .head.sha", "out": "abc1234\n"},
+            {"match": "--jq .id", "out": "1337\n"},
+            {"match": "uploads.github.com", "out": json.dumps({"url": given})},
+            {"match": "pulls/31/comments", "out": json.dumps({"html_url": "https://github.com/x/y/pull/31#c-1"})},
+        ]
+    )
+    assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 31, "seq": [seq]})["ok"]
+    calls = desk.github_calls()
+    uploaded = [call for call in calls if "uploads.github.com" in call]
+    assert len(uploaded) == 1
+    assert "name=shot.window.png" in uploaded[0]
+    assert "content_type=image/png" in uploaded[0]
+    assert "repository_id=1337" in uploaded[0]
+    assert f"--input {desk.home / 'media' / held['file']}" in uploaded[0]
+    # The body posted says on the pull request what the desk says: the words, and a link to the file under them.
+    posted = [call for call in calls if "pulls/31/comments" in call][-1]
+    assert f"this is what I see\\n\\n![shot window]({given})" in posted
+    # A comment kept local keeps its files here, exactly as its text stays here.
+    assert not any("kept here" in call or alone["file"] in call for call in calls)
+    assert {row["seq"]: row for row in desk.get("/comments")}[seq]["images"][0]["url"] == given
+
+    # A reply carries what it was written with, the thread is found by the body it was posted with rather than by its
+    # words alone, and the repository an upload is filed under is asked for once however many go out.
+    answered = desk.attach("after.png", shot + b"\n\n")["image"]
+    desk.post("/reply", {"seq": seq, "text": "and here it is again", "who": "you", "images": [answered]})
+    second = "https://github.com/user-attachments/assets/c0ffee02"
+    thread = {
+        "id": "T_shot",
+        "isResolved": False,
+        "path": "sample.py",
+        "line": 44,
+        "startLine": None,
+        "originalLine": 44,
+        "originalStartLine": None,
+        "diffSide": "RIGHT",
+        "comments": {
+            "nodes": [
+                {
+                    "databaseId": 701,
+                    "body": f"this is what I see\n\n![shot window]({given})",
+                    "path": "sample.py",
+                    "createdAt": "2026-08-31T09:00:00Z",
+                    "author": {"login": "duburcqa"},
+                }
+            ]
+        },
+    }
+    reviewed = {
+        "match": "reviewThreads",
+        "out": json.dumps(
+            {"data": {"repository": {"pullRequest": {"headRefName": "feature", "reviewThreads": {"nodes": [thread]}}}}}
+        ),
+    }
+    desk.github_answers(
+        rules=[
+            {"match": "--jq .id", "out": "1337\n"},
+            {"match": "uploads.github.com", "out": json.dumps({"url": second})},
+            reviewed,
+            {"match": "/comments/701/replies", "out": json.dumps({"id": 9})},
+        ]
+    )
+    assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 31, "seq": [seq]})["replies"] == 1
+    assert f"![after]({second})" in [call for call in desk.github_calls() if "701/replies" in call][-1]
+    assert len([call for call in desk.github_calls() if "--jq .id" in call]) == 1
+    desk.github_answers(rules=[reviewed])
+    assert desk.post("/sync", {"repo": "someone/somewhere", "pr": 31})["took"] == 0
+
+    # A file that will not go stops the send: a remark whose screenshot is on this desk and nowhere on the pull
+    # request is the one thing this desk must not leave behind.
+    refused = desk.attach("no.png", shot + b"\n\n\n")["image"]
+    said = {**carrying, "line": 48, "text": "one more look", "images": [refused]}
+    stubborn = desk.post("/comments", {"comments": [said], "github": True})["seqs"][0]
+    before = len(desk.github_calls())
+    desk.github_answers(rules=[{"match": "uploads.github.com", "code": 1, "err": "gh: Not Found (HTTP 404)"}])
+    outcome = desk.post("/publish", {"repo": "someone/somewhere", "pr": 31, "seq": [stubborn]})
+    assert outcome["ok"] is False
+    assert "404" in outcome["error"]
+    assert not any("pulls/31/comments" in call for call in desk.github_calls()[before:])
+    kept = {row["seq"]: row for row in desk.get("/comments")}[stubborn]
+    assert kept["github"] == "failed"
+    assert "404" in kept["error"]
+
+    # Where to open what the reviewer saw, so a session reads the picture rather than a word about it.
+    printed = desk.cli("comments", "--all").communicate(timeout=60)[0]
+    assert f"{desk.home / 'media' / held['file']} (shot.window.png, on the pull request)" in printed
+    assert f"({alone['name']}, here only)" in printed
+
+
 def test_the_sync_command_says_what_it_brought_back(desk):
     made = desk.post(
         "/comments",

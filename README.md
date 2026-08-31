@@ -48,6 +48,7 @@ The page comes up on `127.0.0.1:8787`, each ref a tab, scoped to the whole range
 - **Delete** takes a thread, or its last reply, from the `x` on either. It is the one thing that discards, so it is asked for each time; one already posted goes from the pull request too.
 - **A comment follows its line** when the diff moves under it, reading "moved from L<n>". One whose line has left the diff is kept, marked "code moved on", at the end of the file it belonged to. Neither is ever resolved or deleted on your behalf.
 - **Every comment wears the number it is referred to by**, so an answer saying "[58]" points at a thread. Press `#`, type the number, and the page goes to it, unfolding whatever was folded; a URL ending in `#58` lands the same way.
+- **Any box takes an image or a video**: pasted from the clipboard, dropped onto the box, or picked with **Attach** - whatever GitHub renders, up to 10MB an image and 100MB a video. It is kept on the desk as it arrives and shown as a thumbnail carrying the way to leave it out again; once the comment is written, a click opens the file whole.
 - A comment keeps the markdown that carries meaning: fenced blocks and backticks stay code, `>` lines read as the passage they quote. Pasted text is only ever text.
 - Comments survive a reload, a refresh and a browser closed on them, a half-written reply included.
 - **Comments** in the header opens the panel: every thread on the branch, open or resolved, waiting for GitHub or local only. Clicking one jumps to it.
@@ -62,6 +63,7 @@ Nothing leaves this desk on its own.
 - **The standing of a comment is a control.** Click "local only" to send that one, click it again to keep it out. The decision stays changeable until it lands.
 - A range becomes a GitHub range comment; one covering removed and added lines is anchored on the added side, the side a range can be expressed on. A batch goes out as one review.
 - **A send that does not land loses nothing.** The comment is recorded before GitHub is contacted, marked `pending` until it lands and `failed` if it does not, keeping the reason. What is owed is retried three ways: the panel's **Retry failures**, on its own every few seconds, and the moment the network returns. A rejection retrying cannot help - a line outside the diff, no permission - is marked `refused` instead.
+- **What a comment carries goes out with it.** The files of a thread are uploaded as it is sent and the body posted carries a link to each under the words, so a screenshot says the same thing on the pull request as it does here. One that will not go stops that send rather than leaving a remark whose screenshot is nowhere but this desk, and a file uploaded once is never uploaded twice. A comment kept local keeps its files here, exactly as its text stays here.
 - **A resolution is believed only when GitHub reports the thread resolved.** Until then the comment reads "not resolved there yet" beside its own resolution.
 - **What GitHub refuses is said where you are**, as a notice carrying the reason that stays until dismissed.
 - **The panel reads by batch or by what moved last.** A batch names the submission a remark went out in; a reply belongs to its thread and carries no batch, so recency is where the answer just written into an old batch is found.
@@ -79,6 +81,8 @@ Every comment is recorded to `~/.claude/diff-desk/comments.jsonl`, numbered, wit
     python3 desk.py edit 3 --reply 0 "worded better ..."      # rewrite one reply, by its place in the thread
     python3 desk.py sync                                      # bring the pull request's comments in
 
+`desk.py comments` prints where to open every file a comment carries, so a session reads the picture rather than a word about it.
+
 The watch follows the cursor, so an answer written on a comment read long ago arrives exactly as a new comment does, and each event says which side made it, so a session never mistakes its own reply for news. It reports to stdout and nowhere else. The page picks all of it up on its own, threading the replies under the comment.
 
 A sync brings the pull request's own comments in, each carrying its author, so a remark a reviewer or a bot wrote there reaches the session through the watch and can be answered. Those the desk answers rather than rewrites: the remark stays its author's word.
@@ -87,7 +91,7 @@ Dropped into `~/.claude/skills/diff-desk/`, this is a Claude Code skill and the 
 
 ## Where things live
 
-State is `~/.claude/diff-desk/`, overridden with `DIFF_DESK_HOME`; the port is `DIFF_DESK_PORT`. One log holds every review the desk has served, each comment recording which pull request it was sent to, so posting, resolving or syncing one review never reaches another's comments.
+State is `~/.claude/diff-desk/`, overridden with `DIFF_DESK_HOME`; the port is `DIFF_DESK_PORT`. What comments carry is kept in `media/` beside the log, one file named by the digest of what it holds, and stays there when a comment goes: nothing another comment, or an earlier wording of one, still names can vanish under it. One log holds every review the desk has served, each comment recording which pull request it was sent to, so posting, resolving or syncing one review never reaches another's comments.
 
 A review is identified by its pull request, not by the ref it is read from. The same work opened from its branch, from the head fetched by number, or from the number typed in is one review: its comments and its reviewed ticks follow it across all three.
 

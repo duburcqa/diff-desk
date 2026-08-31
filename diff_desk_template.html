@@ -514,6 +514,17 @@
     resize: vertical;
   }
   .notebox .row { display: flex; align-items: center; gap: 8px; }
+  /* What a box being written in carries: laid across the box rather than beside the buttons, since a screenshot is
+     read at a glance and a name is not. Each thumbnail carries the way to leave that file out, over its own corner. */
+  .carrying { display: flex; flex-wrap: wrap; gap: 6px; flex-basis: 100%; }
+  .carrying > span { position: relative; display: inline-flex; }
+  .carrying .drop { position: absolute; top: 2px; right: 2px; background: var(--surface); border-radius: 4px; }
+  /* Bounded so a screenshot is read beside the words rather than in place of the diff; the whole of it is a click
+     away, in a tab of its own. */
+  .carries { display: block; max-height: 120px; max-width: 100%; border: 1px solid var(--rule); border-radius: 6px; }
+  .said .carries { margin-top: 4px; max-height: 160px; }
+  /* A box a file is being dragged over, said while it is over it and nowhere else. */
+  .taking { outline: 2px dashed var(--accent); outline-offset: -2px; }
   button.solid, button.ghost {
     font: inherit;
     font-size: 12.5px;
@@ -620,7 +631,7 @@
   .thread .mark.pending { color: var(--stale); background: var(--stale-bg); }
   .thread .mark.failed { color: var(--del-ink); background: var(--del-bg); }
   .thread .mark.posted { color: var(--add-ink); background: var(--add-bg); }
-  .thread .actions { align-items: center; }
+  .thread .actions { align-items: center; flex-wrap: wrap; }
   /* The rest of a reply box reads with the boxes above; what is its own here is that it fills the row it sits in. */
   .thread .actions textarea { flex: 1; min-height: 0; }
   button.tiny {
@@ -1220,6 +1231,137 @@
     }
   }
 
+  // What GitHub renders, which is all a box here offers to take: nothing the desk would refuse, and nothing the pull
+  // request could not show.
+  const ATTACHABLE = ".png,.jpg,.jpeg,.gif,.webp,.svg,.mp4,.mov,.webm";
+
+  async function kept(file) {
+    // Kept by the desk as it arrives rather than as the comment is sent: the reader sees at once that the screenshot
+    // is on the desk, and what the comment holds is its name.
+    if (leaving) return { ok: false, error: "the page is going" };
+    try {
+      const answer = await fetch(`media?name=${encodeURIComponent(file.name || "pasted.png")}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: file,
+      });
+      return await answer.json();
+    } catch (error) {
+      notes.live = false;
+      return { ok: false, error: error.message };
+    }
+  }
+
+  function shown(host, images) {
+    for (const image of images || []) {
+      // A video is played where it stands, a still is opened whole in a tab of its own.
+      if (image.kind.startsWith("video/")) {
+        const player = document.createElement("video");
+        player.className = "carries";
+        player.controls = true;
+        player.src = `media/${image.file}`;
+        player.title = image.name;
+        host.append(player);
+        continue;
+      }
+      const link = document.createElement("a");
+      link.href = `media/${image.file}`;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      const shot = document.createElement("img");
+      shot.className = "carries";
+      shot.src = `media/${image.file}`;
+      shot.alt = image.alt || image.name;
+      shot.title = image.name;
+      link.append(shot);
+      host.append(link);
+    }
+    return host;
+  }
+
+  // Whether a box carries the files it carried, which is what tells a rewriting that changed nothing from one that did.
+  const sameFiles = (held, given) =>
+    held.map((image) => image.file).join(" ") === (given || []).map((image) => image.file).join(" ");
+
+  function attaching(field, box, controls, held) {
+    // Every box a reviewer writes in takes a file the three ways one arrives: pasted from the clipboard, dropped onto
+    // the box, or picked with the button this adds to its buttons. Answers with the way to read what the box carries,
+    // and to replace it, which is what a box that outlives one comment - the overall note - is cleared through.
+    const carrying = [...(held || [])];
+    const strip = document.createElement("div");
+    strip.className = "carrying";
+    field.after(strip);
+    const draw = () => {
+      strip.innerHTML = "";
+      for (const image of carrying) {
+        const one = document.createElement("span");
+        shown(one, [image]);
+        const drop = document.createElement("button");
+        drop.className = "drop";
+        drop.textContent = "\u00d7";
+        drop.title = `Leave ${image.name} out`;
+        drop.addEventListener("click", () => {
+          carrying.splice(carrying.indexOf(image), 1);
+          draw();
+        });
+        one.append(drop);
+        strip.append(one);
+      }
+    };
+    const take = async (files) => {
+      for (const file of files) {
+        const answer = await kept(file);
+        if (answer.ok) carrying.push(answer.image);
+        else window.alert(`${file.name || "that file"} was not kept: ${answer.error || "the desk refused it"}`);
+      }
+      draw();
+    };
+    const pick = document.createElement("input");
+    pick.type = "file";
+    pick.multiple = true;
+    pick.accept = ATTACHABLE;
+    pick.hidden = true;
+    pick.addEventListener("change", () => {
+      take([...pick.files]);
+      // Cleared, so picking the same file twice running is twice something happens.
+      pick.value = "";
+    });
+    const offer = document.createElement("button");
+    offer.className = "ghost";
+    offer.textContent = "Attach";
+    offer.title = "Attach an image or a video";
+    offer.addEventListener("click", () => pick.click());
+    controls.append(offer, pick);
+    field.addEventListener("paste", (event) => {
+      const files = [...(event.clipboardData ? event.clipboardData.files : [])];
+      // A paste carrying files is that and nothing else, so the words are left alone where it carries none.
+      if (!files.length) return;
+      event.preventDefault();
+      take(files);
+    });
+    for (const kind of ["dragenter", "dragover"]) {
+      box.addEventListener(kind, (event) => {
+        event.preventDefault();
+        box.classList.add("taking");
+      });
+    }
+    box.addEventListener("dragleave", () => box.classList.remove("taking"));
+    box.addEventListener("drop", (event) => {
+      event.preventDefault();
+      box.classList.remove("taking");
+      take([...event.dataTransfer.files]);
+    });
+    draw();
+    return (given) => {
+      if (given) {
+        carrying.length = 0;
+        carrying.push(...given);
+        draw();
+      }
+      return carrying.slice();
+    };
+  }
+
   function goTo(said) {
     const wanted = Number.parseInt(String(said).replace(/^#/, ""), 10);
     const note = Number.isNaN(wanted) ? null : mine().find((row) => row.seq === wanted);
@@ -1346,6 +1488,7 @@
       // Standing where what is written into it will stand: a note is read one step in, and so is the box for it.
       writing.style.marginLeft = "12px";
       writing.append(written, keep, drop);
+      const attached = attaching(written, writing, writing);
       // Where the note will be read: after the last note about the same comment, and under that comment while none
       // stands there yet.
       const thread = open.closest(".thread");
@@ -1356,7 +1499,7 @@
       keep.addEventListener("click", async () => {
         const wanted = written.value.trim();
         if (!wanted) return render();
-        await post("reply", { seq: note.seq, text: wanted, who: "you", whisper: true, on });
+        await post("reply", { seq: note.seq, text: wanted, who: "you", whisper: true, on, images: attached() });
         await loadNotes();
         render();
       });
@@ -1774,7 +1917,10 @@
     // Written wherever the tray changes: a comment waiting to be sent is work that has been done, and a reload, a
     // refresh, or a browser closed on it must not be what throws it away.
     try {
-      localStorage.setItem("diffdesk.drafts", JSON.stringify({ review: review(), note: els.traynote.value, held: notes.drafts }));
+      localStorage.setItem(
+        "diffdesk.drafts",
+        JSON.stringify({ review: review(), note: els.traynote.value, noteFiles: noteFiles(), held: notes.drafts }),
+      );
     } catch (error) {
       // A storage that refuses to be written is one the reader will notice on their own.
     }
@@ -1826,6 +1972,7 @@
       if (kept && kept.review === review()) {
         notes.drafts = kept.held || [];
         els.traynote.value = kept.note || "";
+        noteFiles(kept.noteFiles || []);
       }
     } catch (error) {
       notes.drafts = [];
@@ -1851,6 +1998,12 @@
       goes.className = "goes";
       goes.title = "Go to the lines this was written on";
       goes.append(where, said);
+      if ((draft.images || []).length) {
+        const files = document.createElement("b");
+        files.textContent = `+${draft.images.length}`;
+        files.title = draft.images.map((image) => image.name).join(", ");
+        goes.append(files);
+      }
       goes.addEventListener("click", () => reach(draft));
       const alone = document.createElement("button");
       alone.className = "tiny";
@@ -1862,12 +2015,22 @@
     }
   }
 
-  async function sendAll(drafts, summary) {
+  async function sendAll(drafts, summary, files) {
     if (!drafts.length) return;
     const bound = els.togh.checked && Boolean(branch().pr);
     const batch = [...drafts];
-    if (summary) {
-      batch.push({ branch: branch().ref, review: review(), path: "(review)", line: 0, side: "new", text: summary, at: stamp() });
+    const carrying = files || [];
+    if (summary || carrying.length) {
+      batch.push({
+        branch: branch().ref,
+        review: review(),
+        path: "(review)",
+        line: 0,
+        side: "new",
+        text: summary,
+        images: carrying,
+        at: stamp(),
+      });
     }
     let recorded = null;
     if (notes.live) recorded = await post("comments", { comments: batch, github: bound });
@@ -1878,7 +2041,7 @@
     }
     if (bound && recorded && recorded.ok) {
       els.trayresult.textContent = `Posting ${batch.length} to PR #${branch().pr.number}...`;
-      const outcome = await post("publish", { ...where(), summary, seq: recorded.seqs });
+      const outcome = await post("publish", { ...where(), summary, summaryImages: carrying, seq: recorded.seqs });
       // A post that does not land leaves the comments waiting rather than losing them; the log says so and retries.
       els.trayresult.textContent = outcome.ok
         ? `Posted to PR #${branch().pr.number}`
@@ -1889,7 +2052,10 @@
       localStorage.setItem("diffdesk.notes", JSON.stringify(notes.sent));
     }
     notes.drafts = notes.drafts.filter((draft) => !drafts.includes(draft));
-    if (summary) els.traynote.value = "";
+    if (summary || carrying.length) {
+      els.traynote.value = "";
+      noteFiles([]);
+    }
     await loadNotes();
     drawTray();
     drawLog();
@@ -1897,7 +2063,7 @@
   }
 
   async function submitReview() {
-    await sendAll(notes.drafts, els.traynote.value.trim());
+    await sendAll(notes.drafts, els.traynote.value.trim(), noteFiles());
   }
 
   const send1 = (note) => sendAll([note], "");
@@ -2112,6 +2278,7 @@
     text.className = "said";
     text.append(who);
     written(text.appendChild(spoke()), note.text);
+    shown(text, note.images);
     head.append(text);
     if (note.state === "resolved") {
       const turn = document.createElement("button");
@@ -2155,17 +2322,22 @@
         editing.className = "line actions";
         editing.append(written, keep, drop);
         head.replaceWith(editing);
+        const attached = attaching(written, editing, editing, note.images);
         written.focus();
         drop.addEventListener("click", render);
         keep.addEventListener("click", async () => {
           const wanted = written.value.trim();
-          if (!wanted || wanted === note.text) return render();
+          const files = attached();
+          if (!wanted || (wanted === note.text && sameFiles(files, note.images))) return render();
           if (note.pending) {
             // A draft is only in the page, so rewriting it is rewriting the draft itself.
-            if (note.source) note.source.text = wanted;
+            if (note.source) {
+              note.source.text = wanted;
+              note.source.images = files;
+            }
             drawTray();
           } else {
-            await post("edit", { seq: note.seq, text: wanted });
+            await post("edit", { seq: note.seq, text: wanted, images: files });
             await loadNotes();
           }
           drawLog();
@@ -2296,6 +2468,7 @@
       }
       body.append(from);
       written(body.appendChild(spoke()), answer.text);
+      shown(body, answer.images);
       said.append(body);
       // Whether the pull request holds this reply, shown on the reply itself: what a thread still owes is what its own
       // Sync would carry, and a reader deciding whether to press it reads that off the replies.
@@ -2331,12 +2504,14 @@
           editing.className = "line reply actions";
           editing.append(written, keep, drop);
           said.replaceWith(editing);
+          const attached = attaching(written, editing, editing, answer.images);
           written.focus();
           drop.addEventListener("click", render);
           keep.addEventListener("click", async () => {
             const wanted = written.value.trim();
-            if (!wanted || wanted === answer.text) return render();
-            await post("edit", { seq: note.seq, reply: index, text: wanted });
+            const files = attached();
+            if (!wanted || (wanted === answer.text && sameFiles(files, answer.images))) return render();
+            await post("edit", { seq: note.seq, reply: index, text: wanted, images: files });
             await loadNotes();
             render();
           });
@@ -2398,7 +2573,7 @@
       send.textContent = "Reply";
       send.addEventListener("click", async () => {
         if (!say.value.trim()) return;
-        await post("reply", { seq: note.seq, text: say.value.trim(), who: "you" });
+        await post("reply", { seq: note.seq, text: say.value.trim(), who: "you", images: attached() });
         writing.delete(note.seq);
         await loadNotes();
         render();
@@ -2408,7 +2583,13 @@
       close.textContent = note.state === "resolved" ? "Reopen" : "Resolve";
       close.addEventListener("click", async () => {
         const shutting = note.state !== "resolved";
-        await post("resolve", { seq: [note.seq], answer: say.value.trim(), resolved: shutting, who: "you" });
+        await post("resolve", {
+          seq: [note.seq],
+          answer: say.value.trim(),
+          resolved: shutting,
+          who: "you",
+          images: attached(),
+        });
         writing.delete(note.seq);
         await loadNotes();
         if (shutting) {
@@ -2427,6 +2608,7 @@
         render();
       });
       actions.append(say, send, close);
+      const attached = attaching(say, actions, actions);
       // What this thread owes the pull request, sent as it now reads. Offered only when there is something to send,
       // which is what makes the button say what pressing it would do.
       const owes = owedThere(note);
@@ -2622,6 +2804,7 @@
     controls.append(now, keep, drop);
     box.append(field, controls);
     card.querySelector(".filehead").after(box);
+    const attached = attaching(field, box, controls);
     field.focus();
 
     // A file comment carries no line, which is what tells it apart everywhere else: in the log, on the page, and in
@@ -2633,6 +2816,7 @@
       line: 0,
       side: "file",
       text: field.value.trim(),
+      images: attached(),
       at: stamp(),
     });
     drop.addEventListener("click", () => box.remove());
@@ -2685,11 +2869,15 @@
     const hint = document.createElement("span");
     hint.className = "status";
     hint.textContent = "\u2318/Ctrl + Enter";
-    controls.append(now, send, cancel, hint);
+    controls.append(now, send, cancel);
     box.append(field, controls);
     cell.append(box);
     row.append(cell);
     afterRow.after(row);
+    // Added once the box is in the page and before the hint, so what the box carries reads under it and the way to
+    // attach a file reads with the buttons rather than after the words about the keys.
+    const attached = attaching(field, box, controls);
+    controls.append(hint);
     field.focus();
 
     const written = () => ({
@@ -2701,6 +2889,7 @@
       side,
       anchor: codeAt(path, endLine || line, side),
       text: field.value.trim(),
+      images: attached(),
       at: stamp(),
     });
 
@@ -3870,6 +4059,9 @@
   els.srcdir.addEventListener("change", loadRefs);
   els.srcfilter.addEventListener("input", drawRefs);
   grows(els.traynote);
+  // The overall note is a box like any other, and the one that outlives the comments it goes out with, so what it
+  // carries is read back and cleared through here.
+  const noteFiles = attaching(els.traynote, els.tray, els.tray.querySelector(".actions"));
   els.toast.addEventListener("click", () => {
     els.toast.dataset.open = "false";
   });
@@ -3915,6 +4107,7 @@
   els.traydrop.addEventListener("click", () => {
     notes.drafts = [];
     els.traynote.value = "";
+    noteFiles([]);
     drawTray();
     render();
   });

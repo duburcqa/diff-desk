@@ -39,7 +39,7 @@ Armed without `--once` it never stops of its own accord, which is what a session
 
 One desk holds every review it was given, so a session working one of them arms `watch --branch <ref>`, repeatable, and hears only what is said about those. It is what keeps two sessions out of each other's way: where a watch stopped is remembered per review, so one is never carried past what another has yet to hear. Armed without it, a watch hears everything the desk holds - right for a session that is the only one reading it.
 
-Each comment prints as `[seq] branch path:line-endLine (side) text`, followed by its state and any replies, each numbered `[0]`, `[1]` ... by its place in the thread. Answer in the thread, and close what is done - the page shows both without a reload:
+Each comment prints as `[seq] branch path:line-endLine (side) text`, followed by its state, where to open every file it carries, and any replies, each numbered `[0]`, `[1]` ... by its place in the thread. A file is worth opening: the reviewer attached it instead of describing what they saw. Answer in the thread, and close what is done - the page shows both without a reload:
 
     python3 ~/.claude/skills/diff-desk/desk.py reply 3 "it happens because ..."
     python3 ~/.claude/skills/diff-desk/desk.py reply 3 --whisper "check the sibling call site too"
@@ -71,6 +71,7 @@ Nothing a session writes reaches the pull request. `desk.py sync` only brings ba
 - Comments are recorded whether or not GitHub is reachable; posting to a pull request is a separate opt-in tick. Binding one for the pull request says where it belongs, never that it may leave: what has only been bound waits to be asked for, and nothing sends it on a timer. `desk.py publish <seq...>` is the one way a session sends anything, and it names what it sends. A post that does not land leaves its comments marked as still owed, with the reason kept, and they are retried from the page - so a GitHub outage never costs a comment and never needs cleaning up by hand. A comment GitHub rejects outright is marked `refused` rather than retried forever.
 - A comment can be sent on its own from the box, sent alone out of the review tray, or batched into a review; the Comments panel groups comments by batch and sends them one batch at a time. All of it is recorded identically.
 - Whether a comment is bound for the pull request can be changed after it was recorded, from the page or with `desk.py bind <seq...> [--local]`, for as long as it has not landed.
+- A comment carries files as well as words - an image or a video pasted, dropped or picked into any box the reviewer writes in. They are kept beside the log, printed as paths by `desk.py comments`, and reach the pull request only when the reader sends that thread, uploaded then and linked under the words. A comment kept local keeps its files on the desk, as its text stays there.
 - A comment whose line has left the diff is kept and marked, never resolved or dropped on the reviewer's behalf.
 
 ## Changing the page
