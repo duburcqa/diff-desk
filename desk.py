@@ -236,6 +236,24 @@ def serve(args):
             f"a desk is already serving {shown} from {held['root']} against {held['base']}; serving this would take "
             f"the page away from whoever is reading that. Ask them, or pass --take to serve it anyway."
         )
+    # A desk answering with other code than this one is running cannot be brought up to date by being told what to
+    # serve: the page it renders comes from the files on disk, and the endpoints answering that page are the ones its
+    # process started with. A reader then meets a page asking for something the desk has never had. So it is put down
+    # and this one takes over, which is the only way a page and the answers behind it come from the same tool. What it
+    # was holding has already been asked about above, so nobody is being taken by surprise here.
+    running = (ask("/state") or {}).get("desk")
+    if running is not None and running != gen_diff_data.RUNNING:
+        print("the desk answering was started from other code; stopping it and serving this review again")
+        ask("/stop", {})
+        # Waited out on the one answer every desk has ever given, since an older one may not know the newer routes:
+        # gone is gone, and the port is not free to bind until it is.
+        for _ in range(100):
+            if ask("/state") is None:
+                break
+            time.sleep(0.1)
+        else:
+            sys.exit("the desk did not stop, so this review is left as it was")
+
     # A live desk serves the source it holds, collecting again on every page load, so a payload written here would
     # be replaced by the next load: what was asked for is what it must be told to serve. Collecting server-side is
     # also what makes the branch stamp move, which is how the page in front of a reader offers them the refresh.

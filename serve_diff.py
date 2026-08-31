@@ -1006,7 +1006,11 @@ class Handler(BaseHTTPRequestHandler):
             self._json(
                 {
                     "stamp": marked,
-                    "desk": gen_diff_data.desk_version(),
+                    "desk": gen_diff_data.RUNNING,
+                    # Whether the tool on disk has moved on from what this desk is running, which is a restart owed
+                    # rather than a reload: the page it renders comes from the newer files, and asks this one for
+                    # endpoints it has never had.
+                    "stale": gen_diff_data.desk_version() != gen_diff_data.RUNNING,
                     "source": source._asdict() if source else None,
                     "startedBy": Serving.started_by,
                 }

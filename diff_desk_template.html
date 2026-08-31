@@ -1216,6 +1216,19 @@
   // engines - and by the suite, which holds every page to raising none - so nothing new is asked for after it.
   let leaving = false;
 
+  // A desk answering with code older than the page it rendered: the tool moved on under it, so the page asks for
+  // endpoints it has never had. Nothing the page does can cure that - the process has to be started again - so it is
+  // said in those words wherever it is met, rather than as whatever the failed request came back as.
+  const RESTART = "this desk is running older code than the page it served: stop it and serve the review again";
+
+  // What the desk said, or why nothing it said could be read. A body is only parsed once the answer says there is one:
+  // an empty refusal parsed as an answer raises whatever each engine calls a broken document, and that is what a reader
+  // was being shown in place of what went wrong.
+  async function asked(answer) {
+    if (answer.ok) return answer.json();
+    return { ok: false, error: answer.status === 404 ? RESTART : `the desk answered ${answer.status}` };
+  }
+
   async function post(route, payload) {
     if (leaving) return { ok: false, error: "the page is going" };
     try {
@@ -1224,7 +1237,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      return await answer.json();
+      return await asked(answer);
     } catch (error) {
       notes.live = false;
       return { ok: false, error: error.message };
@@ -1245,7 +1258,7 @@
         headers: { "Content-Type": "application/octet-stream" },
         body: file,
       });
-      return await answer.json();
+      return await asked(answer);
     } catch (error) {
       notes.live = false;
       return { ok: false, error: error.message };
@@ -1379,6 +1392,9 @@
   // Whether the desk serving this page has moved on from the script the page holds.
   let behind = false;
   const REFRESH_TITLE = "Refresh the diffs once the branch has moved on";
+  // A desk answering with code older than the page it rendered: the tool moved on under it, so the page asks for
+  // endpoints it has never had. Nothing the page does can cure that - the process has to be started again - so it is
+  // said in those words wherever it is met, rather than as whatever the failed request came back as.
 
   async function watchBranch() {
     // Offered rather than taken: rebuilding the diff under the reader moves the ground they are on, so when the branch
@@ -1387,12 +1403,14 @@
     try {
       const answer = await fetch("state", { cache: "no-store" });
       if (!answer.ok) return;
-      const { stamp, desk } = await answer.json();
+      const { stamp, desk, stale } = await answer.json();
       // The desk fast-forwards itself and restarts into what has been published since, which leaves this page holding
       // the script it was rendered with while the review it shows is untouched. Taking the refresh then reloads the
       // page rather than collecting the diffs again, since what is behind is the page itself.
       behind = Boolean(desk && data.desk && desk !== data.desk);
-      els.moved.title = behind ? "Reload the page, which the desk has moved on from" : REFRESH_TITLE;
+      // A desk running older code than the page it served is not something the page can put right, so what the button
+      // says is what would: stop it and serve the review again.
+      els.moved.title = stale ? RESTART : behind ? "Reload the page, which the desk has moved on from" : REFRESH_TITLE;
       if (stamp && data.stamp) els.moved.disabled = stamp === data.stamp && !behind;
     } catch (error) {
       // Nothing is serving, which the comments already say.

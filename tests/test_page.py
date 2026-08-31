@@ -1093,6 +1093,13 @@ def test_a_page_on_its_way_out_asks_for_nothing_more(page, desk):
     page.evaluate("() => tick()")
     assert len(desk.get("/comments")) == held
 
+    # A route the desk has no answer for is read as what it means - a desk older than the page it served, which only a
+    # restart cures - rather than as whatever the engine calls an answer it could not parse.
+    page.evaluate("() => { leaving = false; }")
+    said = page.evaluate("() => post('nowhere', {})")
+    assert said["ok"] is False
+    assert "older code" in said["error"] and "serve the review again" in said["error"]
+
 
 def test_a_file_changed_since_it_was_reviewed_opens_itself(page, desk):
     branch = page.evaluate("() => data.branches[0].ref")
