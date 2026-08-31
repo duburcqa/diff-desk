@@ -984,9 +984,13 @@ def test_the_path_filter_lists_what_it_matches_for_picking_by_name(page):
 
     # Typing narrows the list to what it matches, and the first match is the one waiting to be taken.
     page.locator("#pq").fill("deep")
+    # Read the moment the letters land: the diff behind the list is not rebuilt for a keystroke - a redraw is the most
+    # expensive thing the page does - and it follows once the typing has settled.
+    assert page.locator("section.file").count() == len(paths)
     page.wait_for_function("() => document.querySelectorAll('#picks .pick').length === 1")
     assert listed.first.get_attribute("data-on") == "true"
     assert "pkg/sub" in listed.first.locator(".where").inner_text()
+    page.wait_for_function("(whole) => document.querySelectorAll('section.file').length < whole", arg=len(paths))
 
     # Taken with the keyboard: the list closes and the file it named is what the reader is brought to.
     page.locator("#pq").press("Enter")

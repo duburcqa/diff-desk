@@ -1911,6 +1911,34 @@
     requestAnimationFrame(fit);
   }
 
+  function whenSettled(work, wait = 150) {
+    // Typing is a stream of keystrokes and a redraw is the most expensive thing this page does, so what is typed into a
+    // filter is answered once the reader stops rather than once per letter. Each letter drops the redraw the one before
+    // it asked for, so a word costs one, and the last letter is the one the page answers. `now` is for the presses that
+    // cannot wait for it: what a reader picks by name is looked for among the cards, and those have to be the ones the
+    // filter leaves.
+    let waiting = null;
+    const drop = () => {
+      if (waiting === null) return;
+      window.clearTimeout(waiting);
+      waiting = null;
+    };
+    const soon = () => {
+      drop();
+      waiting = window.setTimeout(() => {
+        waiting = null;
+        work();
+      }, wait);
+    };
+    soon.now = () => {
+      drop();
+      work();
+    };
+    return soon;
+  }
+
+  const filtering = whenSettled(render);
+
   function keepDrafts() {
     // Written wherever the tray changes: a comment waiting to be sent is work that has been done, and a reload, a
     // refresh, or a browser closed on it must not be what throws it away.
@@ -3290,6 +3318,8 @@
   }
 
   function takePick(order) {
+    // The card a pick is looked for in is one the filter leaves, so a draw still waiting is taken now.
+    filtering.now();
     const shown = visible(view().files);
     const file = shown[order === undefined ? picked : order];
     if (!file) return;
@@ -3969,7 +3999,7 @@
     state.query = event.target.value;
     state.current = 0;
     showClear();
-    render();
+    filtering();
   });
   // Emptying the filter is all the cross asks for: pressing the box is what asks for the overlay, so the press on the
   // cross must not reach it.
@@ -3980,7 +4010,7 @@
     state.query = "";
     state.current = 0;
     showClear();
-    render();
+    filtering.now();
   });
   // Pressing the box in the bar is what asks for the overlay; the caret belongs to the box inside it.
   els.q.addEventListener("focus", () => {
@@ -3991,8 +4021,10 @@
     state.query = event.target.value;
     state.current = 0;
     picked = 0;
-    render();
+    // The names are what the reader is watching while they type, so the list answers each letter; the diff behind it
+    // waits for them to stop.
     drawPicks();
+    filtering();
   });
   els.pq.addEventListener("keydown", (event) => {
     if (els.palette.hidden) return;
