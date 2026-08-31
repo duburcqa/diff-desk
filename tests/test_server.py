@@ -1241,14 +1241,24 @@ def test_serving_over_a_desk_holding_another_review_is_refused(desk):
     # What it is holding, and not merely that it is holding something, is what tells one review from another.
     assert desk.get("/state")["source"]["refs"] == ["feature"]
 
-    # Asking for the review the desk is already showing is nobody else's, and rebuilds its page as it always did.
+    # Asking for the review the desk is already showing is nobody else's, and collects it again as it always did.
     again = desk.cli("serve", "--dir", str(desk.repo), "--base", "main", "feature")
-    assert "page rebuilt" in again.communicate(timeout=180)[0]
+    assert "already serving" in again.communicate(timeout=180)[0]
     assert desk.get("/data")["branches"][0]["ref"] == "feature"
 
     taken = desk.cli("serve", "--dir", str(desk.repo), "--base", "feature", "main", "--take")
-    assert "page rebuilt" in taken.communicate(timeout=180)[0]
+    assert "already serving" in taken.communicate(timeout=180)[0]
     assert desk.get("/data")["branches"][0]["ref"] == "main"
+
+    # A base is part of what is being served, so asking a live desk for another one moves what it holds, not just
+    # the page on disk: a desk collects again from its own source on every page load, so a payload written past it
+    # is replaced by the next load and the reader goes on reading the old base with nothing to tell them.
+    desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": ["feature"]})
+    assert desk.get("/state")["source"]["base"] == "main"
+    moved = desk.cli("serve", "--dir", str(desk.repo), "--base", "feature", "main", "--take")
+    assert "already serving" in moved.communicate(timeout=180)[0]
+    assert desk.get("/state")["source"]["base"] == "feature"
+    assert desk.get("/data")["baseRef"] == "feature"
     desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": ["feature"]})
 
 
