@@ -1786,7 +1786,14 @@
     } catch (error) {
       heard = {};
     }
+    // What the reader had already been shown when they arrived. A thread is marked read the moment it is on their
+    // screen, so folding on that as it happens folds a thread away while they are reading it - which is what news
+    // brought to them is for. What arrived unread therefore stands whole until they come back to the page.
+    arrived = { ...heard };
   }
+
+  // What each thread had been heard of when the page was loaded, which is what folding a settled thread reads.
+  let arrived = {};
 
   function keepHeard() {
     try {
@@ -2061,9 +2068,9 @@
     const cell = document.createElement("td");
     cell.colSpan = 5;
     const answers = (note.replies || []).length;
-    // Folded where the reader folded it, and only once they have been shown all of it: a thread answered since they
-    // read it is news, and news is read rather than outlined.
-    const read = note.seq in heard && answers <= heard[note.seq];
+    // Folded once it is dealt with and holds nothing the reader has yet to be shown: a thread answered since they
+    // last read it is news, and news is read rather than outlined.
+    const read = note.seq in arrived && answers <= arrived[note.seq];
     const settled = note.state === "resolved" && read && !unfolded.has(note.seq);
     const box = document.createElement("div");
     box.className = note.pending ? "thread draft" : note.state === "resolved" ? "thread done" : "thread";
@@ -2410,6 +2417,8 @@
           unfolded.delete(note.seq);
           const kept = mine().find((row) => row.seq === note.seq);
           heard[note.seq] = kept ? (kept.replies || []).length : 0;
+          // Closed by their own hand, so it folds away under it rather than at the next visit.
+          arrived[note.seq] = heard[note.seq];
           keepHeard();
         } else {
           unfolded.add(note.seq);
