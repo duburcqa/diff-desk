@@ -25,6 +25,8 @@ Endpoints, all on 127.0.0.1 so nothing is exposed off the machine:
                               what was only bound, so nothing first reaches a pull request unasked
   POST /sync                  {repo, pr} - bring back what the pull request holds: replies, what it says is resolved,
                               and the comments written there that this desk has none of
+  POST /media?name=           the bytes of one image or video a comment is to carry, kept beside the log
+  GET  /media/<file>          one file kept that way, which is what the page shows a comment carrying
 
 Deleting is the one thing that does discard: a dropped comment leaves the page and every exchange with the pull
 request, and a dropped reply is gone from the thread. What was posted is deleted on the pull request first, so a
@@ -50,6 +52,16 @@ Closing a comment here closes nothing there. Sending the thread does, and where 
 here whose thread is still open there says so rather than reading as resolved everywhere, and a sync that finds it open
 there corrects a claim this desk could no longer stand behind.
 
+A comment carries files as well as words: whatever GitHub renders - an image or a video - pasted, dropped or picked
+into any box a reviewer writes in. The bytes are kept beside the log, one file named by the digest of what it holds,
+and the comment keeps that name rather than the bytes, since the page reads the whole log on every poll. A comment kept
+local keeps its files here exactly as its text stays here. One going out is uploaded to GitHub's asset store first, and
+the body posted is what was written with a link to each file under it - so a screenshot says the same thing on the pull
+request as it does on this desk. What GitHub gives for a file is kept on the comment, so a send that failed, and the
+send after it, carry the file GitHub already holds rather than another copy of it, and every body compared against the
+pull request - a thread found by the text that opened it, a reply told from one already there - is compared as it was
+posted.
+
 A comment also carries where it stands with the pull request, apart from whether it is resolved: `none` when it was
 never meant to go there, `pending` while it still owes a post, `failed` after an attempt worth trying again, `refused`
 when GitHub rejected the comment itself and retrying cannot help, `posted` once it landed. A failure and a refusal both
@@ -57,6 +69,7 @@ keep their reason. The log on disk is written before GitHub is contacted, so a p
 """
 
 import contextlib
+import hashlib
 import json
 import os
 import pathlib
@@ -65,7 +78,7 @@ import time
 import types
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import NamedTuple
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 import gen_diff_data
 
@@ -100,7 +113,29 @@ DATA = HOME / "diff_data.json"
 NOTES = HOME / "comments.jsonl"
 TICKS = HOME / "reviewed.json"
 PULLS = HOME / "pulls.json"
+MEDIA = HOME / "media"
 PORT = int(os.environ.get("DIFF_DESK_PORT", "8787"))
+
+# What GitHub renders, and the type it is told for each: a file whose name says nothing it can show is refused as it is
+# offered rather than at the send, where the comment written around it would be what failed.
+ATTACHABLE = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".svg": "image/svg+xml",
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".webm": "video/webm",
+}
+# The most GitHub takes of each kind. What it takes of a video is the account's own allowance, which cannot be known
+# before asking, so this is the generous bound and GitHub refuses the rest.
+CAPS = {"image": 10 * 1024 * 1024, "video": 100 * 1024 * 1024}
+# Where GitHub keeps what a comment carries, whichever kind of comment carries it: a review comment has no upload of
+# its own, so this one is asked for every attachment that goes out. It is told the repository to file the asset under,
+# and answers a URL for it.
+ASSETS = "https://uploads.github.com/user-attachments/assets"
 
 
 def read_notes():
@@ -130,6 +165,53 @@ def read_notes():
             if answer["at"] == "on the PR":
                 answer["at"] = ""
     return rows
+
+
+def attached(name, raw):
+    """Keep one file a comment is to carry beside the log, and say what it is called there, or why it was refused.
+
+    Named by the digest of what it holds, so the same screenshot pasted into two comments is one file and a name the
+    reviewer never chose cannot land on another's.
+    """
+    suffix = pathlib.Path(name).suffix.lower()
+    kind = ATTACHABLE.get(suffix)
+    if kind is None:
+        offered = suffix or "a file with no extension"
+        return None, f"GitHub renders none of {offered}: {' '.join(sorted(ATTACHABLE))}"
+    if not raw:
+        return None, f"{name} holds nothing"
+    cap = CAPS["video" if kind.startswith("video/") else "image"]
+    if len(raw) > cap:
+        return None, f"{name} is {len(raw) // (1024 * 1024)}MB, and GitHub takes {cap // (1024 * 1024)}MB of that kind"
+    file = hashlib.sha256(raw).hexdigest()[:16] + suffix
+    MEDIA.mkdir(parents=True, exist_ok=True)
+    spare = MEDIA / f"{file}.writing"
+    spare.write_bytes(raw)
+    os.replace(spare, MEDIA / file)
+    # The words that stand in for an image are its own name, as the web uploader has them: the extension goes and the
+    # dots left in what remains read as spaces.
+    return {"file": file, "name": name, "kind": kind, "alt": pathlib.Path(name).stem.replace(".", " ")}, ""
+
+
+def carried(order):
+    """The files a request says its words carry, each a copy of its own so no two comments hold the same one."""
+    return [dict(image) for image in order.get("images") or ()]
+
+
+def spoken_as(item):
+    """One remark or reply as the pull request holds it: what was written, and under it a link to each file it carries.
+
+    Every body sent and every body compared is read through here, so a comment carrying a screenshot travels by what
+    was posted for it rather than by its words alone. A file GitHub has no copy of is left out, a link to it standing
+    for nothing.
+    """
+    links = [
+        # A video has no markdown of its own: GitHub plays a bare URL that is a paragraph in itself.
+        image["url"] if image["kind"].startswith("video/") else f"![{image['alt']}]({image['url']})"
+        for image in item.get("images") or ()
+        if image.get("url")
+    ]
+    return "\n\n".join([said for said in (item.get("text") or "", *links) if said])
 
 
 THREADS = """
@@ -343,10 +425,11 @@ def settle_sent(row, thread, going, step):
     for answer in row["replies"]:
         if answer.get("whisper"):
             continue
-        if answer["text"] in step.sent or answer["text"] in spoken:
+        said = spoken_as(answer)
+        if said in step.sent or said in spoken:
             answer["github"] = "posted"
             answer.pop("error", None)
-        elif answer["text"] in going:
+        elif said in going:
             answer["github"] = "failed"
             answer["error"] = step.trouble
     if step.resolved or thread["isResolved"]:
@@ -357,12 +440,108 @@ def settle_sent(row, thread, going, step):
         row["prResolveError"] = step.trouble
 
 
+# What GitHub answered about each repository an upload was filed under, since asking is a request every time.
+REPO_IDS = {}
+
+
+def repository_id(repo):
+    """The number GitHub files an upload under for one repository, asked once and remembered."""
+    if repo not in REPO_IDS:
+        done = gen_diff_data.gh("api", f"repos/{repo}", "--jq", ".id", repeatable=True)
+        if done.returncode != 0:
+            return 0, " ".join((done.stderr or done.stdout).split())[:300]
+        try:
+            REPO_IDS[repo] = int(done.stdout.strip())
+        except ValueError:
+            return 0, f"GitHub named no repository to file an upload under for {repo}"
+    return REPO_IDS[repo], ""
+
+
+def sent_up(repo, number, item):
+    """Put on GitHub every file one remark or reply carries that it has no copy of yet, and say what refused one.
+
+    The URL is written onto the file as GitHub answers for it, so a send that fails afterwards carries what GitHub
+    already holds rather than another copy of it. Uploading takes write access on the repository, which GitHub turns
+    down as something not found rather than as something refused, so what it said stands as the reason unread.
+    """
+    for image in item.get("images") or ():
+        if image.get("url"):
+            continue
+        where = MEDIA / image["file"]
+        if not where.is_file():
+            return f"{image['name']} is no longer beside the log"
+        asked = f"{ASSETS}?name={quote(image['name'])}&content_type={quote(image['kind'])}&repository_id={number}"
+        print(f"UPLOAD {image['name']} ({where.stat().st_size} bytes) -> {repo}", flush=True)
+        # Given an empty standard input, the bytes being named as a file: the endpoint is told a length, which a body
+        # piped in has none of.
+        done = gen_diff_data.gh(
+            "api",
+            "--method",
+            "POST",
+            asked,
+            "-H",
+            "Content-Type: application/octet-stream",
+            "--input",
+            str(where),
+            repeatable=False,
+            given="",
+        )
+        if done.returncode != 0:
+            return " ".join((done.stderr or done.stdout).split())[:300]
+        try:
+            given = json.loads(done.stdout or "{}").get("url") or ""
+        except json.JSONDecodeError:
+            given = ""
+        if not given:
+            return f"GitHub took {image['name']} and named no URL for it"
+        image["url"] = given
+    return ""
+
+
+def carried_up(repo, chosen, summary):
+    """Put on GitHub every file these threads are about to carry there, and keep on each what it was given.
+
+    Written to the log as GitHub answers, and never with the log held: an upload takes as long as it takes. A file that
+    will not go stops the send - a remark whose screenshot is on this desk and nowhere on the pull request is the one
+    thing this tool is meant not to leave behind. A whisper carries its files no further than this desk, the pull
+    request holding no such thing.
+    """
+    carrying = [item for row in chosen for item in (row, *(row.get("replies") or ())) if not item.get("whisper")]
+    carrying.append(summary)
+    if not any(item.get("images") for item in carrying):
+        return ""
+    number, trouble = repository_id(repo)
+    if trouble:
+        return trouble
+    for item in carrying:
+        trouble = sent_up(repo, number, item)
+        if trouble:
+            break
+    # Read against the log again now the uploads are over, by the name each file is kept under: comments recorded while
+    # they ran must not be written away, and a reply added since moves no file of another.
+    given = {
+        (row["seq"], image["file"]): image["url"]
+        for row in chosen
+        for item in (row, *(row.get("replies") or ()))
+        for image in item.get("images") or ()
+        if image.get("url")
+    }
+    with changing() as rows:
+        for row in rows:
+            for item in (row, *(row.get("replies") or ())):
+                for image in item.get("images") or ():
+                    if not image.get("url") and (row["seq"], image["file"]) in given:
+                        image["url"] = given[row["seq"], image["file"]]
+    return trouble
+
+
 def anchored(note):
     """Where a remark hangs on the pull request: a whole file, the line it was written on, or a range from one."""
+    said = spoken_as(note)
     if note.get("side") == "file":
-        return {"path": note["path"], "body": note["text"], "subject_type": "file"}
+        return {"path": note["path"], "body": said, "subject_type": "file"}
     side = "LEFT" if note.get("side") == "old" else "RIGHT"
-    where = {"path": note["path"], "body": note["text"], "line": note.get("endLine") or note["line"], "side": side}
+    where = {"path": note["path"], "body": said, "line": note.get("endLine") or note["line"], "side": side}
     if note.get("endLine") and note["endLine"] != note["line"]:
         where["start_line"] = note["line"]
         where["start_side"] = side
@@ -539,15 +718,15 @@ def settle(row, landed, incoming, resolved, stamps=()):
     when the pull request says each was written, and its resolution - the pull request being the copy others read,
     what it says is resolved is resolved."""
     stamps = stamps or {}
-    if not row.get("at") and row["text"] in stamps:
-        row["at"] = stamps[row["text"]]
+    if not row.get("at") and spoken_as(row) in stamps:
+        row["at"] = stamps[spoken_as(row)]
     for answer in row.get("replies", []):
         if answer.get("whisper"):
             continue
         if answer["text"] in landed:
             answer["github"] = "posted"
-        if not answer.get("at") and answer["text"] in stamps:
-            answer["at"] = stamps[answer["text"]]
+        if not answer.get("at") and spoken_as(answer) in stamps:
+            answer["at"] = stamps[spoken_as(answer)]
     if incoming:
         row.setdefault("replies", []).extend(incoming)
     if resolved:
@@ -561,7 +740,7 @@ def landed_replies(row, said):
     return [
         answer["text"]
         for answer in row["replies"]
-        if not answer.get("whisper") and (answer["github"] == "posted" or answer["text"] in spoken)
+        if not answer.get("whisper") and (answer["github"] == "posted" or spoken_as(answer) in spoken)
     ]
 
 
@@ -573,9 +752,9 @@ def going_out(row, said):
     """
     spoken = {answer["body"] for answer in said}
     return [
-        answer["text"]
+        spoken_as(answer)
         for answer in row["replies"]
-        if not answer.get("whisper") and answer["github"] != "posted" and answer["text"] not in spoken
+        if not answer.get("whisper") and answer["github"] != "posted" and spoken_as(answer) not in spoken
     ]
 
 
@@ -664,7 +843,7 @@ def author_of(said):
 
 def incoming(row, said):
     """The replies the thread holds that this desk does not, as replies of its own."""
-    ours = {answer["text"] for answer in row.get("replies", [])} | {row["text"]}
+    ours = {spoken_as(answer) for answer in row.get("replies", [])} | {spoken_as(row)}
     return [
         {"who": author_of(answer), "text": answer["body"], "at": said_at(answer), "github": "posted"}
         for answer in said[1:]
@@ -787,15 +966,17 @@ class Handler(BaseHTTPRequestHandler):
         route = urlparse(self.path)
         query = parse_qs(route.query)
         path = route.path.rstrip("/")
+        # What the desk holds and nothing else, answered as it is asked for: which run of the desk is answering, since
+        # a watch armed against one that has been restarted is reading a page and a wording that no longer exist, and
+        # which files have been read, since a tick outlives the browser it was made in.
+        held = {"/serving": lambda: {"desk": SERVING}, "/reviewed": lambda: {"marks": read_ticks()}}
         if path in ("", "/index.html"):
             print(f"PAGE served to {self.headers.get('User-Agent', '?')}", flush=True)
             # Loading the page is asking for the diffs as they stand, so they are collected again before it goes out.
             rebuild()
             self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
-        elif path == "/serving":
-            # Which desk is answering: a watch armed against one that has since been restarted is reading a page and
-            # a wording that no longer exist, which is what tells it to arm itself again.
-            self._json({"desk": SERVING})
+        elif path in held:
+            self._json(held[path]())
         elif path == "/data":
             self._send(200, DATA.read_bytes(), "application/json")
         elif path == "/refs":
@@ -827,10 +1008,10 @@ class Handler(BaseHTTPRequestHandler):
             )
         elif path == "/lines":
             self._lines(query)
+        elif path.startswith("/media/"):
+            self._kept(path[len("/media/") :])
         elif path == "/favicon.ico":
             self._send(204)
-        elif path == "/reviewed":
-            self._json({"marks": read_ticks()})
         elif path == "/comments":
             since = int(query.get("since", ["0"])[0])
             event = int(query.get("event", ["0"])[0])
@@ -879,10 +1060,46 @@ class Handler(BaseHTTPRequestHandler):
         # Reported in the numbering the page asked in, which is what it lays the lines out at.
         self._json({"total": len(rows), "from": low - shift, "to": high - shift, "lines": rows[low - 1 : high]})
 
+    def _kept(self, file):
+        """One file a comment carries, as the page asks for it.
+
+        Read by the name it is kept under and no other: a name carrying a path of its own would reach whatever the desk
+        can read, and every file here is named by the digest of what it holds.
+        """
+        where = MEDIA / pathlib.PurePosixPath(file).name
+        kind = ATTACHABLE.get(where.suffix.lower())
+        if kind is None or not where.is_file():
+            self._send(404)
+            return
+        self._send(200, where.read_bytes(), kind)
+
+    def _media(self):
+        """Keep the file a reviewer pasted, dropped or picked into a box, and answer with what it is called here.
+
+        The bytes arrive as the body and the name they came under in the query, since what a page holds is a file
+        rather than a form. Kept as it is offered rather than as the comment is sent: a reviewer sees at once that the
+        screenshot is on the desk, and the comment it goes into carries nothing but its name.
+        """
+        name = parse_qs(urlparse(self.path).query).get("name", ["attachment"])[0]
+        length = int(self.headers.get("Content-Length", 0))
+        # Refused on the length it declares, before it is read: nothing GitHub would turn away is carried into memory
+        # first.
+        if length > CAPS["video"]:
+            self._json({"ok": False, "error": f"{name} is larger than anything GitHub takes"})
+            return
+        held, trouble = attached(name, self.rfile.read(length))
+        if trouble:
+            print(f"ATTACH REFUSED {trouble}", flush=True)
+            self._json({"ok": False, "error": trouble})
+            return
+        print(f"ATTACHED {held['file']} <- {name}", flush=True)
+        self._json({"ok": True, "image": held})
+
     def do_POST(self):
         path = urlparse(self.path).path.rstrip("/")
         routes = {
             "/comments": self._record,
+            "/media": self._media,
             "/reviewed": self._reviewed,
             "/scan": self._scan,
             "/bind": self._bind,
@@ -986,7 +1203,8 @@ class Handler(BaseHTTPRequestHandler):
             if note.get("endLine") and note["endLine"] != note.get("line"):
                 span += f"-{note['endLine']}"
             text = " ".join(str(note.get("text", "")).split())
-            print(f"  COMMENT [{note['seq']}] {note.get('path', '?')}:{span} :: {text}", flush=True)
+            files = "".join(f" +{image['file']}" for image in note.get("images") or ())
+            print(f"  COMMENT [{note['seq']}] {note.get('path', '?')}:{span} :: {text}{files}", flush=True)
         self._json({"ok": True, "batch": group, "seq": seq, "seqs": [note["seq"] for note in batch]})
 
     def _bind(self):
@@ -1044,8 +1262,15 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 said = replies[index]
             if said is not None:
-                said.setdefault("edits", []).append({"at": time.strftime("%Y-%m-%d %H:%M:%S"), "text": said["text"]})
+                earlier = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "text": said["text"]}
+                if said.get("images"):
+                    earlier["images"] = said["images"]
+                said.setdefault("edits", []).append(earlier)
                 said["text"] = text
+                # A request that says nothing about files leaves the ones it carries alone, which is what a session
+                # rewording a comment from the command line asks for.
+                if "images" in order:
+                    said["images"] = carried(order)
                 # Rewriting is never carried to the pull request, so its copy is marked as having been moved on from.
                 landed = (said["github"] if index is not None else found.get("github")) == "posted"
                 if landed:
@@ -1077,6 +1302,8 @@ class Handler(BaseHTTPRequestHandler):
         # it. Nothing that hangs under a whisper can leave either, the pull request holding no such thing to answer.
         on = order.get("on")
         said = {"who": who, "text": text, "at": time.strftime("%Y-%m-%d %H:%M:%S"), "github": "none"}
+        if order.get("images"):
+            said["images"] = carried(order)
         if on is not None:
             said["on"] = on
         with changing() as rows:
@@ -1125,9 +1352,10 @@ class Handler(BaseHTTPRequestHandler):
                 if row.get("seq") in wanted:
                     row["state"] = "resolved" if closing else "open"
                     if answer:
-                        row["replies"].append(
-                            {"who": who, "text": answer, "at": time.strftime("%Y-%m-%d %H:%M:%S"), "github": "none"}
-                        )
+                        said = {"who": who, "text": answer, "at": time.strftime("%Y-%m-%d %H:%M:%S"), "github": "none"}
+                        if order.get("images"):
+                            said["images"] = carried(order)
+                        row["replies"].append(said)
                     touched(rows, row, who)
                     closed += 1
         print(f"{'RESOLVED' if closing else 'REOPENED'} {closed} comment(s) by {who}", flush=True)
@@ -1198,7 +1426,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         # Newest first, so the comment that opened the thread is the last to go.
         going = (
-            [replies[-1]["text"]] if last_only else [answer["text"] for answer in reversed(replies)] + [found["text"]]
+            [spoken_as(replies[-1])]
+            if last_only
+            else [spoken_as(answer) for answer in reversed(replies)] + [spoken_as(found)]
         )
         gone = 0
         if found.get("github") == "posted" and order.get("repo") and order.get("pr"):
@@ -1211,7 +1441,7 @@ class Handler(BaseHTTPRequestHandler):
                 (
                     node
                     for node in reviewed.threads
-                    if node["comments"]["nodes"] and node["comments"]["nodes"][0]["body"] == found["text"]
+                    if node["comments"]["nodes"] and node["comments"]["nodes"][0]["body"] == spoken_as(found)
                 ),
                 None,
             )
@@ -1278,7 +1508,22 @@ class Handler(BaseHTTPRequestHandler):
         if not chosen:
             self._json({"ok": True, "sent": 0, "owed": 0, "replies": 0, "resolved": 0})
             return
-        landed, url, error, missed = self._put_remarks(order, chosen)
+        # The overall note is a comment of its own on this desk and the review's body on the pull request, so what it
+        # carries is uploaded with the threads going out and read into the body the same way theirs is.
+        summary = {"text": (order.get("summary") or "").strip(), "images": order.get("summaryImages") or []}
+        trouble = carried_up(order["repo"], chosen, summary)
+        if trouble:
+            with changing() as rows:
+                asked = {row["seq"] for row in chosen}
+                for row in rows:
+                    if row["seq"] in asked and row.get("github") != "posted":
+                        row["github"] = "failed"
+                        row["error"] = trouble
+                        touched(rows, row, "session")
+            print(f"PUBLISHED nothing ({trouble})", flush=True)
+            self._json({"ok": False, "error": trouble, "sent": 0, "owed": len(chosen), "replies": 0, "resolved": 0})
+            return
+        landed, url, error, missed = self._put_remarks(order, chosen, summary)
         carrying = [row for row in chosen if row["seq"] not in missed and owes_there(row)]
         replies, resolved, trouble = self._carry_threads(order, carrying)
         with CHANGING:
@@ -1298,7 +1543,7 @@ class Handler(BaseHTTPRequestHandler):
             }
         )
 
-    def _put_remarks(self, order, chosen):
+    def _put_remarks(self, order, chosen, summary):
         """Put on the pull request the remarks of these threads that are not there yet, and record where each stands.
 
         A remark written on the pull request is its author's word and is already there, so what this desk sends of such
@@ -1307,7 +1552,7 @@ class Handler(BaseHTTPRequestHandler):
         posting = [row for row in chosen if not row.get("who") and row.get("github") != "posted"]
         if not posting:
             return set(), "", "", set()
-        went, url, error, refused = post_review(order["repo"], order["pr"], order.get("summary"), posting)
+        went, url, error, refused = post_review(order["repo"], order["pr"], spoken_as(summary), posting)
         # Comments go out one at a time when they go out without a review, so a failure part way leaves the ones
         # already on the pull request standing as posted rather than owed again.
         landed = set(went)
@@ -1340,7 +1585,7 @@ class Handler(BaseHTTPRequestHandler):
         reviewed, trouble = review_threads(order["repo"], order["pr"])
         owing, plans = [], []
         for row in carrying:
-            thread = None if reviewed is None else thread_of(reviewed.threads, row["text"])
+            thread = None if reviewed is None else thread_of(reviewed.threads, spoken_as(row))
             if thread is None:
                 trouble = trouble or NOWHERE
                 # Written onto the comment, so the reader sees on the thread why the last send did not land: nothing
@@ -1399,9 +1644,9 @@ class Handler(BaseHTTPRequestHandler):
                 theirs[said[0]["body"]] = thread
         # Threads opened on the pull request itself, which is where a comment this desk never wrote comes from. Matched
         # by the same body text a thread of its own is matched by, so a second sync finds them already here.
-        known = {row["text"] for row in rows}
+        known = {spoken_as(row) for row in rows}
         arriving = [thread for body, thread in theirs.items() if body not in known]
-        found = {seq: heard_from(row, theirs.get(row["text"])) for seq, row in posted.items()}
+        found = {seq: heard_from(row, theirs.get(spoken_as(row))) for seq, row in posted.items()}
         brought = sum(len(step.incoming) for step in found.values())
         closed = len([seq for seq, step in found.items() if step.settled and posted[seq].get("state") != "resolved"])
         with changing() as fresh:

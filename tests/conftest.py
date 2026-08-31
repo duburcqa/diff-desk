@@ -1,5 +1,6 @@
 """A repository to review and a desk serving it, both built from scratch so no checkout or network is involved."""
 
+import base64
 import json
 import os
 import pathlib
@@ -8,6 +9,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import pytest
@@ -137,6 +139,17 @@ class Desk:
         with urllib.request.urlopen(f"{self.url}/", timeout=60) as answer:
             return answer.read().decode()
 
+    def attach(self, name, raw):
+        """Offer one file to the desk as the page does: the bytes as the body, under the name it arrived with."""
+        request = urllib.request.Request(
+            f"{self.url}/media?name={urllib.parse.quote(name)}",
+            data=raw,
+            headers={"Content-Type": "application/octet-stream"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=60) as answer:
+            return json.loads(answer.read())
+
     def post(self, route, payload):
         request = urllib.request.Request(
             f"{self.url}{route}",
@@ -189,6 +202,15 @@ def desk(repo, tmp_path_factory):
     process.terminate()
     process.wait(timeout=10)
     told.close()
+
+
+@pytest.fixture(scope="session")
+def shot():
+    """One image for whatever a comment is made to carry: 64 pixels square, so a thumbnail of it has a real size."""
+    return base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAATUlEQVR42u3PQQkAAAgEsItoRKNeBN/CYAWWzP4mICAgICAgICAgICAg"
+        "ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIHApZQUA4hE4GpMAAAAASUVORK5CYII="
+    )
 
 
 @pytest.fixture(scope="session")

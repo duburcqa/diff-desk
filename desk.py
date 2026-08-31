@@ -110,6 +110,13 @@ def span(note):
     return f"{note['line']}-{end}" if end and end != note["line"] else str(note["line"])
 
 
+def carried(item, indent):
+    """Where to open every file one remark or reply carries, so a session reads the picture and not a word about it."""
+    for image in item.get("images") or ():
+        where = "on the pull request" if image.get("url") else "here only"
+        print(f"{indent}{serve_diff.MEDIA / image['file']} ({image['name']}, {where})", flush=True)
+
+
 def show(note, since=None):
     text = " ".join(str(note.get("text", "")).split())
     marks = [note.get("state", "open")]
@@ -123,6 +130,7 @@ def show(note, since=None):
         f"[{note['seq']}] {note.get('branch', '?')} {note['path']}:{span(note)} ({note.get('side')}) {text}", flush=True
     )
     print(f"      {' | '.join(marks)}", flush=True)
+    carried(note, "      ")
     for index, answer in enumerate(note.get("replies") or []):
         # Numbered as the desk addresses it, so the reply to reword, or the note to answer, is named by what is
         # printed here. A note is said to be one: it is written for this side of the desk, so it guides the work
@@ -134,6 +142,7 @@ def show(note, since=None):
         # the ones it has already answered.
         news = "*" if since is not None and answer.get("event", 0) > since else " "
         print(f"     {news}[{index}] {said} {answer['at']}: {' '.join(answer['text'].split())}", flush=True)
+        carried(answer, "          ")
         for earlier in answer.get("edits") or []:
             print(f"          was {earlier['at']}: {' '.join(earlier['text'].split())[:80]}", flush=True)
     for earlier in note.get("edits") or []:

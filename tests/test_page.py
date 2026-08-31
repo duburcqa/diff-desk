@@ -4,6 +4,7 @@ Pointer handling and sticky positioning differ between engines, so these run per
 engine is skipped, never silently dropped from the run.
 """
 
+import base64
 import json
 import re
 
@@ -151,6 +152,34 @@ def submit_alone(page, text):
     page.wait_for_function("() => document.querySelectorAll(\"tr[data-composer='true']\").length === 0")
 
 
+OFFER = """([given, name, how, where]) => {
+  const raw = Uint8Array.from(atob(given), (letter) => letter.charCodeAt(0));
+  const file = new File([raw], name, { type: "image/png" });
+  // A real transfer where the engine has one, and what the page reads off it where it has not.
+  let carried;
+  try {
+    carried = new DataTransfer();
+    carried.items.add(file);
+  } catch (error) {
+    carried = { files: [file] };
+  }
+  const event = new Event(how, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, how === "paste" ? "clipboardData" : "dataTransfer", { value: carried });
+  document.querySelector(where).dispatchEvent(event);
+}"""
+
+
+def offer(page, shot, name, how, box):
+    """Give one image to a box as a browser gives it: pasted into what is being written, or dropped onto the box."""
+    carrying = page.locator(f"{box} .carrying > span").count()
+    # A paste reaches what is being written in, a drop reaches the box around it, which is where each is listened for.
+    page.evaluate(OFFER, [base64.b64encode(shot).decode(), name, how, f"{box} textarea" if how == "paste" else box])
+    page.wait_for_function(
+        "([where, held]) => document.querySelectorAll(`${where} .carrying > span`).length === held",
+        arg=[box, carrying + 1],
+    )
+
+
 def drag(page, first, last, column):
     """Press on one row and pull to another, the way a hand does it: in small steps, over the given column.
 
@@ -278,6 +307,51 @@ def test_a_thread_can_be_answered_rewritten_closed_and_reopened_from_the_page(pa
     # Closing and reopening leave the thread exactly as it was: no reply invented, none dropped.
     assert reopened["text"] == "the remark, rewritten"
     assert [reply["text"] for reply in reopened["replies"]] == ["a reply from the reviewer"]
+
+
+def test_a_box_takes_a_screenshot_pasted_dropped_or_picked_and_the_thread_shows_it(page, desk, shot):
+    line = sample(page).locator("tr.a[data-line]").first
+    line.locator("td.code").first.hover()
+    line.locator("button.pin").first.click()
+    composer = "tr[data-composer='true']"
+    offer(page, shot, "pasted.png", "paste", f"{composer} .notebox")
+    offer(page, shot + b"\n", "dropped.png", "drop", f"{composer} .notebox")
+    # The third way in: the button beside the words, which opens the picker every browser has.
+    page.locator(f"{composer} input[type=file]").set_input_files(
+        {"name": "picked.png", "mimeType": "image/png", "buffer": shot + b"\n\n"}
+    )
+    page.wait_for_function(f'() => document.querySelectorAll("{composer} .carrying > span").length === 3')
+    # What was attached can be left out again before the comment is written.
+    page.evaluate(f"() => document.querySelector(\"{composer}\").scrollIntoView({{block: 'center'}})")
+    page.locator(f"{composer} .carrying > span").nth(1).locator("button.drop").click()
+    page.wait_for_function(f'() => document.querySelectorAll("{composer} .carrying > span").length === 2')
+    submit(page, "this is what I see")
+
+    note = desk.get("/comments")[-1]
+    assert [image["name"] for image in note["images"]] == ["pasted.png", "picked.png"]
+    # Kept beside the log rather than in it, since the page reads the whole log on every poll.
+    assert all("url" not in image for image in note["images"])
+    seq = note["seq"]
+    # Shown where it was written, and read back off the desk: an image the page never got the bytes of has no width.
+    page.wait_for_function(
+        "(seq) => { const shown = [...document.querySelectorAll(`#note-${seq} img.carries`)];"
+        " return shown.length === 2 && shown.every((image) => image.complete && image.naturalWidth === 64); }",
+        arg=seq,
+    )
+    opens = page.locator(f"#note-{seq} .said a").first.get_attribute("href")
+    assert opens.endswith(f"media/{note['images'][0]['file']}")
+
+    # Every box a reviewer writes in takes one, an answer to a thread included.
+    thread = page.locator(f"#note-{seq}")
+    thread.locator("textarea").fill("and here it is again")
+    offer(page, shot + b"\n\n\n", "answered.png", "paste", f"#note-{seq} .line.actions")
+    thread.locator("button.ghost").filter(has_text="Reply").click()
+    page.wait_for_function(f"() => document.querySelectorAll('#note-{seq} .reply').length === 1")
+    said = {row["seq"]: row for row in desk.get("/comments")}[seq]["replies"][0]
+    assert [image["name"] for image in said["images"]] == ["answered.png"]
+    page.wait_for_function(
+        "(seq) => document.querySelectorAll(`#note-${seq} .reply img.carries`).length === 1", arg=seq
+    )
 
 
 def test_one_comment_can_be_sent_without_a_batch(page, desk):
@@ -433,7 +507,7 @@ def test_a_comment_keeps_its_code_and_its_line_breaks(page, desk):
     page.wait_for_selector("section.file")
     told = page.locator(".thread .said", has_text="Mind the shift").first
     assert told.locator("strong").inner_text() == "P2 Mind the shift"
-    assert page.locator(".thread img").count() == 0
+    assert told.locator("img").count() == 0
     for markup in ("<sub>", "![", "shields.io", "**"):
         assert markup not in told.inner_text()
 
