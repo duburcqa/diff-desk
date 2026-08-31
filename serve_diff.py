@@ -52,10 +52,12 @@ Closing a comment here closes nothing there. Sending the thread does, and where 
 here whose thread is still open there says so rather than reading as resolved everywhere, and a sync that finds it open
 there corrects a claim this desk could no longer stand behind.
 
-A comment carries files as well as words: whatever GitHub renders - an image or a video - pasted, dropped or picked
-into any box a reviewer writes in. The bytes are kept beside the log, one file named by the digest of what it holds,
-and the comment keeps that name rather than the bytes, since the page reads the whole log on every poll. A comment kept
-local keeps its files here exactly as its text stays here. One going out is uploaded to GitHub's asset store first, and
+A comment carries files as well as words: an image or a video pasted, dropped or picked into any box a reviewer writes
+in. Nine types, which is what GitHub's upload takes from a token - a browser's comment box takes more by uploading
+through a session, and a file this desk could not send is one the pull request could never hold. The bytes are kept
+beside the log, one file named by the digest of what it holds, and the comment keeps that name rather than the bytes,
+since the page reads the whole log on every poll. A comment kept local keeps its files here exactly as its text stays
+here. One going out is uploaded to GitHub's asset store first, and
 the body posted is what was written with a link to each file under it - so a screenshot says the same thing on the pull
 request as it does on this desk. What GitHub gives for a file is kept on the comment, so a send that failed, and the
 send after it, carry the file GitHub already holds rather than another copy of it, and every body compared against the
@@ -116,8 +118,10 @@ PULLS = HOME / "pulls.json"
 MEDIA = HOME / "media"
 PORT = int(os.environ.get("DIFF_DESK_PORT", "8787"))
 
-# What GitHub renders, and the type it is told for each: a file whose name says nothing it can show is refused as it is
-# offered rather than at the send, where the comment written around it would be what failed.
+# What GitHub's upload takes, and the type it is told for each: a file of any other kind is refused as it is offered
+# rather than at the send, where the comment written around it would be what failed. The endpoint answers every type
+# outside this list with `content_type is not included in the list of allowed content types`, whatever a browser's own
+# comment box accepts.
 ATTACHABLE = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
@@ -177,7 +181,8 @@ def attached(name, raw):
     kind = ATTACHABLE.get(suffix)
     if kind is None:
         offered = suffix or "a file with no extension"
-        return None, f"GitHub renders none of {offered}: {' '.join(sorted(ATTACHABLE))}"
+        taken = " ".join(sorted(ATTACHABLE))
+        return None, f"GitHub's upload takes none of {offered}, whatever a browser's comment box takes: {taken}"
     if not raw:
         return None, f"{name} holds nothing"
     cap = CAPS["video" if kind.startswith("video/") else "image"]
