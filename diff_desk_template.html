@@ -1543,22 +1543,21 @@
 
   /* ---------- the log: what is waiting, what is on the PR, what is local only, what has moved on ---------- */
 
-  function present() {
-    // Every line the current view can anchor a comment to, so a comment that no longer has one can be told apart.
-    const keys = new Set();
-    for (const file of view().files) {
-      for (const [kind, oldNo, newNo] of file.lines) {
-        if (kind === "h") continue;
-        keys.add(`${file.path}|${kind === "d" ? "old" : "new"}|${kind === "d" ? oldNo : newNo}`);
-      }
-    }
-    return keys;
-  }
-
   // A remark about a whole file has no line to lose, so it is never left behind by one. Otherwise a comment is left
-  // behind when the line it was written against is gone from the diff, whether or not its number still names one.
-  const isOutdated = (note, keys) =>
-    note.side !== "file" && (!keys.has(`${note.path}|${note.side}|${placed(note)}`) || lostItsLine(note));
+  // behind when the line it was written against is gone from the diff, whether or not its number still names one, and
+  // when the code it was written against is gone from the side it was written on.
+  //
+  // Asked of the one file the comment belongs to. A set of every line in the view answers the same question, and costs
+  // a string per line of the diff to build - every card that fills asks, so a review of any size builds one per card,
+  // and anything that outlives a card holds a copy of it.
+  function isOutdated(note) {
+    if (note.side === "file") return false;
+    const file = view().files.find((entry) => entry.path === note.path);
+    if (!file) return true;
+    const rows = file.lines.filter((row) => row[0] !== "h" && rowSide(row) === note.side);
+    if (!rows.some((row) => placedLine(row, note.side) === placed(note))) return true;
+    return note.anchor ? !rows.some((row) => row[3] === note.anchor) : false;
+  }
 
   function mine() {
     return notes.sent.filter((note) => belongs(note) && note.path !== "(review)" && note.state !== "deleted");
@@ -1577,7 +1576,6 @@
   }
 
   function drawLog() {
-    const keys = present();
     const all = mine();
     const shown = withResolved() ? all : all.filter((note) => note.state !== "resolved");
     const rows = els.logunread.checked ? shown.filter(unread) : shown;
@@ -1604,7 +1602,7 @@
       // is where the answer just written into a batch of long ago is found.
       const moved = [...rows].sort((one, other) => (other.event || 0) - (one.event || 0));
       for (const note of moved) {
-        els.logrows.append(logRow(note, keys));
+        els.logrows.append(logRow(note));
         if (unmoored === note.seq) els.logrows.append(panelThread(note));
       }
       if (!moved.length) drawEmpty(all);
@@ -1631,7 +1629,7 @@
       group.append(title);
       els.logrows.append(group);
       for (const note of held) {
-        group.append(logRow(note, keys));
+        group.append(logRow(note));
         if (unmoored === note.seq) group.append(panelThread(note));
       }
     }
@@ -1755,7 +1753,7 @@
     return !(note.seq in heard) || (note.replies || []).length > heard[note.seq];
   }
 
-  function logRow(note, keys) {
+  function logRow(note) {
     const item = document.createElement("button");
     item.className = "logrow";
     item.dataset.state = note.state;
@@ -1771,7 +1769,7 @@
     for (const [label, kind] of [
       [note.github === "none" ? "local only" : GITHUB_MARK[note.github], note.github],
       [closing(note), note.prResolve === "done" ? "posted" : "pending"],
-      [isOutdated(note, keys) ? "code moved on" : "", "outdated"],
+      [isOutdated(note) ? "code moved on" : "", "outdated"],
     ]) {
       if (!label) continue;
       const mark = document.createElement("span");
@@ -2098,17 +2096,6 @@
     // The same line can read the same in several places, and the one the comment was written against is the one it was
     // nearest to.
     return same.reduce((best, line) => (Math.abs(line - wanted) < Math.abs(best - wanted) ? line : best));
-  }
-
-  // Whether the line a comment was written against is still in the diff. A remark about a whole file has no line to
-  // lose; one whose text is nowhere to be found has lost its place even though its number still names some other line,
-  // which is the case a number alone cannot tell.
-  function lostItsLine(note) {
-    if (note.side === "file") return false;
-    const file = view().files.find((entry) => entry.path === note.path);
-    if (!file) return true;
-    if (!note.anchor) return !file.lines.some((row) => row[0] !== "h" && placedLine(row, note.side) === placed(note));
-    return !file.lines.some((row) => row[0] !== "h" && row[3] === note.anchor && rowSide(row) === note.side);
   }
 
   const rowSide = (row) => (row[0] === "d" ? "old" : "new");
@@ -3635,8 +3622,7 @@
       const tbody = document.createElement("tbody");
       // What each row reads as, worked out for the whole file at once.
       const painted = paintFile(file, tongueFor(file.path));
-      const keys = present();
-      const stranded = mine().filter((note) => note.path === file.path && isOutdated(note, keys));
+      const stranded = mine().filter((note) => note.path === file.path && isOutdated(note));
       // Which line each stranded comment hangs under: the last one the diff still shows at or above where it was
       // written, or the first one shown when it was written above all of them. Kept as `side|line` so the row loop can
       // recognise its own place without holding on to rows that do not exist yet.
