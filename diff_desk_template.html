@@ -707,7 +707,9 @@
   .logrow:hover { border-color: var(--accent); }
   .logrow[data-unread="true"] { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
   .logrow[data-unread="true"] b { color: var(--accent); }
-  .logthread { border: 1px solid var(--rule); border-radius: 6px; background: var(--surface-sunk); overflow: hidden; }
+  /* Never shrunk: the listing scrolls, and a box that hides its own overflow may be squashed to nothing to make room,
+     which leaves a thread opened in the panel showing its border and none of what the reader opened it for. */
+  .logthread { flex: none; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface-sunk); overflow: hidden; }
   .logthread table { width: 100%; border-collapse: collapse; }
   .logthread .noterow td { padding: 0; }
   .logrow[data-state="resolved"] { background: var(--add-bg); border-color: color-mix(in srgb, var(--add-ink) 35%, transparent); }

@@ -1270,6 +1270,32 @@ def test_a_thread_with_nowhere_to_go_is_read_in_the_panel(page, desk):
     row.click()
     assert page.locator(".logthread").get_by_text("and answered afterwards").is_visible()
 
+    # Listed thread by thread, where a thread opened in the panel stands among the rows rather than inside a batch of
+    # its own, and with more rows than the panel can hold, which is what a review looks like by the end of one.
+    filling = desk.post(
+        "/comments",
+        [
+            {"branch": branch, "path": "added.py", "line": 1, "side": "new", "text": f"one of many, {index}"}
+            for index in range(24)
+        ],
+    )["seqs"]
+    page.locator("#logsort").select_option("thread")
+    page.wait_for_function("() => document.querySelectorAll('#logrows .logrow').length > 20")
+    # Shown at the height of what it holds: a scrolling list is free to shrink what it holds, and a thread shrunk to
+    # its border reads as a press that did nothing.
+    stood = page.evaluate(
+        """() => {
+          const holder = document.querySelector('.logthread');
+          const said = holder.querySelector('.thread');
+          return { holder: holder.getBoundingClientRect().height, said: said.getBoundingClientRect().height };
+        }"""
+    )
+    assert stood["said"] > 0
+    assert stood["holder"] >= stood["said"]
+    for gone in filling:
+        desk.post("/drop", {"seq": gone, "who": "you"})
+    page.locator("#logsort").select_option("batch")
+
     row.click()
     assert page.locator(".logthread").count() == 0
     desk.post("/drop", {"seq": seq, "who": "you"})
