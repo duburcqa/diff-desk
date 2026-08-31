@@ -1229,8 +1229,25 @@
     return { ok: false, error: answer.status === 404 ? RESTART : `the desk answered ${answer.status}` };
   }
 
+  // What is already on its way, keyed by what it says. A page waiting on the server looks frozen, which invites a
+  // second click, and the same thing said twice is the same thing: the exchange in flight is awaited again rather
+  // than sent again. A repeat asked for after it lands is a new exchange, since the key is gone by then.
+  const sending = new Map();
+
   async function post(route, payload) {
     if (leaving) return { ok: false, error: "the page is going" };
+    const already = sending.get(route + "\u0000" + JSON.stringify(payload));
+    if (already) return already;
+    const exchange = sent(route, payload);
+    sending.set(route + "\u0000" + JSON.stringify(payload), exchange);
+    try {
+      return await exchange;
+    } finally {
+      sending.delete(route + "\u0000" + JSON.stringify(payload));
+    }
+  }
+
+  async function sent(route, payload) {
     try {
       const answer = await fetch(route, {
         method: "POST",
@@ -1703,7 +1720,8 @@
     //
     // Aimed again until it lands: going there brings other files within reach, and a file built on arrival stands at
     // what its lines measure rather than at what was reserved for them, which moves the thread from under the aim.
-    aim(thread, 6);
+    // The bound covers a whole page coming back at once, which is what letting a filter go does.
+    aim(thread, 24);
   }
 
   function aim(thread, tries, again) {
@@ -1817,12 +1835,40 @@
       item.append(out);
     }
     item.addEventListener("click", () => {
-      // A thread stands on a change: one written on a change since undone, or on a file the reader has filtered away,
-      // has nowhere to be gone to, and a row that answers a press with nothing reads as broken. It opens here instead.
-      if (document.querySelector(`section.file[data-path="${CSS.escape(note.path)}"]`)) {
+      const carded = () => document.querySelector(`section.file[data-path="${CSS.escape(note.path)}"]`);
+      const goes = () => {
+        // Reading it where it was written is what the press asked for, so the copy the panel had opened folds away.
+        if (unmoored === note.seq) unmoored = null;
         reach(note);
+        drawLog();
+      };
+      if (carded()) {
+        goes();
         return;
       }
+      // The file holding it is in the diff but filtered off the page. Pressing a thread asks to be taken to it, so the
+      // filter gives way rather than the press answering with nothing, which reads as broken. Going waits for the page
+      // to hold the file again: every other file comes back at the same moment, and aiming while that is still landing
+      // aims at where the thread was rather than where it ends up.
+      if (view().files.some((file) => file.path === note.path)) {
+        els.q.value = "";
+        els.pq.value = "";
+        state.query = "";
+        state.current = 0;
+        showClear();
+        filtering.now();
+        const settling = (tries) => {
+          if (carded()) {
+            goes();
+          } else if (tries) {
+            requestAnimationFrame(() => settling(tries - 1));
+          }
+        };
+        settling(20);
+        return;
+      }
+      // A thread stands on a change: one written on a change since undone has nowhere to be gone to, and a row that
+      // answers a press with nothing reads as broken. It opens here instead.
       unmoored = unmoored === note.seq ? null : note.seq;
       // Shown whole while it is open: a resolved thread is folded away to an outline, which in the panel is a strip
       // with nothing in it, and the reason for opening it is to read what it holds.
@@ -2605,8 +2651,13 @@
       send.className = "ghost";
       send.textContent = "Reply";
       send.addEventListener("click", async () => {
-        if (!say.value.trim()) return;
-        await post("reply", { seq: note.seq, text: say.value.trim(), who: "you", images: attached() });
+        if (!say.value.trim() || send.disabled) return;
+        send.disabled = true;
+        try {
+          await post("reply", { seq: note.seq, text: say.value.trim(), who: "you", images: attached() });
+        } finally {
+          send.disabled = false;
+        }
         writing.delete(note.seq);
         await loadNotes();
         render();

@@ -2976,3 +2976,73 @@ def test_a_reply_says_whose_it_is_in_its_own_voice(page, desk):
     assert [row["name"] == row["rule"] for row in told] == [True, True]
     assert [row["name"] != row["words"] for row in told] == [True, True]
     assert told[0]["name"] != told[1]["name"]
+
+
+def test_a_reply_pressed_twice_while_it_is_out_is_said_once(page, desk):
+    branch = page.evaluate("() => data.branches[0].ref")
+    saying = f"answered under a slow server, number {len(desk.get('/comments')) + 1}"
+    made = desk.post(
+        "/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": saying}]
+    )["seq"]
+    page.reload(wait_until="load")
+    page.wait_for_selector(f"#note-{made}")
+
+    # A server that takes its time leaves the page looking frozen, which is exactly when a reader presses again.
+    page.route("**/reply", lambda route: page.wait_for_timeout(600) or route.continue_())
+    thread = page.locator(f"#note-{made}")
+    thread.locator("textarea").first.fill("said once under a slow server")
+    send = thread.locator("button.ghost").filter(has_text="Reply")
+    for _ in range(4):
+        send.dispatch_event("click")
+    page.wait_for_function(f"() => document.querySelectorAll('#note-{made} .reply').length === 1")
+    page.wait_for_timeout(900)
+
+    said = {row["seq"]: row for row in desk.get("/comments")}[made]
+    assert [reply["text"] for reply in said["replies"]] == ["said once under a slow server"]
+
+    # The same holds for whatever asks, button or not: two identical exchanges at once are one exchange.
+    page.evaluate(
+        """(seq) => {
+          const saying = { seq, text: 'said once by two callers', who: 'you' };
+          return Promise.all([post('reply', saying), post('reply', saying)]);
+        }""",
+        made,
+    )
+    page.wait_for_timeout(900)
+    twice = {row["seq"]: row for row in desk.get("/comments")}[made]
+    assert [reply["text"] for reply in twice["replies"]] == [
+        "said once under a slow server",
+        "said once by two callers",
+    ]
+
+
+def test_a_thread_is_reached_from_the_panel_even_when_its_file_is_filtered_away(page, desk):
+    branch = page.evaluate("() => data.branches[0].ref")
+    saying = f"reached through a filter, number {len(desk.get('/comments')) + 1}"
+    made = desk.post(
+        "/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": saying}]
+    )["seq"]
+    page.reload(wait_until="load")
+    page.wait_for_selector(f"#note-{made}")
+
+    # A filter naming another file takes sample.py off the page, so nothing of the thread is on screen.
+    page.evaluate("() => { state.query = 'nothing-matches-this'; filtering.now(); }")
+    page.wait_for_function("() => document.querySelectorAll('section.file').length === 0")
+
+    page.locator("#logopen").click()
+    page.wait_for_selector("#log[data-open='true']")
+    page.locator("#log .logrow").filter(has_text=saying[:24]).first.click()
+
+    # Pressing it asks to be taken there, so the filter gives way and the thread is on screen where it was written.
+    page.wait_for_selector(f"#note-{made}")
+    assert page.evaluate("() => state.query") == ""
+    # The whole diff comes back at once when the filter goes, so where the thread ends up settles over a few frames.
+    page.wait_for_function(
+        f"""() => {{
+          const note = document.getElementById('note-{made}');
+          if (!note) return false;
+          const box = note.getBoundingClientRect();
+          const covered = document.querySelector('header').getBoundingClientRect().bottom;
+          return box.top >= covered - 2 && box.top < window.innerHeight;
+        }}"""
+    )
