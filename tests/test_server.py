@@ -1262,6 +1262,66 @@ def test_serving_over_a_desk_holding_another_review_is_refused(desk):
     desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": ["feature"]})
 
 
+def test_serving_over_a_desk_started_from_other_code_replaces_it(repo, tmp_path):
+    # A desk renders its page from the files on disk and answers with the routes its process started with, so once the
+    # tool moves on under a live one the reader meets a page asking it for what it has never had. Told to serve, this
+    # one puts that desk down and takes over rather than telling it what to show.
+    other = tmp_path / "other"
+    other.mkdir()
+    for name in ("desk.py", "gen_diff_data.py", "serve_diff.py", "diff_desk_template.html"):
+        shutil.copy(ROOT / name, other / name)
+    shutil.copytree(ROOT / "vendor", other / "vendor")
+    (other / "gen_diff_data.py").write_text(f"{(other / 'gen_diff_data.py').read_text()}\n# built otherwise\n")
+    port, home = free_port(), tmp_path / "home"
+    home.mkdir()
+    (home / "fake_gh.json").write_text(json.dumps({"code": 1, "err": "gh: Not Found (HTTP 404)"}))
+    env = {
+        **os.environ,
+        "DIFF_DESK_HOME": str(home),
+        "DIFF_DESK_PORT": str(port),
+        # Fast-forwarding and restarting into what has been published is not what is under test here.
+        "DIFF_DESK_UPDATED": "1",
+        "DIFF_DESK_GH": f"{sys.executable} {ROOT / 'tests' / 'fake_gh.py'}",
+        "FAKE_GH_SCRIPT": str(home / "fake_gh.json"),
+    }
+
+    def serve(where):
+        words = [sys.executable, str(where / "desk.py"), "serve", "--dir", str(repo), "--base", "main", "feature"]
+        return subprocess.Popen(words, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+    def asking(route, payload=None):
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}{route}",
+            data=None if payload is None else json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+            method="GET" if payload is None else "POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=10) as answer:
+                return json.loads(answer.read() or b"null")
+        except (urllib.error.URLError, OSError):
+            return None
+
+    started = serve(other)
+    taking = None
+    try:
+        until(lambda: asking("/state") is not None, seconds=45)
+        assert asking("/state")["desk"] != gen_diff_data.RUNNING
+        taking = serve(ROOT)
+        # What answers is what this tool is made of, and the desk that was answering is gone rather than left holding
+        # the port with a page nobody can use.
+        until(lambda: (asking("/state") or {}).get("desk") == gen_diff_data.RUNNING, seconds=45)
+        assert started.wait(timeout=60) == 0
+        assert asking("/state")["stale"] is False
+    finally:
+        asking("/stop", {})
+        for process in (started, taking):
+            if process is None:
+                continue
+            process.terminate()
+            process.wait(timeout=30)
+
+
 def test_one_pull_request_asked_for_either_way_is_one_review():
     # A pull request is asked for by number, comes back as the ref it was fetched into, and is sent as either by the
     # page. Read verbatim, a desk would refuse to rebuild the very review it is holding.

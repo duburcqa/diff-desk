@@ -169,7 +169,7 @@ def fetch_pull(root, upstream, number):
 
 
 def desk_version():
-    """What this desk is, as a digest of the code serving it, so a page can tell it is behind the tool.
+    """What the tool on disk is, as a digest of the code it is made of, so a page can tell it is behind the tool.
 
     A page holds the script it was rendered with, and serving fast-forwards the desk and restarts into whatever has
     been published since. Nothing about the review changes when that happens, so the branch stamp says nothing, and
@@ -181,6 +181,13 @@ def desk_version():
         held = here / name
         said.update(held.read_bytes() if held.exists() else b"")
     return said.hexdigest()[:12]
+
+
+# What the desk answering is running, taken once as it starts. The files it is made of move on under it - the tool is
+# updated while a desk is up - and the page it renders comes from those newer files while the endpoints answering that
+# page are the ones this process started with. A page asking for something this desk has never had is the shape of it,
+# so the two are kept apart and compared rather than both read off the disk, where they always agree.
+RUNNING = desk_version()
 
 
 def render_page(template, payload):
