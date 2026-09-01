@@ -1703,7 +1703,7 @@
       document.getElementById(`note-${note.seq}`) ||
       document.querySelector(`.filenote[data-seq="${note.seq}"]`) ||
       card;
-    reaching = { card, thread };
+    reaching = { path: note.path, seq: note.seq };
     // Resolved and hidden away, it is still the thread being reached for, so it is shown, as a folded file is opened.
     // Remembered as well as applied: the poll redraws the card every few seconds, which builds the thread anew.
     state.reached = { seq: note.seq, path: note.path };
@@ -1718,28 +1718,46 @@
     // the thread off screen. Where it is aimed is worked out here rather than left to the browser, which centres on the
     // whole window and so can leave the thread under the page header - and answers differently from engine to engine.
     //
-    // Aimed again until it lands: going there brings other files within reach, and a file built on arrival stands at
-    // what its lines measure rather than at what was reserved for them, which moves the thread from under the aim.
-    // The bound covers a whole page coming back at once, which is what letting a filter go does.
-    aim(thread, 24);
+    // Aimed again until it lands, since unfolding the card moved everything below it. Nothing else may move while it
+    // is going: the files the aim brings within reach are settled once it has landed, which is what stops the page
+    // unfolding under the reader for as long as the aim keeps chasing the thread down it.
+    aim(note.seq, 24);
   }
 
-  function aim(thread, tries, again) {
+  function aimingAt(seq) {
+    // Found again on every frame rather than held as a node: the poll redraws the card every few seconds, and a node
+    // it has replaced answers with the rect of something detached, which sends the aim to the top of the page.
+    return (
+      document.getElementById(`note-${seq}`) ||
+      document.querySelector(`.filenote[data-seq="${seq}"]`) ||
+      (reaching && document.querySelector(`section.file[data-path="${CSS.escape(reaching.path)}"]`))
+    );
+  }
+
+  function aim(seq, tries, again) {
     requestAnimationFrame(() => requestAnimationFrame(() => {
+      const thread = aimingAt(seq);
+      // Redrawn this very frame and not back yet: waiting for it costs a frame, where aiming at nothing costs the
+      // reader their place.
+      if (!thread || !thread.isConnected) {
+        if (tries > 0) aim(seq, tries - 1, again);
+        else land();
+        return;
+      }
       const box = thread.getBoundingClientRect();
       const covered = document.querySelector("header").getBoundingClientRect().bottom;
       const room = window.innerHeight - covered;
       const middle = Math.max(0, (room - box.height) / 2);
       const off = box.top - covered - middle;
       if (tries <= 0) {
-        reaching = null;
+        land();
         return;
       }
       // Landed is landed and still there a frame later: a file built because the aim brought it within reach is
       // measured after that aim, and what its lines turn out to take moves the thread from under where it landed.
       if (Math.abs(off) < 2) {
-        if (again) reaching = null;
-        else aim(thread, tries - 1, true);
+        if (again) land();
+        else aim(seq, tries - 1, true);
         return;
       }
       // Told to go there outright: an animated scroll answers with where it is rather than where it is going, so the
@@ -1747,8 +1765,33 @@
       // leaving the reader a screen away from the comment they asked for. The thread flashes where it arrives, which
       // is what says where that is.
       window.scrollTo({ top: Math.max(0, window.scrollY + off), behavior: "auto" });
-      aim(thread, tries - 1, false);
+      aim(seq, tries - 1, false);
     }));
+  }
+
+  function land() {
+    // What the aim held off now happens, all of it at once: the files it flew past are settled here rather than under
+    // it, which is what kept the page from unfolding as it went.
+    const seq = reaching && reaching.seq;
+    reaching = null;
+    if (owedSettle) {
+      owedSettle = false;
+      settleNear();
+    }
+    if (seq === null || seq === undefined) return;
+    // Then the thread is put back under the reader, whatever moved it since the aim called it landed: settling those
+    // files, and the box itself taking the size the width gives it, which is delivered a frame or two after it lands.
+    const centre = (tries) => requestAnimationFrame(() => {
+      const thread = aimingAt(seq);
+      if (!thread || !thread.isConnected) return;
+      const covered = document.querySelector("header").getBoundingClientRect().bottom;
+      const box = thread.getBoundingClientRect();
+      const middle = Math.max(0, (window.innerHeight - covered - box.height) / 2);
+      const off = box.top - covered - middle;
+      if (Math.abs(off) >= 2) window.scrollTo({ top: Math.max(0, window.scrollY + off), behavior: "auto" });
+      if (tries > 0) centre(tries - 1);
+    });
+    centre(4);
   }
 
   const alreadyThere = () => mine().filter((note) => note.github === "posted" && owedThere(note));
@@ -3469,6 +3512,8 @@
   // The jump in flight - the card it goes to, and the thread it aims at inside it - kept while it is: a scroll still
   // travelling leaves the card as far off as it was, and letting go of it there is letting go of what is being gone to.
   let reaching = null;
+  // Settling the files an aim flew past, held until it lands.
+  let owedSettle = false;
   // What a file's lines take up, so a card whose lines are not built still stands as tall as it will: without it the
   // page grows under the reader as they go, and the scrollbar means nothing until they have been everywhere.
   const heights = new Map();
@@ -3506,10 +3551,19 @@
   }
 
   const nearby = new IntersectionObserver((entries) => {
+    // A file built stands at what its lines measure rather than at what was reserved for them, which moves everything
+    // below it - the thread an aim is going to among them. So while one is in flight nothing is built: what these
+    // entries ask for is owed until it lands, and 'land' pays it in one settle and one correction.
+    if (reaching) {
+      owedSettle = true;
+      // The file the aim is going to is still built - a redraw during the aim leaves its rows to be made again, and
+      // the thread only exists once they are. Every other file waits for the landing.
+      for (const entry of entries) {
+        if (entry.target.dataset.path === reaching.path) settleBody(entry.target);
+      }
+      return;
+    }
     for (const entry of entries) settleBody(entry.target);
-    // What a jump lands on is aimed at again from here: these are the files it brought within reach, and each one
-    // built stands at what its lines measure rather than at what was reserved for them, which moves everything below.
-    if (reaching) aim(reaching.thread, 2, false);
   }, { rootMargin: `${Math.round(NEAR * 100)}% 0px` });
 
   // What each file's body can actually show, and how far it has been scrolled: together they keep every comment on
@@ -3906,7 +3960,7 @@
     // A card is never let go of while something is being written in it: its lines are what the box hangs among, so
     // letting them go takes the words with them, however far the reader has scrolled from where they wrote them.
     const writing = wrap.querySelector("tr[data-composer], .filenote.writing");
-    const wanted = nearReader(wrap) || (reaching !== null && wrap === reaching.card) || writing !== null;
+    const wanted = nearReader(wrap) || (reaching !== null && wrap.dataset.path === reaching.path) || writing !== null;
     if (wrap.dataset.open === "true" && wanted) fillBody(wrap, held.file, held.index);
     else releaseBody(wrap);
   }

@@ -2902,20 +2902,38 @@ def test_reaching_a_comment_in_a_file_far_from_the_reader_lands_on_it(page, desk
     # Built for the press rather than for the arrival: waiting on the scroll to bring the file within reach leaves the
     # aim pointing at a card holding nothing, which is how a jump used to land a screenful short of the thread.
     assert page.locator(f"#note-{made}").count() == 1
-    landed = until(
-        lambda: page.evaluate(
-            """(seq) => {
-              const box = document.getElementById(`note-${seq}`);
-              if (!box) return null;
-              const rect = box.getBoundingClientRect();
-              const covered = document.querySelector('header').getBoundingClientRect().bottom;
-              return rect.top >= covered - 2 && rect.bottom > covered && rect.top < window.innerHeight ? true : null;
-            }""",
-            made,
-        ),
-        seconds=15.0,
+    # Redrawn the moment the aim sets off, which is what the poll does every few seconds: the thread the reader pressed
+    # for is a new node afterwards, and an aim holding on to the old one reads the rect of something detached, which
+    # carries the reader off to wherever that answers with.
+    page.evaluate("() => render()")
+    # Where the aim says it leaves it: the middle of what the reader can see, or as near as the page can be scrolled
+    # when the thread is at the very top of it. Merely being somewhere on screen is what a chase that gives up halfway
+    # also achieves, which is why what the aim promises is what is asked for.
+    centred = """(seq) => {
+      const box = document.getElementById(`note-${seq}`);
+      if (!box) return null;
+      const covered = document.querySelector('header').getBoundingClientRect().bottom;
+      const rect = box.getBoundingClientRect();
+      const middle = Math.max(0, (window.innerHeight - covered - rect.height) / 2);
+      const off = rect.top - covered - middle;
+      return Math.abs(off) < 4 || window.scrollY === 0 ? Math.round(window.scrollY) + 1 : null;
+    }"""
+    assert until(lambda: page.evaluate(centred, made), seconds=6.0)
+
+    # Still centred once the files the jump flew past have been built: each one stands at what its lines measure rather
+    # than at what was reserved for them, and settling them under the reader is what walked the page away from the
+    # comment they pressed for, one file at a time, for as long as the aim kept chasing it. Where the page holds the
+    # thread by scrolling a few pixels for it, it is the thread's place that is asked after, not the scroll's.
+    page.wait_for_timeout(900)
+    assert page.evaluate(centred, made)
+    assert page.evaluate(
+        """(seq) => {
+          const box = document.getElementById(`note-${seq}`).getBoundingClientRect();
+          const covered = document.querySelector('header').getBoundingClientRect().bottom;
+          return box.top >= covered - 2 && box.bottom <= window.innerHeight + 2;
+        }""",
+        made,
     )
-    assert landed
 
 
 def test_a_remark_and_a_reply_both_say_when_they_were_said_and_where_they_were_written(page, desk):
