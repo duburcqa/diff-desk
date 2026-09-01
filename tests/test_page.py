@@ -1101,6 +1101,41 @@ def test_a_page_on_its_way_out_asks_for_nothing_more(page, desk):
     assert "older code" in said["error"] and "serve the review again" in said["error"]
 
 
+def test_a_comment_is_refused_once_the_branch_it_was_aimed_at_has_moved(page, desk):
+    branch = page.evaluate("() => data.branches[0].ref")
+    line = sample(page).locator("tr.a[data-line]").last
+    line.locator("td.code").first.hover()
+    line.locator("button.pin").first.click()
+    page.wait_for_selector("tr[data-composer='true']")
+    page.locator("tr[data-composer='true'] textarea").fill("this line reads oddly")
+
+    gen_diff_data.run(desk.repo, "checkout", "-q", branch)
+    written = desk.repo / "added.py"
+    kept = written.read_text()
+    try:
+        written.write_text(kept + "SAID_WHILE_WRITING = 1\n")
+        page.evaluate("() => tick()")
+        page.wait_for_function("() => !document.getElementById('moved').disabled")
+
+        # The branch has moved on since the remark was aimed, so it is neither sent nor thrown away: the words stay.
+        page.locator("tr[data-composer='true'] .solid:not(.direct)").click()
+        held = page.locator("tr[data-composer='true']")
+        assert held.count() == 1
+        assert held.locator("textarea").input_value() == "this line reads oddly"
+        assert "moved on" in held.locator(".status").inner_text().lower()
+        assert page.evaluate("() => notes.drafts.length") == 0
+
+        # Sending it on its own is refused the same way, and posts nothing.
+        before = len(desk.get("/comments"))
+        held.locator(".solid.direct").click()
+        assert held.locator("textarea").input_value() == "this line reads oddly"
+        assert len(desk.get("/comments")) == before
+    finally:
+        written.write_text(kept)
+        gen_diff_data.run(desk.repo, "checkout", "-q", "main")
+        desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})
+
+
 def test_a_file_changed_since_it_was_reviewed_opens_itself(page, desk):
     branch = page.evaluate("() => data.branches[0].ref")
     card = page.locator("section.file[data-path='added.py']")
@@ -1129,6 +1164,22 @@ def test_a_file_changed_since_it_was_reviewed_opens_itself(page, desk):
         again.locator(".filehead").first.click()
         page.evaluate("() => render()")
         assert again.get_attribute("data-open") == "false"
+
+        # Ticked on the diff that changed, one press is what it takes: the box holds and the file counts as read.
+        box = again.locator("input[type=checkbox]")
+        box.click()
+        page.wait_for_function("() => render() || true")
+        assert box.is_checked()
+        assert "changed since review" not in again.locator(".filehead").first.inner_text().lower()
+
+        # A press that lands beside the tick, in the header's own padding, still ticks rather than folding the file.
+        box.click()
+        page.wait_for_selector("section.file[data-path='added.py'][data-open='true']")
+        assert not again.locator("input[type=checkbox]").is_checked()
+        head = again.locator(".filehead").first.bounding_box()
+        page.mouse.click(head["x"] + head["width"] - 4, head["y"] + head["height"] / 2)
+        page.wait_for_function("() => render() || true")
+        assert again.locator("input[type=checkbox]").is_checked()
     finally:
         written.write_text(kept)
         gen_diff_data.run(desk.repo, "checkout", "-q", "main")

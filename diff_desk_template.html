@@ -406,7 +406,10 @@
   .icon:hover::after, .icon:focus-visible::after { opacity: 1; }
   .copy[data-copied] { color: var(--add-ink); }
 
-  .seen { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); cursor: pointer; user-select: none; white-space: nowrap; }
+  /* The tick stands at the header's own edge, so its hit area takes in the padding around it: a press meant for the
+     tick that lands beside it would otherwise fold the file instead. */
+  .notebox[data-stale="true"], .filenote[data-stale="true"] { outline: 1px solid var(--del-ink); }
+  .seen { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); cursor: pointer; user-select: none; white-space: nowrap; padding: 8px 12px; margin: -8px -12px -8px 0; }
   .seen input { accent-color: var(--add-ink); width: 14px; height: 14px; }
 
   .chip { font-size: 10px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 6px; border-radius: 4px; background: var(--surface-sunk); color: var(--muted); }
@@ -2910,6 +2913,15 @@
     if (spot) openComposer(spot.row, sel.path, spot.line, spot.endLine, spot.side);
   }
 
+  // A remark is aimed at the lines the reader has in front of them. Once the branch has moved on, sending it would
+  // hang it on code they never read, so the box holds what it holds until the diffs are refreshed.
+  function moveRefused(box, hint) {
+    if (document.getElementById("moved").disabled) return false;
+    box.dataset.stale = "true";
+    hint.textContent = "The branch has moved on. Refresh the diffs, then aim this comment again.";
+    return true;
+  }
+
   function openFileComposer(card, file) {
     if (card.querySelector(".filenote.writing")) return;
     const box = document.createElement("div");
@@ -2928,7 +2940,9 @@
     const drop = document.createElement("button");
     drop.className = "ghost";
     drop.textContent = "Cancel";
-    controls.append(now, keep, drop);
+    const said = document.createElement("span");
+    said.className = "status";
+    controls.append(now, keep, drop, said);
     box.append(field, controls);
     card.querySelector(".filehead").after(box);
     const attached = attaching(field, box, controls);
@@ -2948,14 +2962,14 @@
     });
     drop.addEventListener("click", () => box.remove());
     keep.addEventListener("click", () => {
-      if (!field.value.trim()) return;
+      if (!field.value.trim() || moveRefused(box, said)) return;
       notes.drafts.push(written());
       box.remove();
       drawTray();
       render();
     });
     now.addEventListener("click", async () => {
-      if (!field.value.trim()) return;
+      if (!field.value.trim() || moveRefused(box, said)) return;
       const alone = written();
       box.remove();
       await send1(alone);
@@ -3021,7 +3035,7 @@
     });
 
     const commit = () => {
-      if (!field.value.trim()) return;
+      if (!field.value.trim() || moveRefused(box, hint)) return;
       notes.drafts.push(written());
       row.remove();
       clearSel();
@@ -3031,7 +3045,7 @@
 
     // Sent on its own: recorded, posted and threaded exactly like a batch, without waiting in the tray.
     const straight = async () => {
-      if (!field.value.trim()) return;
+      if (!field.value.trim() || moveRefused(box, hint)) return;
       const alone = written();
       row.remove();
       clearSel();
