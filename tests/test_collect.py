@@ -3,7 +3,7 @@
 import pytest
 
 import gen_diff_data
-from conftest import FILE_LINES, FIRST_EDIT, SECOND_EDIT
+from conftest import FIRST_EDIT, SECOND_EDIT
 
 # All of these read one repository built once, and cost next to nothing to run, so they go to a single worker of a
 # parallel run rather than having several build that repository over again.
@@ -111,7 +111,8 @@ def test_the_range_is_described_for_the_page(repo, payload):
 
 
 def test_the_checked_out_branch_shows_its_uncommitted_work(repo):
-    (repo / "sample.py").write_text("\n".join(f"line {number}" for number in range(1, FILE_LINES)) + "\n")
+    kept = (repo / "sample.py").read_text().splitlines()[:-1]
+    (repo / "sample.py").write_text("\n".join(kept) + "\n")
     try:
         scanned = gen_diff_data.collect(str(repo), "main", ["main"])
         branch = scanned["branches"][0]

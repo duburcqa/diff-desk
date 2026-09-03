@@ -1,6 +1,7 @@
 """Collect a git range as reviewable data: whole branch and per commit, for any repository and any base."""
 
 import hashlib
+import io
 import json
 import os
 import pathlib
@@ -9,6 +10,7 @@ import shlex
 import subprocess
 import sys
 import time
+import tokenize
 
 
 def github():
@@ -202,6 +204,58 @@ def render_page(template, payload):
     return template.replace("__DIFF_DATA__", body).replace("__HIGHLIGHT__", grammar).replace("__BUILD__", stamp)
 
 
+def string_opening(text, line_no):
+    """The delimiter opening the Python string a line stands inside, or "" for a line standing in code.
+
+    A hunk is painted on its own and starts wherever the diff cut it, so a line inside a docstring opened above the hunk
+    reads as code. Handing the painter the delimiter puts the line back inside its string.
+    """
+    if line_no < 1:
+        return ""
+    opened = None
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(text).readline):
+            if token.start[0] >= line_no:
+                break
+            if token.type == tokenize.STRING and line_no <= token.end[0]:
+                return re.match(r"[rRbBuUfF]*(\"\"\"|'''|\"|')", token.string).group(0)
+            if token.type == tokenize.FSTRING_START:
+                opened = token.string
+            elif token.type == tokenize.FSTRING_END:
+                opened = None
+    except (tokenize.TokenError, SyntaxError):
+        return ""
+    return opened or ""
+
+
+def file_text(root, rev, path):
+    """What a file reads as at a revision, the working tree standing for an empty revision, or "" where it has none."""
+    if rev:
+        return run(root, "show", f"{rev}:{path}")
+    file = pathlib.Path(root) / path
+    return file.read_text(errors="replace") if file.is_file() else ""
+
+
+def mark_strings(root, files, old_rev, new_rev):
+    """Note on each hunk of a Python file the string delimiter its old and its new side start inside.
+
+    The note is a fifth member of the hunk header row (see 'string_opening' for what it holds and why).
+    """
+    for entry in files:
+        if entry["binary"] or not entry["path"].endswith(".py"):
+            continue
+        texts = [None, None]
+        for row in entry["lines"]:
+            if row[0] != "h":
+                continue
+            opens = []
+            for side, rev in enumerate((old_rev, new_rev)):
+                if texts[side] is None:
+                    texts[side] = file_text(root, rev, entry["path"])
+                opens.append(string_opening(texts[side], row[1 + side]))
+            row.append(opens)
+
+
 def parse(diff):
     files = []
     current = None
@@ -249,7 +303,7 @@ def parse(diff):
         entry.pop("_old", None)
         entry.pop("_new", None)
         # A digest of the hunks, so a page can tell a file it already reviewed from one that moved under it.
-        body = "\n".join("".join(str(part) for part in line) for line in entry["lines"])
+        body = "\n".join("".join(str(part) for part in line[:4]) for line in entry["lines"])
         entry["digest"] = hashlib.sha1(body.encode()).hexdigest()[:12]
     return files
 
@@ -330,9 +384,9 @@ def collect(root, base, refs, upstream=None):
         log = run(root, "log", "--format=%h%x1f%s", f"{base}..{ref}").strip().split("\n")
         for row in reversed([line for line in log if line]):
             sha, subject = row.split("\x1f")
-            commits.append(
-                {"sha": sha, "subject": subject, "files": parse(run(root, "show", "--format=", "--unified=3", sha))}
-            )
+            files = parse(run(root, "show", "--format=", "--unified=3", sha))
+            mark_strings(root, files, f"{sha}^", sha)
+            commits.append({"sha": sha, "subject": subject, "files": files})
         fork = run(root, "merge-base", base, ref).strip()
         # What the ref has committed, read from the ref rather than from disk, so work saved there says nothing about
         # where the base stands.
@@ -343,6 +397,7 @@ def collect(root, base, refs, upstream=None):
             # rebased or not. What is left to review is what no commit carries, and reading from the fork point would
             # hand the base its own work back as though it were new.
             whole = run(root, "diff", "--unified=3", "HEAD") if ref == current else ""
+            revs = ("HEAD", "")
         else:
             # A ref is read from where it forked, so a base that moved on since does not appear in it backwards. One
             # carrying no commit of its own has only the base to be read against, which is the difference it has.
@@ -352,7 +407,9 @@ def collect(root, base, refs, upstream=None):
                 if ref == current
                 else run(root, "diff", "--unified=3", start, ref)
             )
+            revs = (start, "" if ref == current else ref)
         files = parse(whole)
+        mark_strings(root, files, *revs)
         # A ref that differs from the base nowhere has nothing to review, whatever it carries in commits.
         if not files:
             continue

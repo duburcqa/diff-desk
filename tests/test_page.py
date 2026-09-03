@@ -422,6 +422,12 @@ def test_code_is_read_as_the_language_a_file_name_gives_it(page):
         "count = 42",
     ]
 
+    # A hunk cut inside a docstring, its quotes lying outside the lines shown: every line of it is still read as the
+    # string it stands in, on both sides of the edit.
+    first_hunk = page.evaluate(read, "sample.py")[: 2 * 3 + 2]
+    assert first_hunk[3]["said"] == f"line {FIRST_EDIT}"
+    assert all(row["painted"] == [f"hljs-string:{row['said']}"] for row in first_hunk)
+
     # A name that gives no language leaves the lines as they read: 'def' there is a word like any other.
     assert page.evaluate(read, "notes.txt") == [
         {"said": "def not_code", "painted": []},
