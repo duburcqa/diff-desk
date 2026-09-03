@@ -58,6 +58,9 @@ def repo(tmp_path_factory):
     git(root, "config", "user.email", "desk@example.com")
     git(root, "config", "user.name", "Desk")
     body = [f"line {number}" for number in range(1, FILE_LINES + 1)]
+    # A docstring around the first edit, opened and closed outside the lines its hunk shows, so the page has to be
+    # told the hunk starts inside a string to read those lines as one.
+    body[FIRST_EDIT - 6] = body[FIRST_EDIT + 4] = '"""'
     (root / "sample.py").write_text("\n".join(body) + "\n")
     (root / "kept.py").write_text("untouched\n")
     # A file whose name gives no language, which the page has nothing to read it as.

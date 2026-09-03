@@ -1190,26 +1190,31 @@
     const painted = new Map();
     if (!tongue || !window.hljs) return painted;
     const sides = [[], []];
-    const flush = () => {
-      for (const rows of sides) {
-        if (rows.length) {
-          const said = rows.map((row) => row.text).join("\n");
-          const parts = splitPainted(hljs.highlight(said, { language: tongue, ignoreIllegals: true }).value);
-          rows.forEach((row, index) => painted.set(row.at, parts[index]));
-          rows.length = 0;
-        }
-      }
+    // A hunk cut inside a string is painted as if that string opened on a line just above it, which the desk notes on
+    // the hunk header, so the prose of a docstring the diff entered halfway reads as prose. That extra line is dropped.
+    const flush = (opens) => {
+      sides.forEach((rows, side) => {
+        if (!rows.length) return;
+        const open = opens ? opens[side] : "";
+        const said = (open ? `${open}\n` : "") + rows.map((row) => row.text).join("\n");
+        const parts = splitPainted(hljs.highlight(said, { language: tongue, ignoreIllegals: true }).value);
+        if (open) parts.shift();
+        rows.forEach((row, index) => painted.set(row.at, parts[index]));
+        rows.length = 0;
+      });
     };
-    file.lines.forEach(([kind, , , text], at) => {
+    let opens = null;
+    file.lines.forEach(([kind, , , text, hunkOpens], at) => {
       if (kind === "h") {
-        flush();
+        flush(opens);
+        opens = hunkOpens;
         return;
       }
       // A context line belongs to both texts, and reads the same in either, so the new side is the one shown.
       if (kind === "d" || kind === "c") sides[0].push({ at, text });
       if (kind === "a" || kind === "c") sides[1].push({ at, text });
     });
-    flush();
+    flush(opens);
     return painted;
   }
 
