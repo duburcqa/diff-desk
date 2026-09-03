@@ -543,6 +543,7 @@
     background: var(--accent);
     color: var(--surface);
     cursor: pointer;
+    white-space: nowrap;
   }
   button.ghost { background: transparent; color: var(--muted); border-color: var(--rule-strong); }
   button.solid:disabled, button.ghost:disabled, button.toggle:disabled {
@@ -708,7 +709,10 @@
   .batchhead .said { flex: 1; }
   .tray li { display: flex; align-items: baseline; gap: 6px; }
   .tray li .said { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The buttons keep their width and the status message takes what is left, so a long message wraps in its own
+     span instead of squeezing the labels onto two lines. */
   .log .actions { display: flex; align-items: center; gap: 8px; }
+  .log .actions .status { flex: 1; min-width: 0; }
   .logrow {
     display: flex;
     align-items: baseline;
