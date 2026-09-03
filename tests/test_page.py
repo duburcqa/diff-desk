@@ -772,7 +772,10 @@ def test_a_card_reaches_as_far_across_once_its_lines_are_let_go_of(page):
           const body = document.querySelector('section.file .body');
           const rows = () => body.querySelectorAll('tr[data-line]').length;
           const across = () => Math.round(body.scrollWidth);
-          const built = {rows: rows(), across: across(), room: Math.round(body.clientWidth)};
+          const rules = [...document.styleSheets].flatMap((sheet) => [...sheet.cssRules]);
+          const drawn = rules.find((rule) => rule.selectorText === '.body::-webkit-scrollbar');
+          const built = {rows: rows(), across: across(), room: Math.round(body.clientWidth),
+                         bar: drawn ? drawn.style.height : null};
           window.scrollTo(0, document.body.scrollHeight);
           setTimeout(() => {
             const gone = {rows: rows(), across: across()};
@@ -788,6 +791,9 @@ def test_a_card_reaches_as_far_across_once_its_lines_are_let_go_of(page):
     # However often it comes and goes, it reaches the same distance, so its scrollbar never appears on its own.
     assert held["gone"]["across"] == held["built"]["across"]
     assert held["back"]["across"] == held["built"]["across"]
+    # The bar is drawn by the page, which is what tells it from one the system overlays and fades out under the pointer.
+    # Read from the stylesheet, since the headless browser hides every scrollbar and leaves nothing else to measure.
+    assert held["built"]["bar"] == "10px"
 
 
 def test_a_pending_comment_can_be_sent_on_its_own_from_the_tray(page, desk):

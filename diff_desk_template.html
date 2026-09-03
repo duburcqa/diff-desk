@@ -417,7 +417,12 @@
   .chip.deleted { background: var(--del-bg); color: var(--del-ink); }
   .chip.stale { background: var(--stale-bg); color: var(--stale); }
 
-  .body { overflow-x: auto; border-radius: 0 0 7px 7px; }
+  .body { overflow-x: auto; border-radius: 0 0 7px 7px; scrollbar-width: thin; scrollbar-color: var(--rule-strong) var(--surface-sunk); }
+  /* Drawn in the page's own colours, so the bar stands whatever the system does with its own: an overlay bar fades out
+     under the pointer and every redraw of the card, and a wide diff then gives no sign that it scrolls sideways. */
+  .body::-webkit-scrollbar { height: 10px; }
+  .body::-webkit-scrollbar-track { background: var(--surface-sunk); border-radius: 0 0 7px 7px; }
+  .body::-webkit-scrollbar-thumb { background: var(--rule-strong); border-radius: 5px; }
   table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
   td { padding: 0 0 0 6px; vertical-align: top; white-space: pre; }
   td.ln {
