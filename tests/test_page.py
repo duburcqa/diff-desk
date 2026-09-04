@@ -1658,6 +1658,16 @@ def test_the_log_says_where_every_comment_stands(page, desk):
     # A native tooltip carries no markup, so the count reads as a number rather than as tags around one.
     assert re.match(r"\d+ comments?, \d+ resolved\b", said)
     assert "<" not in said
+    # A long report in the footer wraps in its own span, so every label beside it stays on one line.
+    page.evaluate(
+        """() => {
+          document.getElementById("logresult").textContent =
+            "Brought back 0 reply(ies), took 1 comment(s) in, closed 0 here, and left every other thread as it stood";
+        }"""
+    )
+    one_line = page.locator("#logclose").bounding_box()["height"]
+    for name in ("logretry", "logbind", "logsend", "logsync"):
+        assert page.locator(f"#{name}").bounding_box()["height"] == one_line
     page.locator("#logclose").click()
 
 
