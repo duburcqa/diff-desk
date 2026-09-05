@@ -3115,15 +3115,58 @@
     announce("refresh", file.path.split("/").pop(), said);
   }
 
+  // A box being written in outlives the cards it hangs among: whatever builds them again, a gap filled beside it or a
+  // comment sent from another box, lifts every open box first and hangs each back under the line it was opened on. The
+  // line is found by side and number rather than by row, since a fill shifts every row below it.
+  function liftWriting(root) {
+    const focused = document.activeElement;
+    const boxes = [...root.querySelectorAll("tr[data-composer], .filenote.writing")].map((box) => {
+      let under = box.matches("tr") ? box.previousElementSibling : null;
+      while (under && !under.dataset.line) under = under.previousElementSibling;
+      const { path } = box.closest("section.file").dataset;
+      return { box, path, side: under ? under.dataset.side : null, line: under ? under.dataset.line : null };
+    });
+    return { boxes, focused };
+  }
+
+  function hangWriting({ boxes, focused }) {
+    for (const { box, path, side, line } of boxes) {
+      const wrap = document.querySelector(`section.file[data-path="${CSS.escape(path)}"]`);
+      const of = wrap && drawn.get(wrap);
+      if (!of) continue;
+      fillBody(wrap, of.file, of.index);
+      const spot = line
+        ? wrap.querySelector(`tr[data-line="${line}"][data-side="${side}"]`)
+        : wrap.querySelector(".filehead");
+      if (spot) spot.after(box);
+    }
+    // The keyboard goes back where it was, or to the one box left when the press that redrew took it away with the
+    // button pressed: Escape and Cmd/Ctrl + Enter are aimed at a box, and a page that holds one should hear them.
+    const held = boxes.map(({ box }) => box).filter((box) => box.isConnected);
+    const field = held.find((box) => box.contains(focused)) || (held.length === 1 ? held[0] : null);
+    if (field) field.querySelector("textarea").focus({ preventScroll: true });
+  }
+
   function redrawCard(file, index) {
     const old = document.getElementById(`f${index}`);
     if (!old) return;
+    // The lines picked are picked again by number, for the same reason the boxes are hung again by it.
+    const chosen = sel.path === file.path ? selRows() : [];
+    const ends = chosen.length ? [chosen[0], chosen[chosen.length - 1]] : [];
+    const same = (from, within) =>
+      within.querySelector(`tr[data-line="${from.dataset.line}"][data-side="${from.dataset.side}"]`);
+    const writing = liftWriting(old);
     const fresh = card(file, index);
     fresh.dataset.open = old.dataset.open;
-    clearSel();
     old.replaceWith(fresh);
     settleBody(fresh);
     nearby.observe(fresh);
+    hangWriting(writing);
+    const picked = ends.map((row) => same(row, fresh));
+    if (picked.length && picked.every(Boolean)) {
+      Object.assign(sel, { path: file.path, from: Number(picked[0].dataset.seq), to: Number(picked[1].dataset.seq) });
+      paintSel();
+    } else if (sel.path === file.path) clearSel();
   }
 
   const lastNumbered = (rows) => [...rows].reverse().find((row) => row[0] !== "h" && row[2] > 0);
@@ -3498,6 +3541,7 @@
     els.filelist.innerHTML = "";
     els.filelist.append(fileTree(shown));
 
+    const writing = liftWriting(els.main);
     els.main.innerHTML = "";
     if (commit) {
       const note = document.createElement("div");
@@ -3518,6 +3562,7 @@
     shown.forEach((file, index) => els.main.append(card(file, index)));
     settleNear();
     for (const wrap of els.main.querySelectorAll("section.file")) nearby.observe(wrap);
+    hangWriting(writing);
     fitNotes();
     markCurrent();
     paintSel();
