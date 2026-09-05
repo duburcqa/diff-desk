@@ -2948,6 +2948,53 @@ def test_a_comment_being_written_survives_the_reader_walking_away_from_it(page):
     assert page.locator("tr[data-composer] textarea").input_value() == "half written, and worth keeping"
 
 
+def test_a_comment_being_written_survives_the_gap_beside_it_being_filled(page):
+    card = sample(page)
+    line = card.locator("tr.a[data-line]").first
+    number = line.get_attribute("data-line")
+    line.locator("td.code").first.hover()
+    line.locator("button.pin").first.click()
+    page.locator("tr[data-composer] textarea").fill("half written, and worth keeping")
+    with page.expect_response(lambda answer: "/lines" in answer.url):
+        card.locator("button.expand").first.click()
+    settle(page)
+    # The card is built again around the lines brought in, and the box goes on hanging under the line it was opened
+    # on, its words and the line picked for it kept, however far down the card that line now sits.
+    box = page.locator("tr[data-composer]")
+    assert box.count() == 1
+    assert box.locator("textarea").input_value() == "half written, and worth keeping"
+    assert box.evaluate("node => node.previousElementSibling.dataset.line") == number
+    assert page.locator("tr.sel").count() == 1
+    assert page.locator("tr.sel").first.get_attribute("data-line") == number
+
+
+def test_a_comment_being_written_survives_another_being_sent(page):
+    card = sample(page)
+    lines = card.locator("tr.a[data-line]")
+    number = lines.nth(0).get_attribute("data-line")
+    lines.nth(0).locator("td.code").first.hover()
+    lines.nth(0).locator("button.pin").first.click()
+    page.locator("tr[data-composer] textarea").fill("half written, and worth keeping")
+    lines.nth(1).locator("td.code").first.hover()
+    lines.nth(1).locator("button.pin").first.click()
+    assert page.locator("tr[data-composer]").count() == 2
+    # Sent from the second box on its own, then added to the review from a third: the page is drawn again either way,
+    # and the first box has to come through both with its words, under its line.
+    page.locator("tr[data-composer] textarea").nth(1).fill("said and gone")
+    page.locator("tr[data-composer] button.solid.direct").nth(1).click()
+    page.wait_for_function("() => document.querySelectorAll('tr[data-composer]').length === 1")
+    lines.nth(1).locator("td.code").first.hover()
+    lines.nth(1).locator("button.pin").first.click()
+    page.locator("tr[data-composer] textarea").nth(1).fill("kept for the review")
+    page.locator("tr[data-composer] button.solid:not(.direct)").nth(1).click()
+    page.wait_for_selector("#tray[data-open='true']")
+    box = page.locator("tr[data-composer]")
+    assert box.count() == 1
+    assert box.locator("textarea").input_value() == "half written, and worth keeping"
+    assert box.evaluate("node => node.previousElementSibling.dataset.line") == number
+    assert page.evaluate("() => document.activeElement.closest('tr[data-composer]') !== null")
+
+
 def test_reaching_a_comment_in_a_file_far_from_the_reader_lands_on_it(page, desk):
     branch = page.evaluate("() => data.branches[0].ref")
     # Written on the first file of the review, which is what a reader standing at the end of it is nowhere near.
