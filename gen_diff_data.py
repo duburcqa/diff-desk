@@ -373,7 +373,9 @@ def collect(root, base, refs, upstream=None):
         "branches": [],
     }
     data["stamp"] = stamp(root, base, refs)
-    data["desk"] = desk_version()
+    # The process collecting, which is what the state a page polls answers with: the tool on disk may have moved on from
+    # it, and a page carrying that would read as behind the very desk that served it, reloading at every refresh.
+    data["desk"] = RUNNING
     for wanted in refs:
         number = pull_number(wanted)
         request = None

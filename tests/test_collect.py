@@ -166,3 +166,10 @@ def test_the_page_is_built_around_the_payload(payload):
     assert '"ref":"feature"' in page
     # A closing tag inside the payload would end the script element early.
     assert "</script" not in page.split("<script>", 1)[1].rsplit("</script>", 1)[0]
+
+
+def test_the_payload_names_the_desk_that_collected_it(repo, monkeypatch):
+    # The tool on disk can be published over while a desk runs; a page naming the tool would read as behind the very
+    # desk that served it, since the state it polls names the process, and it would reload at every refresh.
+    monkeypatch.setattr(gen_diff_data, "desk_version", lambda: "the tool on disk, published over since")
+    assert gen_diff_data.collect(repo, "main", ["feature"])["desk"] == gen_diff_data.RUNNING
