@@ -1075,6 +1075,42 @@
 
   /* ---------- reviewed state, remembered and invalidated by digest ---------- */
 
+  // How the page is being read: the comments panel open or closed, what its listing shows and how it is sorted, and
+  // which files and comments the header hides. Kept so a reload shows the review as the reader left it, since the
+  // refresh comes to a reload once the desk has been served over.
+  function keepChoices() {
+    const choices = {
+      log: els.log.dataset.open === "true",
+      unread: els.logunread.checked,
+      resolved: els.logresolved.checked,
+      sort: els.logsort.value,
+      hideDone: els.hidedone.getAttribute("aria-pressed") === "true",
+      hideClosed: els.hideclosed.getAttribute("aria-pressed") === "true",
+    };
+    try {
+      localStorage.setItem("diffdesk.choices", JSON.stringify(choices));
+    } catch (error) {
+      // A storage that refuses to be written costs the reader their choices at the next reload, and nothing now.
+    }
+  }
+
+  function takeChoices() {
+    let choices = {};
+    try {
+      choices = JSON.parse(localStorage.getItem("diffdesk.choices") || "{}");
+    } catch (error) {
+      choices = {};
+    }
+    els.log.dataset.open = String(Boolean(choices.log));
+    els.logunread.checked = Boolean(choices.unread);
+    els.logresolved.checked = Boolean(choices.resolved);
+    els.logsort.value = choices.sort === "thread" ? "thread" : "batch";
+    els.hidedone.setAttribute("aria-pressed", String(Boolean(choices.hideDone)));
+    document.body.classList.toggle("hide-done", Boolean(choices.hideDone));
+    els.hideclosed.setAttribute("aria-pressed", String(Boolean(choices.hideClosed)));
+    document.body.classList.toggle("hide-closed", Boolean(choices.hideClosed));
+  }
+
   function loadFolded() {
     try {
       folded = new Set(JSON.parse(localStorage.getItem("diffdesk.folded") || "[]"));
@@ -1717,6 +1753,7 @@
     card.dataset.reveal = "true";
     folds.set(note.path, { digest: card.dataset.digest, open: true, upTo: latest() });
     els.log.dataset.open = "false";
+    keepChoices();
     // The lines of a file the reader was nowhere near are built for this, since the thread hangs among them - built
     // outright rather than settled, which would leave a file they are nowhere near exactly as it was.
     const held = drawn.get(card);
@@ -4279,6 +4316,7 @@
     holdPlace(staying && staying.path, () => {
       els.hidedone.setAttribute("aria-pressed", String(on));
       document.body.classList.toggle("hide-done", on);
+      keepChoices();
     });
   });
   els.hideclosed.addEventListener("click", () => {
@@ -4287,6 +4325,7 @@
     holdPlace(staying && staying.path, () => {
       els.hideclosed.setAttribute("aria-pressed", String(on));
       document.body.classList.toggle("hide-closed", on);
+      keepChoices();
     });
   });
   els.sourceopen.addEventListener("click", () => {
@@ -4316,10 +4355,12 @@
   els.traysend.addEventListener("click", submitReview);
   els.logopen.addEventListener("click", () => {
     els.log.dataset.open = els.log.dataset.open === "true" ? "false" : "true";
+    keepChoices();
     drawLog();
   });
   els.logclose.addEventListener("click", () => {
     els.log.dataset.open = "false";
+    keepChoices();
   });
   els.logretry.addEventListener("click", async () => {
     await sendWaiting(true);
@@ -4327,12 +4368,16 @@
   els.logsync.addEventListener("click", () => syncThere(true));
   els.logsend.addEventListener("click", () => sendThreads(alreadyThere()));
   els.logresolved.addEventListener("change", () => {
+    keepChoices();
     drawLog();
     render();
   });
-  els.logunread.addEventListener("change", () => drawLog());
+  els.logunread.addEventListener("change", () => {
+    keepChoices();
+    drawLog();
+  });
   els.logsort.addEventListener("change", () => {
-    localStorage.setItem("diffdesk.logsort", els.logsort.value);
+    keepChoices();
     drawLog();
   });
   els.logbind.addEventListener("click", async () => {
@@ -4436,8 +4481,7 @@
   loadFolded();
   takeHeard();
   takeTucked();
-  // How the panel was last read, kept across reloads the way its other choices are.
-  els.logsort.value = localStorage.getItem("diffdesk.logsort") === "thread" ? "thread" : "batch";
+  takeChoices();
   takeDrafts();
   showSource();
   renderTabs();

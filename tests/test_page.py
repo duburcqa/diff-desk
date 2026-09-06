@@ -875,11 +875,18 @@ def test_the_comments_panel_reads_by_batch_or_by_what_moved_last(page, desk):
     assert "the older batch" in page.locator("#logrows .logrow").first.inner_text()
     assert page.locator("#logrows .batch").count() == 0
 
-    # And the choice outlives the reload, as the panel's other choices do.
+    # And how the page is being read outlives the reload: the panel open, its listing sorted and filtered as it was, the
+    # header hiding what it hid. A refresh comes to a reload once the desk has been served over, and it must not cost
+    # the reader their place.
+    page.locator("#logresolved").check()
+    page.locator("#hideclosed").click()
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
-    page.locator("#logopen").click()
+    assert page.locator("#log").get_attribute("data-open") == "true"
     assert page.locator("#logsort").input_value() == "thread"
+    assert page.locator("#logresolved").is_checked()
+    assert page.locator("#hideclosed").get_attribute("aria-pressed") == "true"
+    assert page.evaluate("() => document.body.classList.contains('hide-closed')")
     page.select_option("#logsort", "batch")
 
 
@@ -2586,9 +2593,8 @@ def test_the_panel_buttons_never_move(page, desk):
     )
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
-    page.locator("#logopen").click()
+    # Open as it was left, and something is waiting now, which changes what can be pressed but never where anything is.
     page.wait_for_selector("#log[data-open='true']")
-    # Something is waiting now, which changes what can be pressed but never where anything is.
     after = page.evaluate(
         "(named) => named.map((id) => Math.round(document.getElementById(id).getBoundingClientRect().width))", named
     )
