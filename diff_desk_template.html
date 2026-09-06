@@ -1517,6 +1517,7 @@
     open.className = "tiny";
     open.textContent = "whisper";
     open.title = "Keep a note here, on this desk";
+    open.dataset.on = on === null ? "" : String(on);
     open.addEventListener("click", () => {
       // One at a time: a second press goes back to the box already open rather than opening another beside it.
       const already = document.querySelector(".thread .line.actions.aside textarea");
@@ -1537,26 +1538,32 @@
       const writing = document.createElement("div");
       // Written by the reader, so read in the reader's voice: the rule down its side is the one their words carry.
       writing.className = "line reply actions aside you";
+      writing.dataset.on = open.dataset.on;
       // Standing where what is written into it will stand: a note is read one step in, and so is the box for it.
       writing.style.marginLeft = "12px";
       writing.append(written, keep, drop);
       const attached = attaching(written, writing, writing);
-      // Where the note will be read: after the last note about the same comment, and under that comment while none
-      // stands there yet.
-      const thread = open.closest(".thread");
-      const kin = [...thread.querySelectorAll(`.line.reply.aside[data-on="${on === null ? "" : on}"]`)];
-      (kin.length ? kin[kin.length - 1] : open.closest(".line")).after(writing);
+      placeWhisper(open.closest(".thread"), writing);
       written.focus();
-      drop.addEventListener("click", render);
+      // Taken out by hand: a redraw carries every open box over, so the one being closed has to go before it.
+      drop.addEventListener("click", () => writing.remove());
       keep.addEventListener("click", async () => {
         const wanted = written.value.trim();
-        if (!wanted) return render();
+        if (!wanted) return writing.remove();
         await post("reply", { seq: note.seq, text: wanted, who: "you", whisper: true, on, images: attached() });
+        writing.remove();
         await loadNotes();
         render();
       });
     });
     return open;
+  }
+
+  // Where a note is read: after the last note about the same comment, and under that comment while none stands there.
+  function placeWhisper(thread, writing) {
+    const kin = [...thread.querySelectorAll(`.line.reply.aside:not(.actions)[data-on="${writing.dataset.on}"]`)];
+    const under = kin.length ? kin[kin.length - 1] : thread.querySelector(`button.tiny[data-on="${writing.dataset.on}"]`);
+    if (under) (under.matches(".line") ? under : under.closest(".line")).after(writing);
   }
 
   function owedThere(note) {
@@ -3118,26 +3125,39 @@
     announce("refresh", file.path.split("/").pop(), said);
   }
 
-  // A box being written in outlives the cards it hangs among: whatever builds them again, a gap filled beside it or a
-  // comment sent from another box, lifts every open box first and hangs each back under the line it was opened on. The
-  // line is found by side and number rather than by row, since a fill shifts every row below it.
+  // A box being written in outlives the cards it hangs among: whatever builds them again, a gap filled beside it, a
+  // comment sent from another box or the poll reading new replies, lifts every open box first and hangs each back where
+  // it was opened: under its line, found by side and number rather than by row, since a fill shifts every row below it,
+  // or in its thread, on the comment its note is about.
   function liftWriting(root) {
     const focused = document.activeElement;
-    const boxes = [...root.querySelectorAll("tr[data-composer], .filenote.writing")].map((box) => {
+    const boxes = [...root.querySelectorAll("tr[data-composer], .filenote.writing, .line.actions.aside")].map((box) => {
       let under = box.matches("tr") ? box.previousElementSibling : null;
       while (under && !under.dataset.line) under = under.previousElementSibling;
+      const thread = box.closest(".noterow");
       const { path } = box.closest("section.file").dataset;
-      return { box, path, side: under ? under.dataset.side : null, line: under ? under.dataset.line : null };
+      return {
+        box,
+        path,
+        note: thread ? thread.id : null,
+        side: under ? under.dataset.side : null,
+        line: under ? under.dataset.line : null,
+      };
     });
     return { boxes, focused };
   }
 
   function hangWriting({ boxes, focused }) {
-    for (const { box, path, side, line } of boxes) {
+    for (const { box, path, note, side, line } of boxes) {
       const wrap = document.querySelector(`section.file[data-path="${CSS.escape(path)}"]`);
       const of = wrap && drawn.get(wrap);
       if (!of) continue;
       fillBody(wrap, of.file, of.index);
+      if (note) {
+        const thread = wrap.querySelector(`#${note} .thread`);
+        if (thread) placeWhisper(thread, box);
+        continue;
+      }
       const spot = line
         ? wrap.querySelector(`tr[data-line="${line}"][data-side="${side}"]`)
         : wrap.querySelector(".filehead");
@@ -3158,13 +3178,13 @@
     const ends = chosen.length ? [chosen[0], chosen[chosen.length - 1]] : [];
     const same = (from, within) =>
       within.querySelector(`tr[data-line="${from.dataset.line}"][data-side="${from.dataset.side}"]`);
-    const writing = liftWriting(old);
+    const lifted = liftWriting(old);
     const fresh = card(file, index);
     fresh.dataset.open = old.dataset.open;
     old.replaceWith(fresh);
     settleBody(fresh);
     nearby.observe(fresh);
-    hangWriting(writing);
+    hangWriting(lifted);
     const picked = ends.map((row) => same(row, fresh));
     if (picked.length && picked.every(Boolean)) {
       Object.assign(sel, { path: file.path, from: Number(picked[0].dataset.seq), to: Number(picked[1].dataset.seq) });
@@ -3547,7 +3567,7 @@
     els.filelist.innerHTML = "";
     els.filelist.append(fileTree(shown));
 
-    const writing = liftWriting(els.main);
+    const lifted = liftWriting(els.main);
     els.main.innerHTML = "";
     if (commit) {
       const note = document.createElement("div");
@@ -3568,7 +3588,7 @@
     shown.forEach((file, index) => els.main.append(card(file, index)));
     settleNear();
     for (const wrap of els.main.querySelectorAll("section.file")) nearby.observe(wrap);
-    hangWriting(writing);
+    hangWriting(lifted);
     fitNotes();
     markCurrent();
     paintSel();
