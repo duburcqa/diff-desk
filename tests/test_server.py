@@ -13,7 +13,7 @@ import urllib.request
 import pytest
 
 import gen_diff_data
-from conftest import FILE_LINES, ROOT, SECOND_EDIT, free_port, until
+from conftest import FILE_LINES, FIRST_EDIT, ROOT, SECOND_EDIT, free_port, until
 from desk import one_ref
 from serve_diff import is_refusal
 
@@ -67,6 +67,14 @@ def test_a_slice_of_the_file_fills_a_gap(desk):
         f"/lines?dir={urllib.parse.quote(str(desk.repo))}&rev=main&path=sample.py&from={SECOND_EDIT}&to={SECOND_EDIT}"
     )
     assert ranged["lines"] == [f"line {SECOND_EDIT}"]
+    # Which string the slice starts inside, on each side: the docstring around the first edit stands on both, and a
+    # slice starting above it stands in code.
+    inside = desk.get(
+        f"/lines?dir={urllib.parse.quote(str(desk.repo))}&rev=feature&path=sample.py&from={FIRST_EDIT}&to={FIRST_EDIT}"
+        f"&oldrev=main&oldfrom={FIRST_EDIT}"
+    )
+    assert inside["opens"] == ['"""', '"""']
+    assert answer["opens"] == ["", ""]
 
 
 def test_a_gap_fills_while_the_blocks_bounding_it_still_read_as_the_page_holds_them(desk):

@@ -1041,10 +1041,16 @@ class Handler(BaseHTTPRequestHandler):
         reads - so work written above the gap, which moves every number below it, still fills. What both anchors must
         agree on is the shift, since that is what says the gap still holds the lines it did; when they cannot, or when
         one of them no longer reads at all, the gap has moved under the reader and this says so rather than answering.
+
+        The answer also says which string the slice starts inside, on each side, so a hunk that grew upward is painted
+        from where it now starts (see 'gen_diff_data.string_opening'): the new side at the first line answered, the old
+        side at 'oldfrom' in the file at 'oldrev', numbered by the diff since a committed revision moves under nobody.
         """
         root = pathlib.Path(query.get("dir", ["."])[0])
         rev = query.get("rev", [""])[0]
         name = query.get("path", [""])[0]
+        old_rev = query.get("oldrev", [""])[0]
+        old_from = int(query.get("oldfrom", ["0"])[0])
         anchors = json.loads(query.get("anchors", ["[]"])[0])
         text = gen_diff_data.run(root, "show", f"{rev}:{name}") if rev else (root / name).read_text()
         rows = text.split("\n")
@@ -1066,8 +1072,14 @@ class Handler(BaseHTTPRequestHandler):
         shift = shifts.pop() if shifts else 0
         low = max(1, int(query.get("from", ["1"])[0]) + shift)
         high = min(len(rows), int(query.get("to", [str(len(rows))])[0]) + shift)
+        opens = ["", ""]
+        if name.endswith(".py"):
+            old_text = gen_diff_data.file_text(root, old_rev, name) if old_rev else text
+            opens = [gen_diff_data.string_opening(old_text, old_from), gen_diff_data.string_opening(text, low)]
         # Reported in the numbering the page asked in, which is what it lays the lines out at.
-        self._json({"total": len(rows), "from": low - shift, "to": high - shift, "lines": rows[low - 1 : high]})
+        self._json(
+            {"total": len(rows), "from": low - shift, "to": high - shift, "lines": rows[low - 1 : high], "opens": opens}
+        )
 
     def _kept(self, file):
         """One file a comment carries, as the page asks for it.

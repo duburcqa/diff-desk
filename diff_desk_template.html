@@ -3087,20 +3087,23 @@
 
   const CONTEXT_STEP = 20;
 
-  function fileRev(file) {
-    // A deleted file only exists on the base side; everything else is read from the branch under review.
+  // The revision each side of a file is read from: the base, or the parent of the commit being read, for the old side,
+  // and the branch under review for the new one. A deleted file only exists on the old side, so both read from there.
+  function fileRevs(file) {
     const { commit } = view();
-    if (commit) return file.state === "deleted" ? `${commit.sha}^` : commit.sha;
-    return file.state === "deleted" ? data.baseRef : branch().rev;
+    const old = commit ? `${commit.sha}^` : data.baseRef;
+    return [old, file.state === "deleted" ? old : commit ? commit.sha : branch().rev];
   }
 
-  async function readLines(file, from, to, anchors) {
+  async function readLines(file, from, to, anchors, oldFrom) {
     // The lines this page holds on either side of the gap ride along, at the numbers it holds them: work on disk moves
     // while a page is open, and what the numbers name moves with it. Only this block's own surroundings are sent, so an
     // edit elsewhere in the same file - above it, below it - leaves the gap fillable, which is what a commit already is.
-    const rev = fileRev(file);
+    const [oldRev, rev] = fileRevs(file);
     const held = rev || !anchors.length ? "" : `&anchors=${encodeURIComponent(JSON.stringify(anchors))}`;
-    const where = `lines?dir=${encodeURIComponent(data.root)}&rev=${encodeURIComponent(rev)}&path=${encodeURIComponent(file.path)}&from=${from}&to=${to}${held}`;
+    const where =
+      `lines?dir=${encodeURIComponent(data.root)}&rev=${encodeURIComponent(rev)}&path=${encodeURIComponent(file.path)}` +
+      `&from=${from}&to=${to}&oldrev=${encodeURIComponent(oldRev)}&oldfrom=${oldFrom}${held}`;
     try {
       return await (await fetch(where, { cache: "no-store" })).json();
     } catch (error) {
@@ -3183,15 +3186,18 @@
     const anchors = [];
     if (above) anchors.push([above[2], above[3]]);
     if (below && below[2] > 0) anchors.push([below[2], below[3]]);
-    const slice = await readLines(file, from, from + wanted - 1, anchors);
-    if (slice.stale) return sayStale(file);
     // Context lines advance both sides, so the offset between them holds across the whole gap.
     const offset = head[1] - head[2];
+    const slice = await readLines(file, from, from + wanted - 1, anchors, from + offset);
+    if (slice.stale) return sayStale(file);
     const rows = slice.lines.map((text, step) => ["c", from + step + offset, from + step, text]);
     file.lines.splice(upward ? at + 1 : at, 0, ...rows);
+    // A hunk grown upward starts inside whatever string its new first line stands in, which is what it is painted from
+    // (see paintFile); the note it carried was for where it used to start.
     if (upward) {
       head[1] -= rows.length;
       head[2] -= rows.length;
+      head[4] = slice.opens;
     }
     redrawCard(file, index);
   }
@@ -3221,7 +3227,7 @@
   async function fillTail(file, index) {
     const last = lastNumbered(file.lines);
     if (!last) return;
-    const slice = await readLines(file, last[2] + 1, last[2] + CONTEXT_STEP, [[last[2], last[3]]]);
+    const slice = await readLines(file, last[2] + 1, last[2] + CONTEXT_STEP, [[last[2], last[3]]], last[1] + 1);
     if (slice.stale) return sayStale(file);
     // What the file measures is remembered, so the last press is the one that reaches the end and the offer goes with
     // it. A file whose end was already reached answers with nothing, and the offer goes on the redraw.
