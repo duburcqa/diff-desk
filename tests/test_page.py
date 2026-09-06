@@ -3013,6 +3013,33 @@ def test_a_comment_being_written_survives_another_being_sent(page):
     assert page.evaluate("() => document.activeElement.closest('tr[data-composer]') !== null")
 
 
+def test_a_note_being_written_survives_the_poll_redrawing_its_thread(page, desk):
+    branch = page.evaluate("() => data.branches[0].ref")
+    made = desk.post(
+        "/comments",
+        [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": "a thread to note on"}],
+    )["seq"]
+    page.reload(wait_until="load")
+    page.wait_for_selector(f"#note-{made} .thread")
+    page.locator(f"#note-{made} .line").first.hover()
+    page.locator(f"#note-{made} .line:not(.reply) button.tiny").filter(has_text="Whisper").click()
+    page.locator(f"#note-{made} .line.actions.aside textarea").fill("half a note, and worth keeping")
+    # A reply landing meanwhile, and the poll that reads it once the box has lost the keyboard: the thread is drawn
+    # again around the reply, and the box has to come through with its words, still on the remark.
+    desk.post("/reply", {"seq": made, "text": "answered from elsewhere", "who": "session"})
+    page.locator("header").click()
+    page.evaluate("() => tick()")
+    page.wait_for_selector(f"#note-{made} .line.reply:not(.aside)")
+    box = page.locator(f"#note-{made} .line.actions.aside")
+    assert box.count() == 1
+    assert box.locator("textarea").input_value() == "half a note, and worth keeping"
+    assert box.evaluate("(line) => line.previousElementSibling.matches('.line:not(.reply)')")
+    box.locator("button").filter(has_text="Keep").click()
+    page.wait_for_selector(f"#note-{made} .line.reply.aside:not(.actions)")
+    assert page.locator(f"#note-{made} .line.actions.aside").count() == 0
+    assert "half a note, and worth keeping" in page.locator(f"#note-{made} .line.reply.aside .said").inner_text()
+
+
 def test_reaching_a_comment_in_a_file_far_from_the_reader_lands_on_it(page, desk):
     branch = page.evaluate("() => data.branches[0].ref")
     # Written on the first file of the review, which is what a reader standing at the end of it is nowhere near.
