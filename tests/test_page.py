@@ -428,6 +428,17 @@ def test_code_is_read_as_the_language_a_file_name_gives_it(page):
     assert first_hunk[3]["said"] == f"line {FIRST_EDIT}"
     assert all(row["painted"] == [f"hljs-string:{row['said']}"] for row in first_hunk)
 
+    # The hunk grown up to the top of the file starts in code, and is read from there: the lines above the docstring
+    # read as code, the docstring as the string it is, and the code below it as code again.
+    card = page.locator("section.file").filter(has=page.locator("text=sample.py")).first
+    with page.expect_response(lambda answer: "/lines" in answer.url):
+        card.locator("button.expand").first.click()
+    settle(page)
+    grown = page.evaluate(read, "sample.py")[: FIRST_EDIT + 4]
+    assert [row["said"] for row in grown[:4]] == ["line 1", "line 2", "line 3", "line 4"]
+    assert all(row["painted"] == [f"hljs-number:{row['said'][5:]}"] for row in grown[:4])
+    assert all(row["painted"] == [f"hljs-string:{row['said']}"] for row in grown[4:])
+
     # A name that gives no language leaves the lines as they read: 'def' there is a word like any other.
     assert page.evaluate(read, "notes.txt") == [
         {"said": "def not_code", "painted": []},
