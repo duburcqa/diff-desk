@@ -4395,11 +4395,15 @@
   // unhandled one, which is a page error even where every request inside it was caught.
   const polling = setInterval(() => tick().catch(() => {}), 10000);
   // A page on its way out stops asking. Clearing the timer stops the rounds to come; the flag stops the one already
-  // under way, which is the one whose request is still in flight as the page goes.
-  addEventListener("pagehide", () => {
-    leaving = true;
-    clearInterval(polling);
-  });
+  // under way, which is the one whose request is still in flight as the page goes. Heard at beforeunload, when the
+  // navigation begins: from there until the next document commits, at pagehide, WebKit refuses every request this
+  // page starts and reports each as a page error, and the next document takes as long as collecting the diffs again.
+  for (const going of ["beforeunload", "pagehide"]) {
+    addEventListener(going, () => {
+      leaving = true;
+      clearInterval(polling);
+    });
+  }
 
   const measureHead = () => {
     const box = document.querySelector("header").getBoundingClientRect();
