@@ -1123,6 +1123,13 @@ def test_a_page_on_its_way_out_asks_for_nothing_more(page, desk):
     assert said["ok"] is False
     assert "older code" in said["error"] and "serve the review again" in said["error"]
 
+    # Leaving begins at beforeunload, not at pagehide: between the two the next document is being fetched, which takes
+    # the desk as long as collecting the diffs again, and a request started in that window is refused by WebKit and
+    # reported as a page error. A round fired at beforeunload, after the page has heard it, asks for nothing.
+    page.evaluate("() => addEventListener('beforeunload', () => tick())")
+    page.reload(wait_until="load")
+    page.wait_for_selector("section.file")
+
 
 def test_a_comment_is_refused_once_the_branch_it_was_aimed_at_has_moved(page, desk):
     branch = page.evaluate("() => data.branches[0].ref")
