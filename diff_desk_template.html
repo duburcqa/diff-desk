@@ -2469,8 +2469,16 @@
       turn.textContent = settled ? `resolved${answers ? `, ${answers} repl${answers === 1 ? "y" : "ies"}` : ""}` : "fold";
       turn.title = settled ? "Show the whole thread" : "Fold it away again";
       turn.addEventListener("click", () => {
-        if (settled) unfolded.add(note.seq);
-        else unfolded.delete(note.seq);
+        if (settled) {
+          unfolded.add(note.seq);
+        } else {
+          // Folded by the reader's own hand, which says every reply in it has been read: a reply that arrived since
+          // the page was loaded would otherwise hold the thread open as news, and the press would change nothing.
+          unfolded.delete(note.seq);
+          heard[note.seq] = answers;
+          arrived[note.seq] = answers;
+          keepHeard();
+        }
         keepUnfolded();
         render();
       });

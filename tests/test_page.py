@@ -1252,6 +1252,14 @@ def test_a_resolved_thread_answered_since_opens_itself(page, desk):
     # page it was brought to, so nothing they are reading closes under them.
     read(page, made)
     assert page.locator(f"#note-{made} .thread.folded").count() == 0
+
+    # Folded by hand before coming back: the press is the reader saying they have read it, so it folds at once and
+    # stays folded, with the reply still one click away.
+    desk.post("/reply", {"seq": made, "text": "and another, while they read", "who": "session"})
+    page.wait_for_function(f"() => document.querySelector('#note-{made}')?.textContent.includes('and another')")
+    page.locator(f"#note-{made} button.tiny").filter(has_text="fold").click()
+    page.wait_for_selector(f"#note-{made} .thread.folded")
+    assert page.locator(f"#note-{made} button.tiny").filter(has_text="resolved, 2 replies").count() == 1
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
     page.wait_for_selector(f"#note-{made} .thread.folded")
