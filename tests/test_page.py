@@ -880,6 +880,11 @@ def test_the_comments_panel_reads_by_batch_or_by_what_moved_last(page, desk):
     # the reader their place.
     page.locator("#logresolved").check()
     page.locator("#hideclosed").click()
+    # The file list stands aside on request, and the diff takes the width it held.
+    held = page.evaluate("() => document.getElementById('main').getBoundingClientRect().width")
+    page.locator("#hidefiles").click()
+    page.wait_for_selector("aside", state="hidden")
+    assert page.evaluate("() => document.getElementById('main').getBoundingClientRect().width") > held
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
     assert page.locator("#log").get_attribute("data-open") == "true"
@@ -887,6 +892,10 @@ def test_the_comments_panel_reads_by_batch_or_by_what_moved_last(page, desk):
     assert page.locator("#logresolved").is_checked()
     assert page.locator("#hideclosed").get_attribute("aria-pressed") == "true"
     assert page.evaluate("() => document.body.classList.contains('hide-closed')")
+    assert page.locator("#hidefiles").get_attribute("aria-pressed") == "true"
+    assert not page.locator("aside").is_visible()
+    page.locator("#hidefiles").click()
+    page.wait_for_selector("aside", state="visible")
     page.select_option("#logsort", "batch")
 
 
