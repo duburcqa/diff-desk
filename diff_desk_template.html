@@ -1537,12 +1537,8 @@
       notes.sent = await response.json();
       notes.live = true;
     } catch (error) {
+      // The desk is not answering. What it said last stays on screen, and the next round asks again.
       notes.live = false;
-      try {
-        notes.sent = JSON.parse(localStorage.getItem("diffdesk.notes") || "[]");
-      } catch (parseError) {
-        notes.sent = [];
-      }
     }
   }
 
@@ -2272,24 +2268,26 @@
         at: stamp(),
       });
     }
-    let recorded = null;
-    if (notes.live) recorded = await post("comments", { comments: batch, github: bound });
-    // Written by the reader, so read by the reader: what shows itself later is what somebody else said.
-    if (recorded && recorded.ok) {
-      for (const seq of recorded.seqs) heard[seq] = 0;
-      keepHeard();
+    const recorded = await post("comments", { comments: batch, github: bound });
+    if (!recorded.ok) {
+      // Nothing reached the desk, so it is all still the reader's to send: kept in the tray, which outlives a reload,
+      // and said so. Shown as recorded, it would be gone the moment the desk answered again.
+      for (const draft of drafts) if (!notes.drafts.includes(draft)) notes.drafts.push(draft);
+      els.trayresult.textContent = `Not recorded, kept pending: ${recorded.error || "the desk is not answering"}`;
+      drawTray();
+      render();
+      return;
     }
-    if (bound && recorded && recorded.ok) {
+    // Written by the reader, so read by the reader: what shows itself later is what somebody else said.
+    for (const seq of recorded.seqs) heard[seq] = 0;
+    keepHeard();
+    if (bound) {
       els.trayresult.textContent = `Posting ${batch.length} to PR #${branch().pr.number}...`;
       const outcome = await post("publish", { ...where(), summary, summaryImages: carrying, seq: recorded.seqs });
       // A post that does not land leaves the comments waiting rather than losing them; the log says so and retries.
       els.trayresult.textContent = outcome.ok
         ? `Posted to PR #${branch().pr.number}`
         : `GitHub did not take it, kept waiting: ${outcome.error || "unreachable"}`;
-    }
-    if (!notes.live) {
-      notes.sent.push(...batch);
-      localStorage.setItem("diffdesk.notes", JSON.stringify(notes.sent));
     }
     notes.drafts = notes.drafts.filter((draft) => !drafts.includes(draft));
     if (summary || carrying.length) {
@@ -4625,8 +4623,9 @@
     // would have opened the comment box is delivered to a node that is no longer in the page.
     if (drag.on || leaving) return;
     await watchBranch();
-    // Every box a comment is written in, whichever it is: a redraw rebuilds the card and takes the box with it.
-    if (!notes.live || document.querySelector("tr[data-composer], .filenote.writing") || notes.drafts.length) return;
+    // Every box a comment is written in, whichever it is: a redraw rebuilds the card and takes the box with it. A desk
+    // that stopped answering is asked again each round, so one that comes back is noticed.
+    if (document.querySelector("tr[data-composer], .filenote.writing") || notes.drafts.length) return;
     // A box being typed into is rebuilt by a redraw, which takes the focus with it even when the words are kept.
     if (document.activeElement && document.activeElement.matches("textarea, input:not([type=checkbox])")) return;
     await loadNotes();
