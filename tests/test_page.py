@@ -1147,6 +1147,43 @@ def test_a_page_on_its_way_out_asks_for_nothing_more(page, desk):
     page.wait_for_selector("section.file")
 
 
+def test_a_comment_sent_while_the_desk_is_down_waits_in_the_tray_and_goes_once_it_answers(page, desk):
+    branch = page.evaluate("() => data.branches[0].ref")
+    gen_diff_data.run(desk.repo, "checkout", "-q", branch)
+    try:
+        line = sample(page).locator("tr.a[data-line]").last
+        line.locator("td.code").first.hover()
+        line.locator("button.pin").first.click()
+        page.wait_for_selector("tr[data-composer='true']")
+        page.locator("tr[data-composer='true'] textarea").fill("sent while the desk was down")
+
+        # The desk stops answering, as one being restarted does. Nothing reaches it, so the comment is the reader's
+        # still: pending at its lines and in the tray, which says why, rather than shown as recorded or thrown away.
+        page.route("**/comments", lambda route: route.abort())
+        page.locator("tr[data-composer='true'] .solid.direct").click()
+        page.wait_for_function("() => notes.drafts.length === 1")
+        assert page.locator("tr[data-composer='true']").count() == 0
+        assert page.locator(".thread.draft", has_text="sent while the desk was down").count() == 1
+        assert page.locator("#tray").get_attribute("data-open") == "true"
+        assert "kept pending" in page.locator("#trayresult").inner_text()
+        assert page.evaluate("() => notes.live") is False
+
+        # The desk answers again, and the reader sends what waited: recorded now, and read as any other thread.
+        page.unroute("**/comments")
+        page.locator("#traysend").click()
+        page.wait_for_function("() => notes.drafts.length === 0 && notes.live")
+        recorded = [
+            row
+            for row in desk.get("/comments")
+            if row["text"] == "sent while the desk was down" and row["state"] != "deleted"
+        ]
+        assert len(recorded) == 1
+        page.wait_for_selector(f"#note-{recorded[0]['seq']} .thread:not(.draft)")
+        desk.post("/drop", {"seq": recorded[0]["seq"], "who": "you"})
+    finally:
+        gen_diff_data.run(desk.repo, "checkout", "-q", "main")
+
+
 def test_a_comment_is_refused_only_once_the_lines_it_was_aimed_at_have_moved(page, desk):
     branch = page.evaluate("() => data.branches[0].ref")
     gen_diff_data.run(desk.repo, "checkout", "-q", branch)
