@@ -1432,6 +1432,13 @@ def test_a_thread_with_nowhere_to_go_is_read_in_the_panel(page, desk):
     thread.wait_for()
     assert "and answered afterwards" in thread.inner_text()
 
+    # Hidden with the resolved threads of the diff, it is still shown here: the press on its row asked to read it.
+    page.locator("#hideclosed").click()
+    page.wait_for_selector("body.hide-closed")
+    assert page.locator(".logthread").get_by_text("and answered afterwards").is_visible()
+    page.locator("#hideclosed").click()
+    page.wait_for_function("() => !document.body.classList.contains('hide-closed')")
+
     # Folded away, as a thread reads once it has been dealt with, and opened again: what it holds is what the reader
     # pressed it for, so it is shown whole rather than as the outline it was folded to.
     thread.locator("button.tiny", has_text="fold").click()
