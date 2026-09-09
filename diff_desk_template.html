@@ -727,7 +727,6 @@
     border-radius: 6px;
     cursor: pointer;
   }
-  .logrow:hover { border-color: var(--accent); }
   .logrow[data-unread="true"] { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
   .logrow[data-unread="true"] b { color: var(--accent); }
   /* Never shrunk: the listing scrolls, and a box that hides its own overflow may be squashed to nothing to make room,
@@ -736,6 +735,8 @@
   .logthread table { width: 100%; border-collapse: collapse; }
   .logthread .noterow td { padding: 0; }
   .logrow[data-state="resolved"] { background: var(--add-bg); border-color: color-mix(in srgb, var(--add-ink) 35%, transparent); }
+  /* After the unread and resolved colourings, which weigh the same as it does and would otherwise keep their border. */
+  .logrow:hover { border-color: var(--accent); }
   .logrow b { flex: none; font-family: var(--mono); font-size: 11px; }
   .logrow .said { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
   .logrow .mark, .thread .mark { flex: none; font-family: var(--mono); font-size: 10.5px; padding: 0 6px; border-radius: 999px; }
