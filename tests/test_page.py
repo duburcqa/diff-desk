@@ -1147,39 +1147,69 @@ def test_a_page_on_its_way_out_asks_for_nothing_more(page, desk):
     page.wait_for_selector("section.file")
 
 
-def test_a_comment_is_refused_once_the_branch_it_was_aimed_at_has_moved(page, desk):
+def test_a_comment_is_refused_only_once_the_lines_it_was_aimed_at_have_moved(page, desk):
     branch = page.evaluate("() => data.branches[0].ref")
-    line = sample(page).locator("tr.a[data-line]").last
-    line.locator("td.code").first.hover()
-    line.locator("button.pin").first.click()
-    page.wait_for_selector("tr[data-composer='true']")
-    page.locator("tr[data-composer='true'] textarea").fill("this line reads oddly")
-
     gen_diff_data.run(desk.repo, "checkout", "-q", branch)
-    written = desk.repo / "added.py"
-    kept = written.read_text()
+    elsewhere = desk.repo / "added.py"
+    written = desk.repo / "sample.py"
+    kept_elsewhere, kept = elsewhere.read_text(), written.read_text()
     try:
-        written.write_text(kept + "SAID_WHILE_WRITING = 1\n")
+        line = sample(page).locator("tr.a[data-line]").last
+        line.locator("td.code").first.hover()
+        line.locator("button.pin").first.click()
+        page.wait_for_selector("tr[data-composer='true']")
+        page.locator("tr[data-composer='true'] textarea").fill("this line reads oddly")
+
+        # Work elsewhere moves the branch without touching these lines, so the remark still says what it was aimed at.
+        elsewhere.write_text(kept_elsewhere + "SAID_WHILE_WRITING = 1\n")
         page.evaluate("() => tick()")
         page.wait_for_function("() => !document.getElementById('moved').disabled")
+        page.locator("tr[data-composer='true'] .solid:not(.direct)").click()
+        page.wait_for_function("() => notes.drafts.length === 1")
+        assert page.locator("tr[data-composer='true']").count() == 0
 
-        # The branch has moved on since the remark was aimed, so it is neither sent nor thrown away: the words stay.
+        # The line the next remark is written on is the one that moves, so that one is neither sent nor thrown away.
+        line = sample(page).locator("tr.a[data-line]").last
+        aimed = line.locator("td.code").first.inner_text().strip()
+        line.locator("td.code").first.hover()
+        line.locator("button.pin").first.click()
+        page.wait_for_selector("tr[data-composer='true']")
+        page.locator("tr[data-composer='true'] textarea").fill("and this one is aimed at moved lines")
+        written.write_text(kept.replace(aimed, f"{aimed}  # written over while the box was open"))
+        before = len(desk.get("/comments"))
         page.locator("tr[data-composer='true'] .solid:not(.direct)").click()
         held = page.locator("tr[data-composer='true']")
-        assert held.count() == 1
-        assert held.locator("textarea").input_value() == "this line reads oddly"
-        assert "moved on" in held.locator(".status").inner_text().lower()
-        assert page.evaluate("() => notes.drafts.length") == 0
+        page.wait_for_selector("tr[data-composer='true'] .notebox[data-stale='true']")
+        assert held.locator("textarea").input_value() == "and this one is aimed at moved lines"
+        assert "have moved" in held.locator(".status").inner_text().lower()
+        assert page.evaluate("() => notes.drafts.length") == 1
+
+        # What it says is read at a glance: the ink a removed line is printed in, heavier than the keys beside it.
+        inked = page.evaluate(
+            """() => {
+              const said = document.querySelector("tr[data-composer='true'] .status");
+              const probe = document.createElement('span');
+              probe.style.color = 'var(--del-ink)';
+              document.body.append(probe);
+              const wanted = getComputedStyle(probe).color;
+              probe.remove();
+              const style = getComputedStyle(said);
+              return { color: style.color, wanted, weight: Number(style.fontWeight) };
+            }"""
+        )
+        assert inked["color"] == inked["wanted"]
+        assert inked["weight"] >= 600
 
         # Sending it on its own is refused the same way, and posts nothing.
-        before = len(desk.get("/comments"))
         held.locator(".solid.direct").click()
-        assert held.locator("textarea").input_value() == "this line reads oddly"
+        assert held.locator("textarea").input_value() == "and this one is aimed at moved lines"
         assert len(desk.get("/comments")) == before
     finally:
         written.write_text(kept)
+        elsewhere.write_text(kept_elsewhere)
         gen_diff_data.run(desk.repo, "checkout", "-q", "main")
         desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})
+        page.evaluate("() => { notes.drafts.length = 0; }")
 
 
 def test_a_file_changed_since_it_was_reviewed_opens_itself(page, desk):

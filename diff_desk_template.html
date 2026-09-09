@@ -412,6 +412,7 @@
   /* The tick stands at the header's own edge, so its hit area takes in the padding around it: a press meant for the
      tick that lands beside it would otherwise fold the file instead. */
   .notebox[data-stale="true"], .filenote[data-stale="true"] { outline: 1px solid var(--del-ink); }
+  [data-stale="true"] .status { color: var(--del-ink); font-weight: 600; }
   .seen { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); cursor: pointer; user-select: none; white-space: nowrap; padding: 8px 12px; margin: -8px -12px -8px 0; }
   .seen input { accent-color: var(--add-ink); width: 14px; height: 14px; }
 
@@ -2997,12 +2998,29 @@
     if (spot) openComposer(spot.row, sel.path, spot.line, spot.endLine, spot.side);
   }
 
-  // A remark is aimed at the lines the reader has in front of them. Once the branch has moved on, sending it would
-  // hang it on code they never read, so the box holds what it holds until the diffs are refreshed.
-  function moveRefused(box, hint) {
+  async function stillReads(path, line, side, anchor) {
+    // Whatever moved the branch may have left these lines alone. The desk finds a line by the text the box was opened
+    // over, so a remark whose own line still reads the same is aimed where the reader aimed it.
+    if (side !== "new" || !anchor) return true;
+    const asked = [[line, anchor]];
+    const where =
+      `lines?dir=${encodeURIComponent(data.root)}&rev=&path=${encodeURIComponent(path)}` +
+      `&from=${line}&to=${line}&anchors=${encodeURIComponent(JSON.stringify(asked))}`;
+    try {
+      const answer = await (await fetch(where, { cache: "no-store" })).json();
+      return !answer.stale;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  // A remark is aimed at the lines the reader has in front of them. Sending it once the code under it has moved would
+  // hang it on lines they never read, so the box holds what it holds until the diffs are refreshed.
+  async function moveRefused(box, hint, aimed) {
     if (document.getElementById("moved").disabled) return false;
+    if (await stillReads(aimed.path, aimed.line, aimed.side, aimed.anchor)) return false;
     box.dataset.stale = "true";
-    hint.textContent = "The branch has moved on. Refresh the diffs, then aim this comment again.";
+    hint.textContent = "The lines this comment was written on have moved. Refresh the diffs, then aim it again.";
     return true;
   }
 
@@ -3045,15 +3063,15 @@
       at: stamp(),
     });
     drop.addEventListener("click", () => box.remove());
-    keep.addEventListener("click", () => {
-      if (!field.value.trim() || moveRefused(box, said)) return;
+    keep.addEventListener("click", async () => {
+      if (!field.value.trim() || (await moveRefused(box, said, { path: file.path, side: "file" }))) return;
       notes.drafts.push(written());
       box.remove();
       drawTray();
       render();
     });
     now.addEventListener("click", async () => {
-      if (!field.value.trim() || moveRefused(box, said)) return;
+      if (!field.value.trim() || (await moveRefused(box, said, { path: file.path, side: "file" }))) return;
       const alone = written();
       box.remove();
       await send1(alone);
@@ -3118,8 +3136,8 @@
       at: stamp(),
     });
 
-    const commit = () => {
-      if (!field.value.trim() || moveRefused(box, hint)) return;
+    const commit = async () => {
+      if (!field.value.trim() || (await moveRefused(box, hint, written()))) return;
       notes.drafts.push(written());
       row.remove();
       clearSel();
@@ -3129,7 +3147,7 @@
 
     // Sent on its own: recorded, posted and threaded exactly like a batch, without waiting in the tray.
     const straight = async () => {
-      if (!field.value.trim() || moveRefused(box, hint)) return;
+      if (!field.value.trim() || (await moveRefused(box, hint, written()))) return;
       const alone = written();
       row.remove();
       clearSel();
