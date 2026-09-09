@@ -252,6 +252,9 @@
 
   .shell { display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); align-items: start; }
   @media (max-width: 900px) { .shell { grid-template-columns: minmax(0, 1fr); } }
+  /* The file list stands aside on request, and the diff takes the whole width. */
+  body.hide-files .shell { grid-template-columns: minmax(0, 1fr); }
+  body.hide-files aside { display: none; }
 
   aside {
     position: sticky;
@@ -890,6 +893,7 @@
   </label>
   <button class="toggle" id="ctx" aria-pressed="false" title="Show only added and removed lines">Changes only</button>
   <button class="toggle" id="hidedone" aria-pressed="false" title="Hide the files marked reviewed">Hide reviewed</button>
+  <button class="toggle" id="hidefiles" aria-pressed="false" title="Hide the file list">Hide files</button>
   <div class="tally">
     <div class="progress" title="Files marked reviewed">
       <span class="track"><i id="pfill" style="width:0%"></i></span>
@@ -1040,7 +1044,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "qx", "ctx", "hidedone", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "logresolved", "logunread", "logonlynew", "brand", "repo", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
+  for (const id of ["tabs", "scope", "q", "qx", "ctx", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "logresolved", "logunread", "logonlynew", "brand", "repo", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -1086,6 +1090,7 @@
       resolved: els.logresolved.checked,
       sort: els.logsort.value,
       hideDone: els.hidedone.getAttribute("aria-pressed") === "true",
+      hideFiles: els.hidefiles.getAttribute("aria-pressed") === "true",
       hideClosed: els.hideclosed.getAttribute("aria-pressed") === "true",
     };
     try {
@@ -1108,6 +1113,8 @@
     els.logsort.value = choices.sort === "thread" ? "thread" : "batch";
     els.hidedone.setAttribute("aria-pressed", String(Boolean(choices.hideDone)));
     document.body.classList.toggle("hide-done", Boolean(choices.hideDone));
+    els.hidefiles.setAttribute("aria-pressed", String(Boolean(choices.hideFiles)));
+    document.body.classList.toggle("hide-files", Boolean(choices.hideFiles));
     els.hideclosed.setAttribute("aria-pressed", String(Boolean(choices.hideClosed)));
     document.body.classList.toggle("hide-closed", Boolean(choices.hideClosed));
   }
@@ -4346,6 +4353,12 @@
       document.body.classList.toggle("hide-closed", on);
       keepChoices();
     });
+  });
+  els.hidefiles.addEventListener("click", () => {
+    const on = els.hidefiles.getAttribute("aria-pressed") !== "true";
+    els.hidefiles.setAttribute("aria-pressed", String(on));
+    document.body.classList.toggle("hide-files", on);
+    keepChoices();
   });
   els.sourceopen.addEventListener("click", () => {
     const open = els.source.dataset.open !== "true";
