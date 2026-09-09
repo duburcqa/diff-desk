@@ -1426,6 +1426,21 @@ def test_a_thread_with_nowhere_to_go_is_read_in_the_panel(page, desk):
     page.wait_for_selector("#log[data-open='true']")
     page.locator("#logresolved").check()
     row = page.locator(f"#logrows .logrow[data-seq='{seq}']")
+    # Hovered, a resolved row takes the accent at its border like any other row: what a press would land on is shown.
+    row.hover()
+    hovered = page.evaluate(
+        """(seq) => {
+          const row = document.querySelector(`#logrows .logrow[data-seq='${seq}']`);
+          const probe = document.createElement('span');
+          probe.style.color = 'var(--accent)';
+          document.body.append(probe);
+          const wanted = getComputedStyle(probe).color;
+          probe.remove();
+          return { got: getComputedStyle(row).borderColor, wanted };
+        }""",
+        seq,
+    )
+    assert hovered["got"] == hovered["wanted"]
     row.click()
     # The thread opens where it is, so what was said in it can still be read.
     thread = page.locator(".logthread")
