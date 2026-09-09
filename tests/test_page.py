@@ -2095,6 +2095,8 @@ def test_a_file_changed_since_it_was_reviewed_says_so_where_the_count_is(page, d
 
 
 def test_text_is_found_across_the_whole_diff_folded_files_included(page):
+    # In the dark, where a bar drawn on the page's own surface is one more black box among the dark ones.
+    page.emulate_media(color_scheme="dark")
     # Put away and hidden: reviewed, with the reviewed files hidden, its rows are nowhere on the page.
     card = page.locator("section.file[data-path='pkg/sub/deep.py']")
     card.locator("input[type=checkbox]").check()
@@ -2105,7 +2107,6 @@ def test_text_is_found_across_the_whole_diff_folded_files_included(page):
     try:
         page.keyboard.press("Control+f")
         page.wait_for_selector("#find:not([hidden])")
-        assert page.evaluate("() => document.activeElement.id") == "fq"
         # Found in the file put away, which is opened and shown for it, with the line brought in front of the reader.
         page.locator("#fq").fill("return 2")
         page.wait_for_function("() => document.getElementById('fcount').textContent === '1/1'")
@@ -2122,13 +2123,30 @@ def test_text_is_found_across_the_whole_diff_folded_files_included(page):
               const found = 'highlights' in CSS ? CSS.highlights.get('found') : null;
               const words = found ? [...found].map((range) => range.toString()) : null;
               const box = getComputedStyle(document.getElementById('fq'));
-              const width = document.getElementById('find').getBoundingClientRect().width;
-              return { image: getComputedStyle(cell).backgroundImage, words, radius: box.borderRadius, width };
+              const lum = (node) => {
+                const [r, g, b] = getComputedStyle(node).backgroundColor.match(/[\d.]+/g).map(Number);
+                const lin = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+                return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+              };
+              const lift = (lum(document.getElementById('find')) + 0.05) / (lum(document.body) + 0.05);
+              const bar = document.getElementById('find').getBoundingClientRect();
+              const gap = bar.top - document.querySelector('header').getBoundingClientRect().bottom;
+              const glyph = parseFloat(getComputedStyle(document.getElementById('fnext')).fontSize);
+              const active = document.activeElement.id;
+              const image = getComputedStyle(cell).backgroundImage;
+              return { image, words, radius: box.borderRadius, width: bar.width, lift, gap, glyph, active };
             }"""
         )
         assert painted["image"] != "none" and painted["words"] in (None, ["return 2"]) and painted["radius"] == "6px"
-        # Narrow, as the browser's own find is: the toggles stand inside the box rather than beside it.
-        assert painted["width"] < 400
+        # Narrow, as the browser's own find is, with the toggles inside the box and the keyboard in it; standing off
+        # the dark page rather than on its surface, clear of the header, with buttons large enough to press.
+        assert (
+            painted["width"] < 400
+            and painted["active"] == "fq"
+            and painted["lift"] >= 1.2
+            and painted["gap"] >= 4
+            and painted["glyph"] >= 14
+        )
         # Counted over every file, and stepped through with Enter, backwards with Shift held.
         page.locator("#fq").fill("rewritten")
         page.wait_for_function("() => document.getElementById('fcount').textContent === '1/9'")
