@@ -2111,8 +2111,7 @@ def test_text_is_found_across_the_whole_diff_folded_files_included(page):
         page.wait_for_function("() => document.getElementById('fcount').textContent === '1/1'")
         assert card.get_attribute("data-open") == "true"
         hit = page.locator("tr.hit")
-        assert hit.count() == 1
-        assert "return 2" in hit.inner_text()
+        assert hit.count() == 1 and "return 2" in hit.inner_text()
         box = hit.bounding_box()
         assert box["y"] >= 0 and box["y"] + box["height"] <= page.viewport_size["height"]
         # Seen as found: the row is painted over its own kind, an added line here, and the words themselves where the
@@ -2123,15 +2122,40 @@ def test_text_is_found_across_the_whole_diff_folded_files_included(page):
               const found = 'highlights' in CSS ? CSS.highlights.get('found') : null;
               const words = found ? [...found].map((range) => range.toString()) : null;
               const box = getComputedStyle(document.getElementById('fq'));
-              return { image: getComputedStyle(cell).backgroundImage, words, radius: box.borderRadius };
+              const width = document.getElementById('find').getBoundingClientRect().width;
+              return { image: getComputedStyle(cell).backgroundImage, words, radius: box.borderRadius, width };
             }"""
         )
-        assert painted["image"] != "none"
-        assert painted["words"] is None or painted["words"] == ["return 2"]
-        assert painted["radius"] == "6px"
+        assert painted["image"] != "none" and painted["words"] in (None, ["return 2"]) and painted["radius"] == "6px"
+        # Narrow, as the browser's own find is: the toggles stand inside the box rather than beside it.
+        assert painted["width"] < 400
         # Counted over every file, and stepped through with Enter, backwards with Shift held.
         page.locator("#fq").fill("rewritten")
         page.wait_for_function("() => document.getElementById('fcount').textContent === '1/9'")
+
+        # Read in its case, as whole words, or as a pattern when asked, and a pattern that does not parse is said so.
+        # Each step turns a mode with its button or its key, writes into the box, and reads the count and the box.
+        counted = "(want) => document.getElementById('fcount').textContent === want"
+        steps = [
+            ("#fcase", "Rewritten", "0", "false"),
+            ("#fcase", None, "1/9", "false"),
+            ("#fword", "rewrit", "0", "false"),
+            (None, "rewritten", "1/9", "false"),
+            ("#fword", None, "1/9", "false"),
+            ("Alt+KeyR", "re.*ten$", "1/9", "false"),
+            (None, "(", "?", "true"),
+            ("#fregex", None, "1/1", "false"),
+            (None, "rewritten", "1/9", "false"),
+        ]
+        for turn, text, count, bad in steps:
+            if turn and turn.startswith("#"):
+                page.locator(turn).click()
+            elif turn:
+                page.locator("#fq").press(turn)
+            if text is not None:
+                page.locator("#fq").fill(text)
+            page.wait_for_function(counted, arg=count)
+            assert page.locator("#fq").get_attribute("data-bad") == bad
         page.locator("#fq").press("Enter")
         assert page.locator("#fcount").inner_text() == "2/9"
         page.locator("#fq").press("Shift+Enter")

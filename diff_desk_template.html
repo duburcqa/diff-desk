@@ -206,15 +206,34 @@
     top: calc(var(--head) + 8px);
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 8px;
+    gap: 4px;
+    padding: 4px 6px;
     border: 1px solid var(--rule-strong);
     border-radius: 8px;
     background: var(--surface);
     box-shadow: 0 12px 32px rgb(0 0 0 / 30%);
   }
   #find[hidden] { display: none; }
-  #find .search { flex: none; width: 280px; margin: 0; }
+  #find .search { flex: none; width: 260px; margin: 0; }
+  /* How the box is read stands inside it, at its end, as the browser's own find has it. */
+  #find .search input { padding-right: 80px; }
+  #find .modes { position: absolute; right: 4px; display: flex; gap: 1px; }
+  #find .mode {
+    font: inherit;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1;
+    padding: 4px 5px;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  #find .mode:hover { color: var(--ink); background: var(--surface-sunk); }
+  #find .mode[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
+  #fword { text-decoration: underline; }
+  #fq[data-bad="true"] { border-color: var(--del-ink); }
   #find .count { font-family: var(--mono); font-size: 11.5px; color: var(--muted); min-width: 5ch; text-align: right; }
   .pick {
     display: flex;
@@ -973,14 +992,19 @@
   <div id="picks" role="listbox" aria-label="Files matching the filter"></div>
 </div>
 <div id="find" hidden>
-  <label class="search">
+  <div class="search">
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2 14 14"/></svg>
     <input id="fq" type="search" placeholder="Find in diff" aria-label="Find text in the diff" spellcheck="false" />
-  </label>
+    <span class="modes">
+      <button class="mode" id="fcase" aria-pressed="false" title="Match case (Alt+C)">Aa</button>
+      <button class="mode" id="fword" aria-pressed="false" title="Match whole word (Alt+W)">ab</button>
+      <button class="mode" id="fregex" aria-pressed="false" title="Use regular expression (Alt+R)">.*</button>
+    </span>
+  </div>
   <span class="count" id="fcount"></span>
-  <button class="tiny" id="fprev" title="Previous match (Shift+Enter)">&#8593;</button>
-  <button class="tiny" id="fnext" title="Next match (Enter)">&#8595;</button>
-  <button class="tiny" id="fclose" title="Close (Escape)">&#215;</button>
+  <button class="mode" id="fprev" title="Previous match (Shift+Enter)">&#8593;</button>
+  <button class="mode" id="fnext" title="Next match (Enter)">&#8595;</button>
+  <button class="mode" id="fclose" title="Close (Escape)">&#215;</button>
 </div>
 
 <div class="logrow toast" id="toast" data-open="false" role="status" aria-live="polite">
@@ -1083,7 +1107,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "qx", "ctx", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "logresolved", "logunread", "logonlynew", "brand", "repo", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "find", "fq", "fcount", "fprev", "fnext", "fclose", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
+  for (const id of ["tabs", "scope", "q", "qx", "ctx", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "logresolved", "logunread", "logonlynew", "brand", "repo", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "find", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -3643,15 +3667,31 @@
   // file. This one reads every line of the diff, and brings the reader to the line it finds.
   const finding = { hits: [], at: -1 };
 
-  function findAll(text) {
-    const wanted = text.trim().toLowerCase();
-    if (!wanted) return [];
+  // How the box is read: in its case, as whole words, as a pattern. Off by default, as the browser's own find.
+  const modes = { matchCase: false, wholeWord: false, regex: false };
+
+  // What the box asks for, as a pattern: the text as written, escaped unless it is a pattern already, and kept from
+  // word characters on either side when whole words are asked for. Undefined for a pattern that does not parse.
+  function wanted() {
+    const text = els.fq.value;
+    if (!text) return null;
+    let source = modes.regex ? text : text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (modes.wholeWord) source = `(?<!\\w)(?:${source})(?!\\w)`;
+    try {
+      return new RegExp(source, modes.matchCase ? "" : "i");
+    } catch (error) {
+      return undefined;
+    }
+  }
+
+  function findAll(pattern) {
+    if (!pattern) return [];
     const hits = [];
     const bare = document.body.classList.contains("hide-context");
     for (const file of visible(view().files)) {
       file.lines.forEach((row, order) => {
         if (row[0] === "h" || (bare && row[0] === "c")) return;
-        if (String(row[3]).toLowerCase().includes(wanted)) hits.push({ path: file.path, order });
+        if (pattern.test(String(row[3]))) hits.push({ path: file.path, order });
       });
     }
     return hits;
@@ -3659,7 +3699,7 @@
 
   // The words found, painted as a range over the code cell's text, which leaves the syntax colours under them alone.
   // Engines without the highlight registry paint the row alone.
-  function markWords(row, wanted) {
+  function markWords(row, pattern) {
     if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
     const nodes = [];
     let text = "";
@@ -3669,15 +3709,16 @@
       nodes.push({ node, start: text.length });
       text += node.data;
     }
-    const at = text.toLowerCase().indexOf(wanted.toLowerCase());
-    if (at < 0) return;
+    const found = pattern.exec(text);
+    if (!found || !found[0].length) return;
+    const at = found.index;
     const spot = (offset) => {
       const held = nodes.filter((entry) => entry.start <= offset).pop();
       return [held.node, Math.min(offset - held.start, held.node.data.length)];
     };
     const range = new Range();
     range.setStart(...spot(at));
-    range.setEnd(...spot(at + wanted.length));
+    range.setEnd(...spot(at + found[0].length));
     CSS.highlights.set("found", new Highlight(range));
   }
 
@@ -3689,7 +3730,10 @@
   function showHit() {
     unmarkHit();
     const hit = finding.hits[finding.at];
-    els.fcount.textContent = hit ? `${finding.at + 1}/${finding.hits.length}` : els.fq.value.trim() ? "0" : "";
+    const pattern = wanted();
+    els.fq.dataset.bad = String(pattern === undefined);
+    const none = pattern === undefined ? "?" : pattern ? "0" : "";
+    els.fcount.textContent = hit ? `${finding.at + 1}/${finding.hits.length}` : none;
     if (!hit) return;
     const card = document.querySelector(`section.file[data-path="${CSS.escape(hit.path)}"]`);
     if (!card) return;
@@ -3703,12 +3747,12 @@
     const row = card.querySelector(`:scope > .body tr[data-seq="${hit.order}"]`);
     if (!row) return;
     row.classList.add("hit");
-    markWords(row, els.fq.value.trim());
+    markWords(row, pattern);
     row.scrollIntoView({ block: "center" });
   }
 
   function findAgain(step) {
-    finding.hits = findAll(els.fq.value);
+    finding.hits = findAll(wanted());
     if (!finding.hits.length) finding.at = -1;
     else if (step === undefined) finding.at = 0;
     else finding.at = (Math.max(finding.at, 0) + step + finding.hits.length) % finding.hits.length;
@@ -4488,7 +4532,21 @@
       event.stopPropagation();
       closeFind();
     }
+    // By code rather than by key: the letter under Alt reads as another character on some keyboards.
+    const mode = { KeyC: "fcase", KeyW: "fword", KeyR: "fregex" }[event.code];
+    if (event.altKey && mode) {
+      event.preventDefault();
+      els[mode].click();
+    }
   });
+  for (const [id, mode] of [["fcase", "matchCase"], ["fword", "wholeWord"], ["fregex", "regex"]]) {
+    els[id].addEventListener("click", () => {
+      modes[mode] = !modes[mode];
+      els[id].setAttribute("aria-pressed", String(modes[mode]));
+      els.fq.focus();
+      findAgain();
+    });
+  }
   els.fnext.addEventListener("click", () => findAgain(1));
   els.fprev.addEventListener("click", () => findAgain(-1));
   els.fclose.addEventListener("click", closeFind);
