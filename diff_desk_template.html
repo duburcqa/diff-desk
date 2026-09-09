@@ -198,6 +198,24 @@
   #palette .search { flex: none; width: 100%; margin: 0; }
   #picks { max-height: min(56vh, 480px); overflow-y: auto; }
   #veil[hidden], #palette[hidden] { display: none; }
+  /* Finding text, under the bar and out of the way of the diff it reads. */
+  #find {
+    position: fixed;
+    z-index: 44;
+    right: 16px;
+    top: calc(var(--head) + 8px);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    border: 1px solid var(--rule-strong);
+    border-radius: 8px;
+    background: var(--surface);
+    box-shadow: 0 12px 32px rgb(0 0 0 / 30%);
+  }
+  #find[hidden] { display: none; }
+  #find input { width: 260px; }
+  #find .count { font-family: var(--mono); font-size: 11.5px; color: var(--muted); min-width: 5ch; text-align: right; }
   .pick {
     display: flex;
     align-items: baseline;
@@ -463,6 +481,14 @@
     );
   }
   tr.sel td.ln:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+  /* The line the find stands on. */
+  tr.hit td {
+    background-image: linear-gradient(
+      color-mix(in srgb, var(--accent) 28%, transparent),
+      color-mix(in srgb, var(--accent) 28%, transparent)
+    );
+  }
+  tr.hit td.ln:first-child { box-shadow: inset 2px 0 0 var(--accent); }
   body.hide-closed .noterow[data-done="true"], body.hide-closed .filenote[data-done="true"] { display: none; }
   body.hide-closed .noterow[data-done="true"][data-reveal="true"] { display: table-row; }
   body.hide-closed .filenote[data-done="true"][data-reveal="true"] { display: block; }
@@ -944,6 +970,13 @@
   </label>
   <div id="picks" role="listbox" aria-label="Files matching the filter"></div>
 </div>
+<div id="find" hidden>
+  <input id="fq" type="search" placeholder="Find in diff" aria-label="Find text in the diff" spellcheck="false" />
+  <span class="count" id="fcount"></span>
+  <button class="tiny" id="fprev" title="Previous match (Shift+Enter)">&#8593;</button>
+  <button class="tiny" id="fnext" title="Next match (Enter)">&#8595;</button>
+  <button class="tiny" id="fclose" title="Close (Escape)">&#215;</button>
+</div>
 
 <div class="logrow toast" id="toast" data-open="false" role="status" aria-live="polite">
   <svg class="warn" viewBox="0 0 14 14" aria-hidden="true">
@@ -1004,7 +1037,7 @@
     <h2 class="label">Files</h2>
     <div class="filelist" id="filelist"></div>
     <div class="hint">
-      <kbd>j</kbd><kbd>k</kbd> files · <kbd>/</kbd> filter<br />
+      <kbd>j</kbd><kbd>k</kbd> files · <kbd>/</kbd> filter · <kbd>f</kbd> find<br />
       drag the <b>+</b> across lines to select a range<br />
       <kbd>c</kbd> comment · <kbd>r</kbd> mark reviewed
     </div>
@@ -1045,7 +1078,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "qx", "ctx", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "logresolved", "logunread", "logonlynew", "brand", "repo", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
+  for (const id of ["tabs", "scope", "q", "qx", "ctx", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "logresolved", "logunread", "logonlynew", "brand", "repo", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "find", "fq", "fcount", "fprev", "fnext", "fclose", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -3600,6 +3633,68 @@
     showClear();
   }
 
+  /* ---------- finding text in the diff ---------- */
+
+  // The browser's own find reads what is on the page, which is the rows built around the reader and none of a folded
+  // file. This one reads every line of the diff, and brings the reader to the line it finds.
+  const finding = { hits: [], at: -1 };
+
+  function findAll(text) {
+    const wanted = text.trim().toLowerCase();
+    if (!wanted) return [];
+    const hits = [];
+    const bare = document.body.classList.contains("hide-context");
+    for (const file of visible(view().files)) {
+      file.lines.forEach((row, order) => {
+        if (row[0] === "h" || (bare && row[0] === "c")) return;
+        if (String(row[3]).toLowerCase().includes(wanted)) hits.push({ path: file.path, order });
+      });
+    }
+    return hits;
+  }
+
+  function showHit() {
+    for (const old of document.querySelectorAll("tr.hit")) old.classList.remove("hit");
+    const hit = finding.hits[finding.at];
+    els.fcount.textContent = hit ? `${finding.at + 1}/${finding.hits.length}` : els.fq.value.trim() ? "0" : "";
+    if (!hit) return;
+    const card = document.querySelector(`section.file[data-path="${CSS.escape(hit.path)}"]`);
+    if (!card) return;
+    // A file folded away, or hidden because it is reviewed, is opened and shown for the line found in it, and its rows
+    // are built outright where the reader was nowhere near them.
+    card.dataset.open = "true";
+    card.dataset.reveal = "true";
+    folds.set(hit.path, { digest: card.dataset.digest, open: true, upTo: latest() });
+    const held = drawn.get(card);
+    if (held) fillBody(card, held.file, held.index);
+    const row = card.querySelector(`:scope > .body tr[data-seq="${hit.order}"]`);
+    if (!row) return;
+    row.classList.add("hit");
+    row.scrollIntoView({ block: "center" });
+  }
+
+  function findAgain(step) {
+    finding.hits = findAll(els.fq.value);
+    if (!finding.hits.length) finding.at = -1;
+    else if (step === undefined) finding.at = 0;
+    else finding.at = (Math.max(finding.at, 0) + step + finding.hits.length) % finding.hits.length;
+    showHit();
+  }
+
+  function openFind() {
+    els.find.hidden = false;
+    els.fq.focus();
+    els.fq.select();
+    if (els.fq.value.trim()) findAgain(0);
+  }
+
+  function closeFind() {
+    if (els.find.hidden) return;
+    els.fq.blur();
+    els.find.hidden = true;
+    for (const old of document.querySelectorAll("tr.hit")) old.classList.remove("hit");
+  }
+
   function movePick(step) {
     const rows = els.picks.querySelectorAll(".pick");
     if (!rows.length) return;
@@ -4348,6 +4443,21 @@
     }
   });
   els.veil.addEventListener("click", closePicker);
+  els.fq.addEventListener("input", () => findAgain());
+  els.fq.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      findAgain(event.shiftKey ? -1 : 1);
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      closeFind();
+    }
+  });
+  els.fnext.addEventListener("click", () => findAgain(1));
+  els.fprev.addEventListener("click", () => findAgain(-1));
+  els.fclose.addEventListener("click", closeFind);
   els.ctx.addEventListener("click", () => {
     const on = els.ctx.getAttribute("aria-pressed") !== "true";
     els.ctx.setAttribute("aria-pressed", String(on));
@@ -4448,6 +4558,12 @@
   });
 
   document.addEventListener("keydown", (event) => {
+    // Finding text is this page's, wherever the keyboard is: the browser's own find reads only the rows on screen.
+    if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "f") {
+      event.preventDefault();
+      openFind();
+      return;
+    }
     if (["INPUT", "SELECT", "TEXTAREA"].includes(event.target.tagName)) {
       if (event.key === "Escape") event.target.blur();
       return;
@@ -4464,6 +4580,11 @@
       event.preventDefault();
       els.goto.focus();
       els.goto.select();
+      return;
+    }
+    if (event.key === "f") {
+      event.preventDefault();
+      openFind();
       return;
     }
     const count = entries().length;

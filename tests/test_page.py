@@ -2094,6 +2094,50 @@ def test_a_file_changed_since_it_was_reviewed_says_so_where_the_count_is(page, d
     card.locator("input[type=checkbox]").uncheck()
 
 
+def test_text_is_found_across_the_whole_diff_folded_files_included(page):
+    # Put away and hidden: reviewed, with the reviewed files hidden, its rows are nowhere on the page.
+    card = page.locator("section.file[data-path='pkg/sub/deep.py']")
+    card.locator("input[type=checkbox]").check()
+    page.wait_for_selector("section.file[data-path='pkg/sub/deep.py'][data-done='true']")
+    page.locator("#hidedone").click()
+    page.wait_for_selector("body.hide-done")
+    assert not card.is_visible()
+    try:
+        page.keyboard.press("Control+f")
+        page.wait_for_selector("#find:not([hidden])")
+        assert page.evaluate("() => document.activeElement.id") == "fq"
+        # Found in the file put away, which is opened and shown for it, with the line brought in front of the reader.
+        page.locator("#fq").fill("return 2")
+        page.wait_for_function("() => document.getElementById('fcount').textContent === '1/1'")
+        assert card.get_attribute("data-open") == "true"
+        hit = page.locator("tr.hit")
+        assert hit.count() == 1
+        assert "return 2" in hit.inner_text()
+        box = hit.bounding_box()
+        assert box["y"] >= 0 and box["y"] + box["height"] <= page.viewport_size["height"]
+        # Counted over every file, and stepped through with Enter, backwards with Shift held.
+        page.locator("#fq").fill("rewritten")
+        page.wait_for_function("() => document.getElementById('fcount').textContent === '1/9'")
+        page.locator("#fq").press("Enter")
+        assert page.locator("#fcount").inner_text() == "2/9"
+        page.locator("#fq").press("Shift+Enter")
+        assert page.locator("#fcount").inner_text() == "1/9"
+        assert page.locator("tr.hit").count() == 1
+        # Closed, nothing of it is left on the page, and the letter opens it again from the page itself.
+        page.locator("#fq").press("Escape")
+        page.wait_for_selector("#find", state="hidden")
+        assert page.locator("tr.hit").count() == 0
+        keys_reach(page)
+        page.keyboard.press("f")
+        page.wait_for_selector("#find:not([hidden])")
+        page.locator("#fq").press("Escape")
+        page.wait_for_selector("#find", state="hidden")
+    finally:
+        page.locator("#hidedone").click()
+        page.wait_for_function("() => !document.body.classList.contains('hide-done')")
+        card.locator("input[type=checkbox]").uncheck()
+
+
 def test_the_progress_counts_the_files_the_filter_leaves(page):
     total = page.evaluate("() => view().files.length")
     assert f"/{total} reviewed" in page.locator("#ptext").inner_text().lower()
