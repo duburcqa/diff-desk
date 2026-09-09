@@ -4,6 +4,7 @@
     --ground: #f6f7f9;
     --surface: #ffffff;
     --surface-sunk: #f0f2f6;
+    --float: #ffffff;
     --ink: #151a21;
     --muted: #5c6675;
     --faint: #8a94a4;
@@ -35,6 +36,7 @@
       --ground: #11141a;
       --surface: #151a21;
       --surface-sunk: #1b212a;
+      --float: #2a3340;
       --ink: #f2f5fa;
       --muted: #adb8c9;
       --faint: #8b95a6;
@@ -61,6 +63,7 @@
     --ground: #11141a;
     --surface: #151a21;
     --surface-sunk: #1b212a;
+    --float: #2a3340;
     --ink: #f2f5fa;
     --muted: #adb8c9;
     --faint: #8b95a6;
@@ -210,13 +213,14 @@
     padding: 4px 6px;
     border: 1px solid var(--rule-strong);
     border-radius: 8px;
-    background: var(--surface);
+    /* Lifted off the page: on the page's own surface the bar read as one more black box among the dark ones. */
+    background: var(--float);
     box-shadow: 0 12px 32px rgb(0 0 0 / 30%);
   }
   #find[hidden] { display: none; }
   #find .search { flex: none; width: 260px; margin: 0; }
   /* How the box is read stands inside it, at its end, as the browser's own find has it. */
-  #find .search input { padding-right: 80px; }
+  #find .search input { padding-right: 80px; background: var(--surface); }
   #find .modes { position: absolute; right: 4px; display: flex; gap: 1px; }
   #find .mode {
     font: inherit;
@@ -231,7 +235,9 @@
     cursor: pointer;
   }
   #find .mode:hover { color: var(--ink); background: var(--surface-sunk); }
-  #find .mode[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
+  #find .mode[aria-pressed="true"] { color: var(--ink); background: color-mix(in srgb, var(--accent) 30%, transparent); }
+  /* The arrows and the cross, larger than the toggles: pressed on their own rather than read. */
+  #find > .mode { color: var(--ink); font-size: 15px; padding: 4px 7px; }
   #fword { text-decoration: underline; }
   #fq[data-bad="true"] { border-color: var(--del-ink); }
   #find .count { font-family: var(--mono); font-size: 11.5px; color: var(--muted); min-width: 5ch; text-align: right; }
@@ -3760,6 +3766,9 @@
   }
 
   function openFind() {
+    // Hung under the header's own edge, read now: the header folds onto two rows in a narrow window, and a bar placed
+    // by the header's nominal height then stands across it.
+    els.find.style.top = `${document.querySelector("header").getBoundingClientRect().bottom + 8}px`;
     els.find.hidden = false;
     els.fq.focus();
     els.fq.select();
