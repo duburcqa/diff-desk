@@ -2500,6 +2500,15 @@ def test_a_reply_being_written_survives_the_page_redrawing_itself(page, desk):
     assert page.locator(f"#note-{made} textarea").first.input_value() == ""
     assert "all of what I mean" in thread.inner_text()
 
+    # A round that hears nothing new leaves the cards as they stand, so a press in flight lands where it was aimed; one
+    # that hears a reply draws it. Given a few rounds to settle first, since one may still be bringing back what the
+    # pull request holds, which is news of its own.
+    standing = "async () => { const it = document.querySelector('section.file'); await tick(); return it.isConnected; }"
+    assert any(page.evaluate(standing) for _ in range(4))
+    desk.post("/reply", {"seq": made, "text": "said from elsewhere meanwhile", "who": "session"})
+    assert not page.evaluate(standing)
+    assert "said from elsewhere meanwhile" in thread.inner_text()
+
 
 def test_a_box_takes_the_height_of_what_is_written_into_it(page, desk):
     card = sample(page)
