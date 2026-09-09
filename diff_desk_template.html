@@ -2058,8 +2058,7 @@
     }
     if (!outcome.ok) announce("sync", `PR #${request.number}`, outcome.error || "GitHub unreachable");
     await loadNotes();
-    drawLog();
-    render();
+    drawNews();
   }
 
   // A press sends everything this desk is holding for the pull request; the clock sends only what a send already
@@ -4607,6 +4606,19 @@
     }
   });
 
+  // What the comments said when the page last drew them for a round, so a round that hears nothing new draws nothing.
+  let drawnFor = null;
+
+  function drawNews() {
+    // Redrawn for news alone. Rebuilding every card each round replaces the node under a press, so a click that
+    // straddles the round lands on nothing, and a review of any size is rebuilt for no reason.
+    const said = notes.sent.map((note) => `${note.seq}:${note.event || 0}:${note.state}`).join(",");
+    if (said === drawnFor) return;
+    drawnFor = said;
+    drawLog();
+    render();
+  }
+
   // Resolutions are posted by whoever is working through the comments, so an idle page picks them up on its own.
   async function tick() {
     // Never redraw under a gesture: rebuilding the table destroys the pin holding the pointer, and the release that
@@ -4618,8 +4630,7 @@
     // A box being typed into is rebuilt by a redraw, which takes the focus with it even when the words are kept.
     if (document.activeElement && document.activeElement.matches("textarea, input:not([type=checkbox])")) return;
     await loadNotes();
-    drawLog();
-    render();
+    drawNews();
     // A post that could not be made is retried on its own, as long as the browser believes it is connected.
     if (navigator.onLine) {
       await retryFailed();
