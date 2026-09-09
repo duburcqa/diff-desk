@@ -2115,6 +2115,20 @@ def test_text_is_found_across_the_whole_diff_folded_files_included(page):
         assert "return 2" in hit.inner_text()
         box = hit.bounding_box()
         assert box["y"] >= 0 and box["y"] + box["height"] <= page.viewport_size["height"]
+        # Seen as found: the row is painted over its own kind, an added line here, and the words themselves where the
+        # engine paints ranges. The box is the page's own, not the browser's.
+        painted = page.evaluate(
+            """() => {
+              const cell = document.querySelector('tr.hit td.code');
+              const found = 'highlights' in CSS ? CSS.highlights.get('found') : null;
+              const words = found ? [...found].map((range) => range.toString()) : null;
+              const box = getComputedStyle(document.getElementById('fq'));
+              return { image: getComputedStyle(cell).backgroundImage, words, radius: box.borderRadius };
+            }"""
+        )
+        assert painted["image"] != "none"
+        assert painted["words"] is None or painted["words"] == ["return 2"]
+        assert painted["radius"] == "6px"
         # Counted over every file, and stepped through with Enter, backwards with Shift held.
         page.locator("#fq").fill("rewritten")
         page.wait_for_function("() => document.getElementById('fcount').textContent === '1/9'")
