@@ -2677,7 +2677,10 @@ def test_a_file_holding_an_unread_comment_opens_itself(page, desk):
     assert page.locator(f"#note-{made} .thread.folded").count() == 0
     assert "settled before you saw it" in page.locator(f"#note-{made}").inner_text()
 
-    # Read now, so the file closes again - and it holds its header alone until something asks for its lines.
+    # Read now, so the file closes again - and it holds its header alone until something asks for its lines. Brought
+    # in front of the reader first: the file's first line holds every thread earlier tests left there, and a thread
+    # below the fold has not been read.
+    read(page, made)
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
     comments_reach(page)
