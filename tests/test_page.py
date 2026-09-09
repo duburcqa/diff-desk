@@ -1439,6 +1439,15 @@ def test_a_thread_with_nowhere_to_go_is_read_in_the_panel(page, desk):
     page.locator("#hideclosed").click()
     page.wait_for_function("() => !document.body.classList.contains('hide-closed')")
 
+    # Answered from where it is read: the reply stands in the thread at once and the box is emptied, so nothing
+    # invites a second press. Asked of the answer itself rather than of the poll, which redraws the panel later.
+    thread.locator("textarea").first.fill("answered from the panel")
+    thread.locator("button.ghost").filter(has_text="Reply").click()
+    page.wait_for_function(
+        "() => document.querySelector('.logthread')?.innerText.includes('answered from the panel')", timeout=3000
+    )
+    assert thread.locator("textarea").first.input_value() == ""
+
     # Folded away, as a thread reads once it has been dealt with, and opened again: what it holds is what the reader
     # pressed it for, so it is shown whole rather than as the outline it was folded to.
     thread.locator("button.tiny", has_text="fold").click()

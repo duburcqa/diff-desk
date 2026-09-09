@@ -1327,16 +1327,14 @@ class Handler(BaseHTTPRequestHandler):
             said["images"] = carried(order)
         if on is not None:
             said["on"] = on
+        is_whisper = bool(order.get("whisper"))
         with changing() as rows:
             found = next((row for row in rows if row["seq"] == order.get("seq")), None)
-            if found is None:
-                is_whisper = bool(order.get("whisper"))
-            else:
+            if found is not None:
                 said_before = found["replies"]
                 if on is not None and not 0 <= on < len(said_before):
                     self._json({"ok": False, "error": f"comment {found['seq']} has nothing said at [{on}]"})
                     return
-                is_whisper = bool(order.get("whisper"))
                 if on is not None and said_before[on].get("whisper"):
                     # A reply is never turned into a whisper, nor a whisper into a reply: what is bound for the
                     # pull request cannot hang on something the pull request has never seen.
@@ -1352,6 +1350,14 @@ class Handler(BaseHTTPRequestHandler):
                         said["on"] = on
                 if is_whisper:
                     said["whisper"] = True
+                # The same words from the same side, right after themselves, are a press repeated while the page
+                # looked frozen rather than a second answer: the thread ends with them already and is left as it is.
+                repeated = said_before and all(
+                    said_before[-1].get(key) == said.get(key) for key in ("who", "text", "whisper", "on", "images")
+                )
+                if repeated:
+                    self._json({"ok": False, "error": f"comment {found['seq']} already ends with these words"})
+                    return
                 said_before.append(said)
                 touched(rows, found, who)
         if found is None:

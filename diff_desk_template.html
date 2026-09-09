@@ -1589,6 +1589,7 @@
         await post("reply", { seq: note.seq, text: wanted, who: "you", whisper: true, on, images: attached() });
         writing.remove();
         await loadNotes();
+        drawLog();
         render();
       });
     });
@@ -2708,6 +2709,7 @@
             if (!wanted || (wanted === answer.text && sameFiles(files, answer.images))) return render();
             await post("edit", { seq: note.seq, reply: index, text: wanted, images: files });
             await loadNotes();
+            drawLog();
             render();
           });
         });
@@ -2776,6 +2778,9 @@
         }
         writing.delete(note.seq);
         await loadNotes();
+        // The panel holds a copy of a thread with nowhere else to be read, and a copy left standing after the answer
+        // shows the words still in the box and nothing said, which is what a reader presses again.
+        drawLog();
         render();
       });
       const close = document.createElement("button");
@@ -2805,6 +2810,7 @@
           unfolded.add(note.seq);
         }
         keepUnfolded();
+        drawLog();
         render();
       });
       actions.append(say, send, close);

@@ -169,6 +169,9 @@ def test_either_side_can_reply_without_closing_the_thread(desk):
     made = desk.post("/comments", {"branch": "feature", "path": "sample.py", "line": 11, "side": "new", "text": "why?"})
     assert desk.post("/reply", {"seq": made["seq"], "text": "because of X", "who": "session"})["replies"] == 1
     assert desk.post("/reply", {"seq": made["seq"], "text": "then what about Y", "who": "you"})["replies"] == 2
+    # Said again word for word by the same side, it is refused: a thread already ending with these words is a press
+    # repeated, never a second answer.
+    assert desk.post("/reply", {"seq": made["seq"], "text": "then what about Y", "who": "you"})["ok"] is False
     row = {row["seq"]: row for row in desk.get("/comments")}[made["seq"]]
     assert [(reply["who"], reply["text"]) for reply in row["replies"]] == [
         ("session", "because of X"),
