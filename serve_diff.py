@@ -1382,7 +1382,15 @@ class Handler(BaseHTTPRequestHandler):
                         said = {"who": who, "text": answer, "at": time.strftime("%Y-%m-%d %H:%M:%S"), "github": "none"}
                         if order.get("images"):
                             said["images"] = carried(order)
-                        row["replies"].append(said)
+                        # An answer the thread already ends with, from the same side, is the same answer asked for
+                        # twice, as when a session answers a thread and then closes it with the same words, or asks
+                        # again after the desk restarted under it. The thread is closed as asked and says it once.
+                        last = row["replies"][-1] if row["replies"] else None
+                        repeated = last and all(
+                            last.get(key) == said.get(key) for key in ("who", "text", "whisper", "on", "images")
+                        )
+                        if not repeated:
+                            row["replies"].append(said)
                     touched(rows, row, who)
                     closed += 1
         print(f"{'RESOLVED' if closing else 'REOPENED'} {closed} comment(s) by {who}", flush=True)

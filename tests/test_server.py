@@ -164,6 +164,12 @@ def test_resolving_closes_only_what_was_named_and_can_be_undone(desk):
     assert again["state"] == "open"
     assert len(again["replies"]) == 1
 
+    # Closed again with the very answer the thread already ends with, from the same side: closed, and said once.
+    assert desk.post("/resolve", {"seq": [marked["seq"]], "answer": "done in abc1234"})["resolved"] == 1
+    once = {row["seq"]: row for row in desk.get("/comments")}[marked["seq"]]
+    assert once["state"] == "resolved"
+    assert len(once["replies"]) == 1
+
 
 def test_either_side_can_reply_without_closing_the_thread(desk):
     made = desk.post("/comments", {"branch": "feature", "path": "sample.py", "line": 11, "side": "new", "text": "why?"})
