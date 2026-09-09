@@ -1883,7 +1883,11 @@
     holder.className = "logthread";
     const table = document.createElement("table");
     const body = document.createElement("tbody");
-    body.append(noteRow(note));
+    const row = noteRow(note);
+    // Opened by a press on its row, so it is read whatever the header hides: with the resolved threads hidden, a
+    // resolved one would be hidden here as well, and the panel would show a strip with nothing in it.
+    row.dataset.reveal = "true";
+    body.append(row);
     table.append(body);
     holder.append(table);
     return holder;
