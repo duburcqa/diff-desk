@@ -880,11 +880,15 @@ def test_the_comments_panel_reads_by_batch_or_by_what_moved_last(page, desk):
     # the reader their place.
     page.locator("#logresolved").check()
     page.locator("#hideclosed").click()
-    # The file list stands aside on request, and the diff takes the width it held.
+    # The file list folds from its own head, the diff takes the width it held, and a rail at the edge brings it back.
+    # The bar holds one row in a laptop window, with nothing in it that is not a control.
+    page.set_viewport_size({"width": 1200, "height": 900})
+    assert page.locator("#brand").count() == 0 and page.locator("header").bounding_box()["height"] < 70
     held = page.evaluate("() => document.getElementById('main').getBoundingClientRect().width")
-    page.locator("#hidefiles").click()
+    page.locator("aside #hidefiles").click()
     page.wait_for_selector("aside", state="hidden")
     assert page.evaluate("() => document.getElementById('main').getBoundingClientRect().width") > held
+    assert page.locator("#showfiles").is_visible()
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
     assert page.locator("#log").get_attribute("data-open") == "true"
@@ -894,9 +898,10 @@ def test_the_comments_panel_reads_by_batch_or_by_what_moved_last(page, desk):
     assert page.evaluate("() => document.body.classList.contains('hide-closed')")
     assert page.locator("#hidefiles").get_attribute("aria-pressed") == "true"
     assert not page.locator("aside").is_visible()
-    page.locator("#hidefiles").click()
+    page.locator("#showfiles").click()
     page.wait_for_selector("aside", state="visible")
     page.select_option("#logsort", "batch")
+    page.set_viewport_size({"width": 1500, "height": 900})
 
 
 def test_a_comment_resolved_here_does_not_claim_the_pull_request_agrees(page, desk):
@@ -3260,7 +3265,9 @@ def test_a_note_being_written_survives_the_poll_redrawing_its_thread(page, desk)
     # A reply landing meanwhile, and the poll that reads it once the box has lost the keyboard: the thread is drawn
     # again around the reply, and the box has to come through with its words, still on the remark.
     desk.post("/reply", {"seq": made, "text": "answered from elsewhere", "who": "session"})
-    page.locator("header").click()
+    # On the bar's own padding: a press on the bar is what drops the keyboard, and one landing in the filter would
+    # only move it there.
+    page.locator("header").click(position={"x": 4, "y": 4})
     page.evaluate("() => tick()")
     page.wait_for_selector(f"#note-{made} .line.reply:not(.aside)")
     box = page.locator(f"#note-{made} .line.actions.aside")
