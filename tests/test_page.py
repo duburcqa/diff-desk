@@ -1918,6 +1918,49 @@ def test_a_comment_whose_line_left_the_diff_is_kept_and_marked(page, desk):
     )
     assert placed == {"isLast": False, "above": str(held["line"])}
 
+    # Written with the lines around it, a comment whose own lines have changed hangs where they were, right above the
+    # first line that followed it and still reads the same, wherever the numbering has since put that line.
+    pair = page.evaluate(
+        "() => {"
+        "  const file = data.branches[0].files.find((entry) => entry.path === 'sample.py');"
+        "  const rows = file.lines.filter((entry) => entry[0] !== 'h' && entry[0] !== 'd');"
+        "  const at = rows.findIndex((row, i) => i > 0 && rows[i - 1][2] === row[2] - 1);"
+        "  return {before: rows[at - 1][2], following: rows[at][3]};"
+        "}"
+    )
+    moved = desk.post(
+        "/comments",
+        [
+            {
+                "branch": branch,
+                "path": "sample.py",
+                "line": pair["before"] + 40,
+                "side": "new",
+                "text": "written on lines since rewritten, with their neighbours",
+                "anchor": "a line this diff never held",
+                "around": {"above": [], "below": [pair["following"]]},
+            }
+        ],
+    )["seqs"][0]
+    page.reload(wait_until="load")
+    page.wait_for_selector(f"#note-{moved}")
+    hung = page.evaluate(
+        "(seq) => {"
+        "  let above = document.getElementById(`note-${seq}`).previousElementSibling;"
+        "  while (above && !above.dataset.line) above = above.previousElementSibling;"
+        "  return above && above.dataset.line;"
+        "}",
+        moved,
+    )
+    assert hung == str(pair["before"])
+    # And a comment written from the page carries its neighbours with it.
+    line = sample(page).locator("tr.a[data-line]").first
+    line.locator("td.code").first.hover()
+    line.locator("button.pin").first.click()
+    submit(page, "carried with its neighbours")
+    carried = desk.get("/comments")[-1]
+    assert carried["around"]["below"] and carried["around"]["above"]
+
 
 def test_a_release_the_page_never_sees_does_not_leave_it_dragging(page):
     line = rows(page).nth(2)
