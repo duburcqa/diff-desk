@@ -122,12 +122,21 @@
     border-bottom: 1px solid var(--rule);
   }
 
-  .brand { display: flex; align-items: baseline; gap: 8px; flex: none; min-width: 0; }
-  .brand h1 { white-space: nowrap; }
-  .brand .base { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .brand h1 { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: -0.01em; }
-  .brand .base { font-family: var(--mono); font-size: 11px; color: var(--muted); }
-
+  /* How the diff is being looked at: three toggles in one group, read by their icons and said by their titles. */
+  .views { display: flex; gap: 2px; padding: 2px; background: var(--surface-sunk); border-radius: 7px; flex: none; }
+  .views .toggle {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 26px;
+    padding: 0;
+    border-color: transparent;
+    background: transparent;
+    color: var(--muted);
+  }
+  .views .toggle svg { width: 14px; height: 14px; }
+  .views .toggle:hover { color: var(--ink); }
+  .views .toggle[aria-pressed="true"] { background: var(--surface); color: var(--accent); border-color: var(--rule-strong); box-shadow: var(--shadow); }
   .tabs { display: flex; gap: 2px; padding: 2px; background: var(--surface-sunk); border-radius: 7px; }
   .tab {
     appearance: none;
@@ -147,7 +156,7 @@
   .tab[aria-selected="true"] .away { opacity: 1; }
   .tab[aria-selected="true"]:hover .away { color: var(--accent); }
 
-  select, .toggle, .search input {
+  select, .toggle, .search input, #goto {
     font: inherit;
     font-size: 12.5px;
     color: var(--ink);
@@ -285,6 +294,12 @@
   .totals .minus { color: var(--del-ink); }
 
   .tally { display: flex; align-items: center; gap: 12px; flex: none; }
+  /* What a laptop window has no room for gives way before the bar folds: the totals and the long commit name. */
+  @media (max-width: 1250px) {
+    header { gap: 8px; }
+    .totals { display: none; }
+    #scope { max-width: 18ch; }
+  }
   .progress { display: flex; align-items: center; gap: 7px; }
   .progress .track { width: 74px; height: 5px; border-radius: 3px; background: var(--rule); overflow: hidden; }
   .progress .track i { display: block; height: 100%; background: var(--add-ink); }
@@ -295,9 +310,27 @@
 
   .shell { display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); align-items: start; }
   @media (max-width: 900px) { .shell { grid-template-columns: minmax(0, 1fr); } }
-  /* The file list stands aside on request, and the diff takes the whole width. */
-  body.hide-files .shell { grid-template-columns: minmax(0, 1fr); }
+  /* The file list folds away from its own head, and a rail at the edge brings it back. */
+  .asidehead { display: flex; align-items: center; justify-content: space-between; margin: 0 0 8px 4px; }
+  .asidehead h2 { margin: 0; }
+  #hidefiles, .rail { display: grid; place-items: center; padding: 0; border-color: transparent; background: transparent; color: var(--muted); }
+  #hidefiles { width: 24px; height: 22px; }
+  #hidefiles svg, .rail svg { width: 12px; height: 12px; }
+  #hidefiles:hover, .rail:hover { color: var(--ink); background: var(--surface-sunk); }
+  .rail { display: none; }
+  body.hide-files .shell { grid-template-columns: 28px minmax(0, 1fr); }
   body.hide-files aside { display: none; }
+  body.hide-files .rail {
+    display: grid;
+    position: sticky;
+    top: var(--head);
+    width: 28px;
+    height: 36px;
+    margin-top: 8px;
+    border: 0;
+    border-radius: 0 6px 6px 0;
+    cursor: pointer;
+  }
 
   aside {
     position: sticky;
@@ -923,7 +956,6 @@
 
   /* Narrow views keep every control and fold the bar instead, so the one thing that gives way is the base ref, which
      the Source panel says in full. */
-  @media (max-width: 1020px) { .brand .base { display: none; } }
 
 
   .empty { padding: 40px 8px; color: var(--muted); text-align: center; }
@@ -931,11 +963,7 @@
   .hint { padding: 8px 4px 10px; color: var(--faint); font-size: 11px; line-height: 1.8; }
 </style>
 
-<header>
-  <div class="brand" id="brand" data-built="__BUILD__">
-    <h1>Diff Desk</h1>
-    <span class="base"><span id="repo"></span></span>
-  </div>
+<header data-built="__BUILD__">
   <button class="toggle" id="sourceopen" title="Choose the repository, the base and the branches to review">Source</button>
   <div class="tabs" id="tabs" role="tablist" aria-label="Branch"></div>
   <select id="scope" aria-label="Commit"></select>
@@ -945,9 +973,17 @@
     <input id="q" type="search" placeholder="Filter paths" aria-label="Filter paths" />
     <button id="qx" type="button" aria-label="Clear path filter" hidden>&#215;</button>
   </label>
-  <button class="toggle" id="ctx" aria-pressed="false" title="Show only added and removed lines">Changes only</button>
-  <button class="toggle" id="hidedone" aria-pressed="false" title="Hide the files marked reviewed">Hide reviewed</button>
-  <button class="toggle" id="hidefiles" aria-pressed="false" title="Hide the file list">Hide files</button>
+  <div class="views" role="group" aria-label="View">
+    <button class="toggle" id="ctx" aria-pressed="false" title="Changes only: show only added and removed lines" aria-label="Changes only">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5h5M5.5 2v5M3 11.5h10M9.5 4.5h3.5"/></svg>
+    </button>
+    <button class="toggle" id="hidedone" aria-pressed="false" title="Hide the files marked reviewed" aria-label="Hide reviewed">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 8.5l3 3 7-8"/><path d="M2 13.5l12-11" opacity=".55"/></svg>
+    </button>
+    <button class="toggle" id="hideclosed" aria-pressed="false" title="Hide the comments already resolved" aria-label="Hide resolved">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 7.3c0 2.6-2.7 4.7-6 4.7-.6 0-1.2-.1-1.7-.2L3 13.5l.6-2.6C2.6 10 2 8.7 2 7.3 2 4.7 4.7 2.6 8 2.6s6 2.1 6 4.7z"/><path d="M5.8 7.4l1.6 1.5 2.8-3.2"/></svg>
+    </button>
+  </div>
   <div class="tally">
     <div class="progress" title="Files marked reviewed">
       <span class="track"><i id="pfill" style="width:0%"></i></span>
@@ -970,7 +1006,6 @@
       <span class="minus num" id="tminus"></span>
     </div>
   </div>
-  <button class="toggle" id="hideclosed" aria-pressed="false" title="Hide the comments already resolved">Hide resolved</button>
   <button class="toggle" id="logopen" title="Every comment recorded, and where each one stands">Comments<i class="dot" id="logdot" aria-hidden="true"></i></button>
   <button class="solid" id="moved" disabled title="Refresh the diffs once the branch has moved on">Refresh</button>
 </header>
@@ -1068,8 +1103,16 @@
 </div>
 
 <div class="shell">
+  <button class="rail" id="showfiles" title="Show the file list" aria-label="Show the file list">
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg>
+  </button>
   <aside>
-    <h2 class="label">Files</h2>
+    <div class="asidehead">
+      <h2 class="label">Files</h2>
+      <button class="toggle" id="hidefiles" aria-pressed="false" title="Hide the file list" aria-label="Hide the file list">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg>
+      </button>
+    </div>
     <div class="filelist" id="filelist"></div>
     <div class="hint">
       <kbd>j</kbd><kbd>k</kbd> files · <kbd>/</kbd> filter · <kbd>f</kbd> find<br />
@@ -1113,14 +1156,15 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "qx", "ctx", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "logresolved", "logunread", "logonlynew", "brand", "repo", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "find", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
+  for (const id of ["tabs", "scope", "q", "qx", "ctx", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "logresolved", "logunread", "logonlynew", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "find", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
     els[id] = document.getElementById(id);
   }
 
   function showSource() {
-    els.repo.textContent = data.name || "";
-    // The base and the moment this page was built are worth having, not worth a line of the bar: they live in the title.
-    els.brand.title = `base ${data.baseRef} at ${data.base} \u00b7 ${els.brand.dataset.built}`;
+    // The repository, the base and the moment this page was built are worth having, not worth a line of the bar: they
+    // live in the title of the button that chooses them.
+    const built = document.querySelector("header").dataset.built;
+    els.sourceopen.title = `Choose the repository, the base and the branches to review \u00b7 ${data.name || ""} on ${data.baseRef} at ${data.base} \u00b7 ${built}`;
     els.srcdir.value = data.root || "";
     els.srcbase.value = data.baseRef || "upstream/main";
   }
@@ -4587,6 +4631,7 @@
     document.body.classList.toggle("hide-files", on);
     keepChoices();
   });
+  els.showfiles.addEventListener("click", () => els.hidefiles.click());
   els.sourceopen.addEventListener("click", () => {
     const open = els.source.dataset.open !== "true";
     els.source.dataset.open = String(open);
