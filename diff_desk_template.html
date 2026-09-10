@@ -2359,6 +2359,46 @@
     return row ? row[3] : "";
   }
 
+  // The lines either side of a range, as the diff shows them, kept with a comment so that once its own lines have
+  // changed it can still hang where they were: among the lines that stayed.
+  function around(path, line, endLine, side) {
+    const file = view().files.find((entry) => entry.path === path);
+    if (!file) return null;
+    const rows = file.lines.filter((row) => row[0] !== "h" && rowSide(row) === side);
+    const first = rows.findIndex((row) => placedLine(row, side) === line);
+    const last = rows.findIndex((row) => placedLine(row, side) === endLine);
+    if (first < 0 || last < 0) return null;
+    return {
+      above: rows.slice(Math.max(0, first - 3), first).map((row) => row[3]),
+      below: rows.slice(last + 1, last + 4).map((row) => row[3]),
+    };
+  }
+
+  // Where a comment whose own lines have changed still belongs: right above the first line that followed it and still
+  // reads the same, or failing that right under the last line that preceded it and does, each looked for nearest to
+  // where the comment was written. A line of nothing much is not looked for: it reads the same in too many places.
+  function beside(file, note) {
+    if (!note.around) return null;
+    const rows = file.lines.filter((row) => row[0] !== "h" && rowSide(row) === note.side);
+    const telling = (text) => text.trim().length >= 3;
+    const nearest = (text, from) => {
+      const found = rows.filter((row) => row[3] === text).map((row) => placedLine(row, note.side));
+      if (!found.length) return null;
+      return found.reduce((best, line) => (Math.abs(line - from) < Math.abs(best - from) ? line : best));
+    };
+    for (const text of (note.around.below || []).filter(telling)) {
+      const line = nearest(text, note.endLine || note.line);
+      if (line === null) continue;
+      const at = rows.findIndex((row) => placedLine(row, note.side) === line);
+      return at > 0 ? placedLine(rows[at - 1], note.side) : null;
+    }
+    for (const text of (note.around.above || []).filter(telling).reverse()) {
+      const line = nearest(text, note.line);
+      if (line !== null) return line;
+    }
+    return null;
+  }
+
   function placed(note) {
     const wanted = note.endLine || note.line;
     if (!note.anchor) return wanted;
@@ -3196,6 +3236,7 @@
       endLine,
       side,
       anchor: codeAt(path, endLine || line, side),
+      around: around(path, line, endLine || line, side),
       text: field.value.trim(),
       images: attached(),
       at: stamp(),
@@ -4141,6 +4182,11 @@
       // recognise its own place without holding on to rows that do not exist yet.
       const hangs = new Map();
       for (const note of stranded) {
+        const kept = beside(file, note);
+        if (kept !== null) {
+          hangs.set(note.seq, `${note.side}|${kept}`);
+          continue;
+        }
         const wanted = placed(note);
         const lines = file.lines
           .filter((row) => row[0] !== "h" && rowSide(row) === note.side)
