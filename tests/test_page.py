@@ -2631,6 +2631,23 @@ def test_a_box_takes_the_height_of_what_is_written_into_it(page, desk):
     assert box.bounding_box()["height"] <= page.evaluate("() => window.innerHeight") * 0.45 + 2
     page.keyboard.press("Escape")
 
+    # A box built out of sight, in a thread the header hides, is the size of a line once the thread is shown: measured
+    # while hidden it would be a sliver.
+    branch = page.evaluate("() => data.branches[0].ref")
+    made = desk.post(
+        "/comments", {"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": "built hidden"}
+    )["seq"]
+    desk.post("/resolve", {"seq": [made], "who": "session"})
+    page.locator("#hideclosed").click()
+    page.evaluate("() => loadNotes().then(render)")
+    page.wait_for_selector(f"#note-{made} textarea", state="attached")
+    assert not page.locator(f"#note-{made}").is_visible()
+    page.locator("#hideclosed").click()
+    page.wait_for_selector(f"#note-{made} textarea")
+    settle(page)
+    assert page.locator(f"#note-{made} textarea").bounding_box()["height"] >= 24
+    desk.post("/drop", {"seq": made, "who": "you"})
+
 
 def test_a_reply_quoting_a_passage_shows_it_as_a_quote(page, desk):
     card = sample(page)

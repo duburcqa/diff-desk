@@ -2188,6 +2188,9 @@
     // A box the size of what has been written into it: measured after it is in the page, since a box not yet there has
     // nothing to measure, and bounded so a long remark scrolls inside it rather than pushing the diff off screen.
     const fit = () => {
+      // Out of sight - in a thread the header hides, or a file folded away - it measures nothing, and a height taken
+      // from nothing is a sliver once the thread is shown. Left to the observer below, which hears it being shown.
+      if (!box.clientWidth) return;
       box.style.height = "auto";
       const cap = Math.round(window.innerHeight * 0.45);
       const wanted = box.scrollHeight;
@@ -2198,6 +2201,14 @@
     };
     box.addEventListener("input", fit);
     requestAnimationFrame(fit);
+    // A frame later rather than in the observer's own callback: a box resized while the observer reports on it is a
+    // resize loop, which the engine reports as a page error.
+    const shown = new ResizeObserver(() => {
+      if (!box.clientWidth) return;
+      shown.disconnect();
+      requestAnimationFrame(fit);
+    });
+    shown.observe(box);
   }
 
   function whenSettled(work, wait = 150) {
