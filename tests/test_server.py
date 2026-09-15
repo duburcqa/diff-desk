@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -230,6 +231,37 @@ def test_a_refusal_is_told_apart_from_a_failure_worth_retrying():
     assert not is_refusal("dial tcp: lookup api.github.com: no such host")
     assert not is_refusal("gh: Internal Server Error (HTTP 500)")
     assert not is_refusal("context deadline exceeded")
+
+
+def test_a_call_github_never_answers_is_a_failed_answer(monkeypatch):
+    monkeypatch.setenv("DIFF_DESK_GH", f'{sys.executable} -c "import time; time.sleep(30)"')
+    started = time.monotonic()
+    told = gen_diff_data.gh("api", "user", repeatable=True, budget=1)
+    assert told.returncode != 0 and "no answer" in told.stderr
+    assert time.monotonic() - started < 5
+
+
+def test_what_github_last_answered_stands_while_it_is_asked_again_in_the_background(monkeypatch):
+    monkeypatch.setattr(gen_diff_data, "REMEMBERED", {"slow": "what it said last time"})
+    monkeypatch.setattr(gen_diff_data, "ASKING", {})
+    heard = []
+    monkeypatch.setattr(gen_diff_data, "LISTENERS", [heard.append])
+    slow = lambda: time.sleep(1) or "what it says now"  # noqa: E731 - a question that takes its time
+    started = time.monotonic()
+    assert gen_diff_data.recalled("slow", slow) == "what it said last time"
+    assert time.monotonic() - started < 0.5
+    # Asked again while the question is still out, it is left to land rather than asked twice.
+    asking = gen_diff_data.ASKING["slow"]
+    assert gen_diff_data.recalled("slow", slow) == "what it said last time"
+    assert gen_diff_data.ASKING["slow"] is asking
+    # An answer lands in its own time and the listeners hear of it once: the same answer again is no news, and no
+    # answer leaves what is remembered standing.
+    asking.join(5)
+    assert gen_diff_data.REMEMBERED["slow"] == "what it says now"
+    assert gen_diff_data.recalled("slow", lambda: "what it says now") == "what it says now"
+    assert gen_diff_data.recalled("slow", lambda: None) == "what it says now"
+    until(lambda: not gen_diff_data.ASKING["slow"].is_alive())
+    assert heard == ["slow"]
 
 
 def test_only_a_call_that_never_reached_github_is_worth_making_again():
@@ -2042,6 +2074,18 @@ def test_a_whisper_stays_on_the_desk_whatever_the_thread_sends(desk):
     assert (again["ok"], again["sent"]) == (True, 0)
     assert not any("done." in call for call in desk.github_calls()[before:])
 
+    # What may be forgotten is read as the page lays the thread out: the last note on the reply it stands on goes,
+    # whatever was said to the thread after it, while a note with a later one standing beside it on the remark stays.
+    assert desk.post("/reply", {"seq": seq, "text": "out loud, later", "who": "session"})["ok"]
+    assert not desk.post("/forget", {"seq": seq, "whisper": 0})["ok"]
+    assert desk.post("/forget", {"seq": seq, "whisper": 3})["ok"]
+    assert [reply["text"] for reply in {row["seq"]: row for row in desk.get("/comments")}[seq]["replies"]] == [
+        "come back to this after the rebase",
+        "answered on the pull request",
+        "and the session is to widen the test",
+        "out loud, later",
+    ]
+
 
 def test_sending_a_thread_carries_what_it_holds_and_leaves_what_comes_after(desk):
     made = desk.post(
@@ -2297,6 +2341,11 @@ def test_the_sync_command_says_what_it_brought_back(desk):
     gen_diff_data.run(desk.repo, "remote", "add", "origin", "https://github.com/someone/somewhere.git")
     try:
         assert desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": ["feature"]})["ok"]
+        # The pull request the branch is opened as lands after the diffs, since collecting never waits on GitHub, and
+        # the state a page polls carries the stamp of what is served.
+        until(lambda: desk.get("/data")["branches"][0]["pr"])
+        assert desk.get("/data")["branches"][0]["pr"]["number"] == 33
+        assert desk.get("/state")["decor"] == desk.get("/data")["decor"]
         told = desk.cli("sync").communicate(timeout=60)[0]
     finally:
         gen_diff_data.run(desk.repo, "remote", "remove", "origin")
@@ -2409,8 +2458,10 @@ def test_the_reader_own_words_on_the_pull_request_are_theirs_to_reword(desk):
             },
         ]
     )
-    # Who the reader is, learned where everything else about the review is: collecting the diffs.
+    # Who the reader is, learned where everything else about the review is: collecting the diffs, which GitHub answers
+    # after the diffs are served.
     assert desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": ["feature"]})["ok"]
+    until(lambda: desk.get("/data")["viewer"] == "duburcqa")
     assert desk.post("/sync", {"repo": "someone/somewhere", "pr": 61})["took"] == 1
     seq = {row["text"]: row for row in desk.get("/comments")}["written over there, by the reader"]["seq"]
 

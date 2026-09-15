@@ -105,6 +105,8 @@ class Serving:
     source = None
     started_by = None
     server = None
+    # What GitHub adds to the served payload, stamped (see gen_diff_data.decorate), so a page can tell it has changed.
+    decor = None
 
 
 HERE = pathlib.Path(__file__).parent
@@ -603,9 +605,28 @@ def post_review(repo, number, summary, sending):
 def serve_payload(payload):
     """Make this payload the served one: the numbers it names are remembered, then it and the page are written."""
     remembered_pulls(payload["branches"])
+    Serving.decor = payload["decor"]
     DATA.write_text(json.dumps(payload, separators=(",", ":")))
     if TEMPLATE.exists():
         PAGE.write_text(gen_diff_data.render_page(TEMPLATE.read_text(), payload))
+
+
+def redecorate(key):
+    """Decorate the served payload again with what GitHub has just answered, and serve it if that changed anything.
+
+    Collecting never waits on GitHub, so what it adds to a page lands after the page did: a page polling the state
+    reads the new stamp and takes the decoration from `/data` without collecting the diffs again.
+    """
+    with BUILDING:
+        if not DATA.exists():
+            return
+        payload = json.loads(DATA.read_text())
+        if gen_diff_data.decorate(payload):
+            serve_payload(payload)
+            print(f"REDECORATED on {key}", flush=True)
+
+
+gen_diff_data.LISTENERS.append(redecorate)
 
 
 def rebuild():
@@ -902,6 +923,19 @@ def write_ticks(marks):
     os.replace(spare, TICKS)
 
 
+def stands_on(said, index):
+    """The reply a whisper stands on, read through the whispers between, or None for the remark itself.
+
+    A whisper written on a whisper stands where that one stands, and an anchor naming nothing the thread holds as a
+    reply stands on the remark. This is how the page lays a thread out, so what it offers to forget and what the desk
+    lets go agree.
+    """
+    on = said[index].get("on")
+    while on is not None and 0 <= on < len(said) and said[on].get("whisper"):
+        on = said[on].get("on")
+    return on if on is not None and 0 <= on < len(said) and not said[on].get("whisper") else None
+
+
 def remembered_pulls(branches):
     """Fill in the pull request of every ref that has one, and remember what was learnt for the next collect.
 
@@ -1006,6 +1040,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(
                 {
                     "stamp": marked,
+                    "decor": Serving.decor,
                     "desk": gen_diff_data.RUNNING,
                     # Whether the tool on disk has moved on from what this desk is running, which is a restart owed
                     # rather than a reload: the page it renders comes from the newer files, and asks this one for
@@ -1182,16 +1217,19 @@ class Handler(BaseHTTPRequestHandler):
             root, base, refs = serving.root, serving.base, list(serving.refs)
         print(f"SCAN {root} {base} {refs or '(every branch ahead)'}", flush=True)
         Serving.source = Source(root, base, refs)
-        try:
-            payload = gen_diff_data.collect(root, base, refs)
-        except Exception as error:  # noqa: BLE001 - whatever went wrong belongs on the page, not in a traceback
-            print(f"SCAN FAILED {error}", flush=True)
-            self._json({"ok": False, "error": f"{type(error).__name__}: {error}"})
-            return
-        if not payload["branches"]:
-            self._json({"ok": False, "error": f"nothing ahead of {base} in {root}"})
-            return
-        serve_payload(payload)
+        # Held from collecting to serving, as a rebuild holds it: an answer from GitHub landing meanwhile decorates
+        # what is served again (see `redecorate`), and one reading the payload before this wrote would put it back.
+        with BUILDING:
+            try:
+                payload = gen_diff_data.collect(root, base, refs)
+            except Exception as error:  # noqa: BLE001 - whatever went wrong belongs on the page, not in a traceback
+                print(f"SCAN FAILED {error}", flush=True)
+                self._json({"ok": False, "error": f"{type(error).__name__}: {error}"})
+                return
+            if not payload["branches"]:
+                self._json({"ok": False, "error": f"nothing ahead of {base} in {root}"})
+                return
+            serve_payload(payload)
         files = sum(len(entry["files"]) for entry in payload["branches"])
         print(f"SCANNED {len(payload['branches'])} branch(es), {files} file diffs", flush=True)
         self._json({"ok": True, "data": payload})
@@ -1397,34 +1435,37 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": True, "resolved": closed, "state": "resolved" if closing else "open"})
 
     def _forget(self):
-        """Forget the last whisper of a thread, named by its place in it.
+        """Forget a whisper of a thread, named by its place in it, when nothing stands under it.
 
         A whisper never left this desk, so nothing has to be asked of the pull request - which is what tells it apart
-        from a reply, where a posted one has to be deleted there as well. What they share is that only the last of
-        them can go: letting go of one further up leaves what stands under it standing against nothing.
+        from a reply, where a posted one has to be deleted there as well. What may go is the last whisper on what it
+        stands on, the remark or one reply, read as the page lays the thread out: a whisper written on a whisper stands
+        where that one stands, so letting go of one further up would leave what hangs under it hanging from nothing.
+        A reply written after it stands on its own and keeps nothing under the whisper.
         """
         order = self._body()
         seq, at = order.get("seq"), order.get("whisper")
         with changing() as rows:
             found = next((row for row in rows if row["seq"] == seq), None)
             said = (found or {}).get("replies") or []
-            if found is None or at != len(said) - 1 or not said[at].get("whisper"):
+            is_whisper = isinstance(at, int) and 0 <= at < len(said) and bool(said[at].get("whisper"))
+            has_later = is_whisper and any(
+                said[index].get("whisper") and stands_on(said, index) == stands_on(said, at)
+                for index in range(at + 1, len(said))
+            )
+            if not is_whisper or has_later:
                 found = None
             else:
                 said.pop(at)
                 # What is said is addressed by its place in the thread, so the places move when one goes: an anchor
-                # past it comes back one, and one that named it stands on the thread instead.
+                # past it comes back one.
                 for answer in said:
                     on = answer.get("on")
-                    if on is None:
-                        continue
-                    if on == at:
-                        answer.pop("on")
-                    elif on > at:
+                    if on is not None and on > at:
                         answer["on"] = on - 1
                 touched(rows, found, "you")
         if found is None:
-            self._json({"ok": False, "error": f"[{at}] is not the last whisper of comment {seq}"})
+            self._json({"ok": False, "error": f"[{at}] is not the last whisper on what it stands on in comment {seq}"})
             return
         print(f"FORGOT whisper [{at}] of [{seq}]", flush=True)
         self._json({"ok": True, "seq": seq, "whisper": at})

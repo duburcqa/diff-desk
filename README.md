@@ -35,7 +35,7 @@ The page comes up on `127.0.0.1:8787`, each ref a tab, scoped to the whole range
 - A file is built when you come within reach of it and let go once you are well past, standing at the height its lines measured. A six-thousand-line review is 5,700 nodes rather than 218,000 and opens in half a second rather than seven. What it costs: the browser's own search reaches the files you are near.
 - Copying a selection gives the code alone - no line numbers, no `+`/`-` markers, indentation intact.
 - **What you have not seen does not stay folded**: a file whose diff changed since you ticked it, one holding a comment never shown to you, a resolved thread answered since you last read it. Seen means it has been on your screen.
-- The branch is watched while you read it. **Refresh** is offered once the diff it was built from has moved on - a commit, a fixup, work saved on disk - and never taken on your behalf: it keeps the branch, the commit, every comment and every tick.
+- The branch is watched while you read it. **Refresh** is offered once the diff it was built from has moved on - a commit, a fixup, work saved on disk - and never taken on your behalf: it keeps the branch, the commit, every comment and every tick. It reads git alone, so it lands with the network gone: what GitHub adds is read from its last answer, asked again in the background, and taken into the open page as it comes.
 
 ## Commenting
 

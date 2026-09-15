@@ -1594,7 +1594,11 @@
     try {
       const answer = await fetch("state", { cache: "no-store" });
       if (!answer.ok) return;
-      const { stamp, desk, stale } = await answer.json();
+      const { stamp, decor, desk, stale } = await answer.json();
+      // What GitHub adds to the diffs lands after them, since collecting never waits on it: taken from the desk as it
+      // comes, and what shows it redrawn, while the diffs and the reader's place in them stay as they are. Left to the
+      // scan under way when there is one, since what it brings back carries it.
+      if (decor && data.decor && decor !== data.decor && !els.moved.dataset.busy) await redecorate();
       // The desk fast-forwards itself and restarts into what has been published since, which leaves this page holding
       // the script it was rendered with while the review it shows is untouched. Taking the refresh then reloads the
       // page rather than collecting the diffs again, since what is behind is the page itself.
@@ -1606,6 +1610,20 @@
     } catch (error) {
       // Nothing is serving, which the comments already say.
     }
+  }
+
+  async function redecorate() {
+    const fresh = await (await fetch("data", { cache: "no-store" })).json();
+    data.upstream = fresh.upstream;
+    data.viewer = fresh.viewer;
+    data.decor = fresh.decor;
+    for (const entry of data.branches) {
+      const same = fresh.branches.find((row) => row.ref === entry.ref);
+      if (same) entry.pr = same.pr;
+    }
+    renderTabs();
+    drawLog();
+    render();
   }
 
   async function loadNotes() {
@@ -2899,7 +2917,8 @@
         forget.title = "Forget this note";
         forget.addEventListener("click", async () => {
           if (!window.confirm("Forget this note?")) return;
-          await post("forget", { seq: note.seq, whisper: index });
+          const outcome = await post("forget", { seq: note.seq, whisper: index });
+          if (!outcome.ok) window.alert(`It is still there: ${outcome.error}`);
           await loadNotes();
           drawLog();
           render();
