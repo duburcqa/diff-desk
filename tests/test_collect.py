@@ -1,5 +1,8 @@
 """What the collector makes of a range: the rows, the numbers they carry, and what a page is handed."""
 
+import sys
+import time
+
 import pytest
 
 import gen_diff_data
@@ -92,6 +95,34 @@ def test_a_pull_request_fetched_earlier_is_reviewable_while_github_is_unreachabl
         ]
     finally:
         gen_diff_data.run(repo, "update-ref", "-d", "refs/diffdesk/pull/77")
+
+
+def test_a_branch_is_collected_while_github_never_answers(repo, monkeypatch):
+    # The diff is read from git alone and what GitHub adds only decorates it, from what GitHub last said, so a network
+    # that hangs rather than fails costs the collection nothing.
+    monkeypatch.setenv("DIFF_DESK_GH", f'{sys.executable} -c "import time; time.sleep(30)"')
+    listing = {"feature": {"number": 33, "url": "u", "title": "t", "headRefName": "feature"}}
+    remembered = {
+        "viewer": "duburcqa",
+        "slug:someone/somewhere": "someone/elsewhere",
+        "pulls:someone/elsewhere": listing,
+    }
+    monkeypatch.setattr(gen_diff_data, "REMEMBERED", remembered)
+    monkeypatch.setattr(gen_diff_data, "ASKING", {})
+    gen_diff_data.run(repo, "remote", "add", "upstream", "https://github.com/someone/somewhere.git")
+    try:
+        started = time.monotonic()
+        data = gen_diff_data.collect(str(repo), "main", ["feature"])
+        assert time.monotonic() - started < 3
+        assert (data["upstream"], data["viewer"]) == ("someone/elsewhere", "duburcqa")
+        assert data["branches"][0]["ref"] == "feature" and data["branches"][0]["files"]
+        assert data["branches"][0]["pr"]["number"] == 33
+        # The same payload decorated again from the same memory is unchanged, and changes with what is remembered.
+        assert not gen_diff_data.decorate(data)
+        remembered["viewer"] = "someone"
+        assert gen_diff_data.decorate(data) and data["viewer"] == "someone"
+    finally:
+        gen_diff_data.run(repo, "remote", "remove", "upstream")
 
 
 def test_a_repository_without_a_remote_claims_no_upstream(repo, payload):
