@@ -101,36 +101,46 @@ def gh(*args, repeatable, given=None, cwd=None, budget=120):
 # again in the background (see `recalled`), so collecting a page never waits on GitHub. The pull request each branch
 # is opened as outlives the desk (see `remembered_pulls` in serve_diff), the rest is asked again by the next one.
 REMEMBERED = {}
-# The questions being asked right now, by what they are filed under, so one in flight is left to land rather than
-# asked twice.
-ASKING = {}
+# The questions out right now, and the ones asked again while they were out, which are asked once more as they land:
+# a question is never out twice, and nobody who asked is answered with older news than their asking. Both are changed
+# under the one lock, so a question landing and one arriving at the same moment never lose each other.
+ASKING = set()
+WANTED = set()
+ASKING_LOCK = threading.Lock()
 # Called with the key of every answer that changed what is remembered, which is how a desk learns to decorate what it
 # serves again (see serve_diff).
 LISTENERS = []
 
 
 def answered(key, ask, args):
-    """Ask GitHub one question and file the answer, when there is one and it is news."""
-    told = ask(*args)
-    if told is None or told == REMEMBERED.get(key):
-        return
-    REMEMBERED[key] = told
-    for listener in LISTENERS:
-        listener(key)
+    """Ask GitHub one question, file the answer when there is one and it is news, and ask again while it is wanted."""
+    while True:
+        told = ask(*args)
+        if told is not None and told != REMEMBERED.get(key):
+            REMEMBERED[key] = told
+            for listener in LISTENERS:
+                listener(key)
+        with ASKING_LOCK:
+            if key not in WANTED:
+                ASKING.discard(key)
+                return
+            WANTED.discard(key)
 
 
 def recalled(key, ask, *args):
     """What GitHub last answered to `ask(*args)`, filed under `key`, while it is asked again in the background.
 
-    The question is started over unless it is already out, and what is remembered is returned at once: the last answer,
-    or None where GitHub has never answered. `ask` answers None for no answer, which leaves what is remembered standing.
-    Nothing here waits on GitHub: an answer lands in its own time and the listeners are told (see LISTENERS).
+    The question is asked over, once it has landed when it is out already, and what is remembered is returned at once:
+    the last answer, or None where GitHub has never answered. `ask` answers None for no answer, which leaves what is
+    remembered standing. Nothing here waits on GitHub: an answer lands in its own time and the listeners are told (see
+    LISTENERS).
     """
-    thread = ASKING.get(key)
-    if thread is None or not thread.is_alive():
-        thread = threading.Thread(target=answered, args=(key, ask, args), daemon=True)
-        ASKING[key] = thread
-        thread.start()
+    with ASKING_LOCK:
+        if key in ASKING:
+            WANTED.add(key)
+        else:
+            ASKING.add(key)
+            threading.Thread(target=answered, args=(key, ask, args), daemon=True).start()
     return REMEMBERED.get(key)
 
 

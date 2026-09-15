@@ -5,6 +5,7 @@ refused, or to be unreachable, without a network or a login. A script may carry 
 since resolving a repository, listing its pull requests and posting a review are all `gh` yet answered differently.
 """
 
+import fcntl
 import json
 import os
 import pathlib
@@ -22,19 +23,22 @@ if os.environ.get("FAKE_GH_LOG"):
         told.write(" ".join(asking.split()) + (f" <<< {given}" if given else "") + "\n")
 # A rule carrying `times` answers only that many of the calls it matches, which is how a call is made to fail once and
 # then succeed. What each rule has already answered is tallied beside the script, and cleared when a test writes a new
-# one, so one test's failures are not spent by the next.
+# one, so one test's failures are not spent by the next. The desk asks GitHub several things at once, so the tally is
+# read and written under a lock: two stand-ins racing on it would read it half-written and answer nothing.
 spent = pathlib.Path(os.environ["FAKE_GH_SCRIPT"]).with_suffix(".spent")
-kept = json.loads(spent.read_text()) if spent.exists() else {}
-wanted = asked
-for index, rule in enumerate(asked.get("rules", [])):
-    if rule["match"] not in asking:
-        continue
-    if rule.get("times") and kept.get(str(index), 0) >= rule["times"]:
-        continue
-    kept[str(index)] = kept.get(str(index), 0) + 1
-    wanted = rule
-    break
-spent.write_text(json.dumps(kept))
+with spent.with_suffix(".lock").open("w") as held:
+    fcntl.flock(held, fcntl.LOCK_EX)
+    kept = json.loads(spent.read_text()) if spent.exists() else {}
+    wanted = asked
+    for index, rule in enumerate(asked.get("rules", [])):
+        if rule["match"] not in asking:
+            continue
+        if rule.get("times") and kept.get(str(index), 0) >= rule["times"]:
+            continue
+        kept[str(index)] = kept.get(str(index), 0) + 1
+        wanted = rule
+        break
+    spent.write_text(json.dumps(kept))
 # Whatever is being piped in is left unread: only a posted review is given anything, and the calls that resolve a
 # repository inherit a standard input that never ends, which reading would wait on for good.
 sys.stdout.write(wanted.get("out", ""))

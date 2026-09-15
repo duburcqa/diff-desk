@@ -545,6 +545,7 @@ def test_a_local_comment_can_be_turned_towards_the_pull_request(page, desk):
     gen_diff_data.run(desk.repo, "remote", "add", "origin", "https://github.com/someone/somewhere.git")
     try:
         assert desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})["ok"]
+        until(lambda: (desk.get("/data")["branches"][0]["pr"] or {}).get("number") == 18)
         made = desk.post(
             "/comments",
             [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": "local first"}],
@@ -1633,6 +1634,7 @@ def test_a_review_keeps_its_comments_and_ticks_however_it_is_opened(page, desk):
     gen_diff_data.run(desk.repo, "remote", "add", "origin", "https://github.com/someone/somewhere.git")
     try:
         assert desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})["ok"]
+        until(lambda: (desk.get("/data")["branches"][0]["pr"] or {}).get("number") == 21)
         page.reload(wait_until="load")
         page.wait_for_selector("section.file")
         # A comment and a tick, made while the review is open on its branch. The remark comes first: ticking folds the
@@ -2085,8 +2087,23 @@ def test_a_branch_with_a_pull_request_says_which_and_opens_it(page, desk):
     ]
     desk.github_answers(rules=knows)
     gen_diff_data.run(desk.repo, "remote", "add", "origin", "https://github.com/someone/somewhere.git")
+    # A second review beside it, with a remark of its own, so what the comments panel shows can be told apart.
+    gen_diff_data.run(desk.repo, "branch", "other", branch)
+    desk.post(
+        "/comments",
+        [
+            {
+                "branch": "other",
+                "path": "sample.py",
+                "line": FIRST_EDIT,
+                "side": "new",
+                "text": "said on the other branch",
+            }
+        ],
+    )
     try:
-        assert desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})["ok"]
+        assert desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch, "other"]})["ok"]
+        until(lambda: (desk.get("/data")["branches"][0]["pr"] or {}).get("number") == 7)
         page.reload(wait_until="load")
         page.wait_for_selector(".tab")
         tab = page.locator(".tab").first
@@ -2106,8 +2123,19 @@ def test_a_branch_with_a_pull_request_says_which_and_opens_it(page, desk):
         }""")
         tab.click()
         assert page.evaluate("() => window.__opened") == ["https://github.com/someone/somewhere/pull/7"]
+
+        # The comments panel reads the review being shown, and follows the tab the moment it is chosen.
+        page.locator("#logopen").click()
+        page.wait_for_selector("#log[data-open='true']")
+        assert page.locator("#logrows .logrow").filter(has_text="said on the other branch").count() == 0
+        page.locator(".tab").nth(1).click()
+        rows = page.locator("#logrows .logrow").all_inner_texts()
+        assert rows and all("said on the other branch" in row for row in rows)
+        page.locator("#logclose").click()
     finally:
         gen_diff_data.run(desk.repo, "remote", "remove", "origin")
+        desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})
+        gen_diff_data.run(desk.repo, "branch", "-D", "other")
         desk.github_answers(code=1, err="gh: Not Found (HTTP 404)")
         desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})
 
@@ -2917,6 +2945,7 @@ def test_a_sync_that_could_not_happen_says_so_where_the_reader_is(page, desk):
     gen_diff_data.run(desk.repo, "remote", "add", "origin", "https://github.com/someone/somewhere.git")
     try:
         assert desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})["ok"]
+        until(lambda: (desk.get("/data")["branches"][0]["pr"] or {}).get("number") == 7)
         page.reload(wait_until="load")
         page.wait_for_selector("section.file")
         assert page.locator("#toast").get_attribute("data-open") == "false"
@@ -3061,6 +3090,7 @@ def test_a_thread_says_what_it_owes_the_pull_request_and_sends_it_when_asked(pag
     gen_diff_data.run(desk.repo, "remote", "add", "origin", "https://github.com/someone/somewhere.git")
     try:
         assert desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})["ok"]
+        until(lambda: (desk.get("/data")["branches"][0]["pr"] or {}).get("number") == 41)
         made = desk.post(
             "/comments",
             [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": "a thread to send"}],
@@ -3163,6 +3193,7 @@ def test_the_comments_panel_sends_one_thread_from_its_row_and_every_thread_the_p
     gen_diff_data.run(desk.repo, "remote", "add", "origin", "https://github.com/someone/somewhere.git")
     try:
         assert desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})["ok"]
+        until(lambda: (desk.get("/data")["branches"][0]["pr"] or {}).get("number") == 42)
         # Named apart from anything this desk already holds: the same thread sent once owes nothing the second time.
         held = len(desk.get("/comments"))
         texts = [f"already on the PR, number {held + 1}", f"and this one too, number {held + 2}"]
