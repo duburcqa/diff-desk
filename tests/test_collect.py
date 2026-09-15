@@ -108,7 +108,8 @@ def test_a_branch_is_collected_while_github_never_answers(repo, monkeypatch):
         "pulls:someone/elsewhere": listing,
     }
     monkeypatch.setattr(gen_diff_data, "REMEMBERED", remembered)
-    monkeypatch.setattr(gen_diff_data, "ASKING", {})
+    monkeypatch.setattr(gen_diff_data, "ASKING", set())
+    monkeypatch.setattr(gen_diff_data, "WANTED", set())
     gen_diff_data.run(repo, "remote", "add", "upstream", "https://github.com/someone/somewhere.git")
     try:
         started = time.monotonic()

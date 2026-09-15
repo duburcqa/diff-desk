@@ -3548,6 +3548,8 @@
         [...els.tabs.children].forEach((node, i) => node.setAttribute("aria-selected", String(i === index)));
         renderScopes();
         render();
+        // The comments panel reads the review being shown, so it follows the tab rather than the next round.
+        drawLog();
       });
       els.tabs.append(tab);
     });
@@ -3674,6 +3676,7 @@
       renderTabs();
       renderScopes();
       render();
+      drawLog();
       els.srcstatus.textContent = `${data.branches.length} branch${data.branches.length === 1 ? "" : "es"} loaded`;
       els.source.dataset.open = "false";
       els.sourceopen.setAttribute("aria-pressed", "false");

@@ -243,25 +243,35 @@ def test_a_call_github_never_answers_is_a_failed_answer(monkeypatch):
 
 def test_what_github_last_answered_stands_while_it_is_asked_again_in_the_background(monkeypatch):
     monkeypatch.setattr(gen_diff_data, "REMEMBERED", {"slow": "what it said last time"})
-    monkeypatch.setattr(gen_diff_data, "ASKING", {})
-    heard = []
+    monkeypatch.setattr(gen_diff_data, "ASKING", set())
+    monkeypatch.setattr(gen_diff_data, "WANTED", set())
+    heard, asked = [], []
     monkeypatch.setattr(gen_diff_data, "LISTENERS", [heard.append])
-    slow = lambda: time.sleep(1) or "what it says now"  # noqa: E731 - a question that takes its time
+
+    def slow():
+        asked.append(time.monotonic())
+        time.sleep(0.5)
+        return f"what it says now, asked {len(asked)} time(s)"
+
     started = time.monotonic()
     assert gen_diff_data.recalled("slow", slow) == "what it said last time"
-    assert time.monotonic() - started < 0.5
-    # Asked again while the question is still out, it is left to land rather than asked twice.
-    asking = gen_diff_data.ASKING["slow"]
+    assert time.monotonic() - started < 0.3
+    # Asked twice more while the question is out, it goes out once more as it lands, so nobody who asked is answered
+    # with older news than their asking, and a question is never out twice.
     assert gen_diff_data.recalled("slow", slow) == "what it said last time"
-    assert gen_diff_data.ASKING["slow"] is asking
-    # An answer lands in its own time and the listeners hear of it once: the same answer again is no news, and no
-    # answer leaves what is remembered standing.
-    asking.join(5)
-    assert gen_diff_data.REMEMBERED["slow"] == "what it says now"
-    assert gen_diff_data.recalled("slow", lambda: "what it says now") == "what it says now"
-    assert gen_diff_data.recalled("slow", lambda: None) == "what it says now"
-    until(lambda: not gen_diff_data.ASKING["slow"].is_alive())
-    assert heard == ["slow"]
+    assert gen_diff_data.recalled("slow", slow) == "what it said last time"
+    until(lambda: "slow" not in gen_diff_data.ASKING, seconds=5.0)
+    assert len(asked) == 2
+    assert gen_diff_data.REMEMBERED["slow"] == "what it says now, asked 2 time(s)"
+    # Every answer that was news reached the listeners, once each. The same answer again is no news, and no answer
+    # leaves what is remembered standing.
+    assert heard == ["slow", "slow"]
+    same = "what it says now, asked 2 time(s)"
+    assert gen_diff_data.recalled("slow", lambda: same) == same
+    until(lambda: "slow" not in gen_diff_data.ASKING, seconds=5.0)
+    assert gen_diff_data.recalled("slow", lambda: None) == "what it says now, asked 2 time(s)"
+    until(lambda: "slow" not in gen_diff_data.ASKING, seconds=5.0)
+    assert heard == ["slow", "slow"]
 
 
 def test_only_a_call_that_never_reached_github_is_worth_making_again():
