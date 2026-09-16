@@ -3179,11 +3179,14 @@
 
   async function stillReads(path, line, side, anchor) {
     // Whatever moved the branch may have left these lines alone. The desk finds a line by the text the box was opened
-    // over, so a remark whose own line still reads the same is aimed where the reader aimed it.
-    if (side !== "new" || !anchor) return true;
+    // over, so a remark whose own line still reads the same is aimed where the reader aimed it. Looked for in what a
+    // refresh would build this diff from: the work on disk for the branch checked out, the ref itself for any other,
+    // which the desk tells apart at the moment of asking (see '/lines'). A commit is read at its own sha, which moves
+    // under nobody.
+    if (side !== "new" || !anchor || view().commit) return true;
     const asked = [[line, anchor]];
     const where =
-      `lines?dir=${encodeURIComponent(data.root)}&rev=&path=${encodeURIComponent(path)}` +
+      `lines?dir=${encodeURIComponent(data.root)}&ref=${encodeURIComponent(branch().ref)}&path=${encodeURIComponent(path)}` +
       `&from=${line}&to=${line}&anchors=${encodeURIComponent(JSON.stringify(asked))}`;
     try {
       const answer = await (await fetch(where, { cache: "no-store" })).json();
