@@ -141,6 +141,16 @@ def submit(page, text):
     page.wait_for_function("() => document.getElementById('tray').dataset.open === 'false'")
 
 
+def aim(page, text):
+    """Open a box on the last added line of the file under review and write the comment, without sending it."""
+    line = sample(page).locator("tr.a[data-line]").last
+    line.locator("td.code").first.hover()
+    line.locator("button.pin").first.click()
+    page.wait_for_selector("tr[data-composer='true']")
+    page.locator("tr[data-composer='true'] textarea").fill(text)
+    return line
+
+
 def submit_alone(page, text):
     """Send one comment straight from the box, without it waiting in the review tray.
 
@@ -1192,32 +1202,38 @@ def test_a_comment_sent_while_the_desk_is_down_waits_in_the_tray_and_goes_once_i
 
 def test_a_comment_is_refused_only_once_the_lines_it_was_aimed_at_have_moved(page, desk):
     branch = page.evaluate("() => data.branches[0].ref")
+    aside = desk.repo / "notes.txt"
+    kept_aside = aside.read_text()
+    try:
+        # The branch under review is not the one checked out, so its lines are read from the ref itself: work on disk
+        # that lights the refresh, on the checked-out branch's copy of a file this one rewrites, leaves a remark aimed.
+        aim(page, "read from the ref, whatever the disk says")
+        aside.write_text(kept_aside + "SAID_ON_THE_BASE = 1\n")
+        page.evaluate("() => tick()")
+        page.wait_for_function("() => !document.getElementById('moved').disabled")
+        page.locator("tr[data-composer='true'] .solid:not(.direct)").click()
+        page.wait_for_function("() => notes.drafts.length === 1")
+        assert page.locator("tr[data-composer='true']").count() == 0
+    finally:
+        aside.write_text(kept_aside)
+
     gen_diff_data.run(desk.repo, "checkout", "-q", branch)
     elsewhere = desk.repo / "added.py"
     written = desk.repo / "sample.py"
     kept_elsewhere, kept = elsewhere.read_text(), written.read_text()
     try:
-        line = sample(page).locator("tr.a[data-line]").last
-        line.locator("td.code").first.hover()
-        line.locator("button.pin").first.click()
-        page.wait_for_selector("tr[data-composer='true']")
-        page.locator("tr[data-composer='true'] textarea").fill("this line reads oddly")
+        aim(page, "this line reads oddly")
 
         # Work elsewhere moves the branch without touching these lines, so the remark still says what it was aimed at.
         elsewhere.write_text(kept_elsewhere + "SAID_WHILE_WRITING = 1\n")
         page.evaluate("() => tick()")
         page.wait_for_function("() => !document.getElementById('moved').disabled")
         page.locator("tr[data-composer='true'] .solid:not(.direct)").click()
-        page.wait_for_function("() => notes.drafts.length === 1")
+        page.wait_for_function("() => notes.drafts.length === 2")
         assert page.locator("tr[data-composer='true']").count() == 0
 
         # The line the next remark is written on is the one that moves, so that one is neither sent nor thrown away.
-        line = sample(page).locator("tr.a[data-line]").last
-        aimed = line.locator("td.code").first.inner_text().strip()
-        line.locator("td.code").first.hover()
-        line.locator("button.pin").first.click()
-        page.wait_for_selector("tr[data-composer='true']")
-        page.locator("tr[data-composer='true'] textarea").fill("and this one is aimed at moved lines")
+        aimed = aim(page, "and this one is aimed at moved lines").locator("td.code").first.inner_text().strip()
         written.write_text(kept.replace(aimed, f"{aimed}  # written over while the box was open"))
         before = len(desk.get("/comments"))
         page.locator("tr[data-composer='true'] .solid:not(.direct)").click()
@@ -1225,7 +1241,7 @@ def test_a_comment_is_refused_only_once_the_lines_it_was_aimed_at_have_moved(pag
         page.wait_for_selector("tr[data-composer='true'] .notebox[data-stale='true']")
         assert held.locator("textarea").input_value() == "and this one is aimed at moved lines"
         assert "have moved" in held.locator(".status").inner_text().lower()
-        assert page.evaluate("() => notes.drafts.length") == 1
+        assert page.evaluate("() => notes.drafts.length") == 2
 
         # What it says is read at a glance: the ink a removed line is printed in, heavier than the keys beside it.
         inked = page.evaluate(

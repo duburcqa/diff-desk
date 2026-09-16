@@ -1080,9 +1080,18 @@ class Handler(BaseHTTPRequestHandler):
         The answer also says which string the slice starts inside, on each side, so a hunk that grew upward is painted
         from where it now starts (see 'gen_diff_data.string_opening'): the new side at the first line answered, the old
         side at 'oldfrom' in the file at 'oldrev', numbered by the diff since a committed revision moves under nobody.
+
+        Asked with 'ref' in place of 'rev', the file is read from what a refresh would build that branch's diff from:
+        the work on disk when the branch is checked out, the ref itself otherwise. A page cannot tell the two apart on
+        its own, since what it holds about a branch dates from the scan that built it, and a checkout since then is
+        exactly the kind of move a page asks about.
         """
         root = pathlib.Path(query.get("dir", ["."])[0])
         rev = query.get("rev", [""])[0]
+        ref = query.get("ref", [""])[0]
+        if ref and not rev:
+            current = gen_diff_data.run(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
+            rev = "" if ref == current else ref
         name = query.get("path", [""])[0]
         old_rev = query.get("oldrev", [""])[0]
         old_from = int(query.get("oldfrom", ["0"])[0])

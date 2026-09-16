@@ -109,7 +109,21 @@ def test_a_gap_fills_while_the_blocks_bounding_it_still_read_as_the_page_holds_t
         # A revision cannot move, so a slice of one is answered whatever the work on disk says.
         committed = f"/lines?dir={urllib.parse.quote(str(desk.repo))}&rev=feature&path=wide.py&from=5&to=7"
         assert desk.get(committed)["lines"] == lines[4:7]
+
+        # Asked by branch, the desk reads what a refresh would build that branch's diff from: the ref while the branch
+        # is not the one checked out, whatever the work on disk says, and the work on disk once it is.
+        by_ref = (
+            f"/lines?dir={urllib.parse.quote(str(desk.repo))}&ref=feature&path=wide.py&from=5&to=7&anchors={anchors}"
+        )
+        assert desk.get(by_ref)["lines"] == lines[4:7]
+        written.write_text(kept)
+        gen_diff_data.run(desk.repo, "checkout", "-q", "feature")
+        assert desk.get(by_ref)["lines"] == lines[4:7]
+        written.write_text(written.read_text().replace(lines[3], "SAID_AT_THE_EDGE = 1"))
+        assert desk.get(by_ref)["stale"]
     finally:
+        gen_diff_data.run(desk.repo, "checkout", "-q", "--", "wide.py")
+        gen_diff_data.run(desk.repo, "checkout", "-q", "main")
         written.write_text(kept)
 
 
