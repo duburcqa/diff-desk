@@ -97,6 +97,42 @@ def test_a_pull_request_fetched_earlier_is_reviewable_while_github_is_unreachabl
         gen_diff_data.run(repo, "update-ref", "-d", "refs/diffdesk/pull/77")
 
 
+def test_a_pull_request_shows_the_commits_its_local_branch_has_not_pushed_yet(repo, tmp_path, monkeypatch):
+    # The review is of the work, not of what has reached GitHub: the local branch of a pull request is read whenever it
+    # builds on the fetched head, and the head GitHub holds is read otherwise.
+    request = {"number": 78, "title": "t", "url": "", "headRefName": "ahead"}
+    # GitHub answers nothing, at once, so no question asked in the background lands in the memory of a later test.
+    monkeypatch.setenv("DIFF_DESK_GH", "false")
+    monkeypatch.setattr(gen_diff_data, "REMEMBERED", {})
+    monkeypatch.setattr(gen_diff_data, "fetch_pull", lambda root, upstream, number: ("refs/diffdesk/pull/78", request))
+    gen_diff_data.run(repo, "update-ref", "refs/diffdesk/pull/78", "feature")
+    gen_diff_data.run(repo, "branch", "ahead", "feature")
+    gen_diff_data.run(repo, "worktree", "add", "-q", str(tmp_path / "ahead"), "ahead")
+    try:
+        (tmp_path / "ahead" / "unpushed.py").write_text("waiting = True\n")
+        gen_diff_data.run(tmp_path / "ahead", "add", "-A")
+        gen_diff_data.run(tmp_path / "ahead", "commit", "-q", "-m", "not pushed yet")
+        data = gen_diff_data.collect(str(repo), "main", ["#78"])
+        branch = data["branches"][0]
+        assert branch["ref"] == "refs/diffdesk/pull/78" and branch["rev"] == "ahead"
+        assert [commit["subject"] for commit in branch["commits"]][-1] == "not pushed yet"
+        assert "unpushed.py" in [entry["path"] for entry in branch["files"]]
+        # A commit on the local branch moves the stamp a page polls, so the page offers to refresh onto it.
+        (tmp_path / "ahead" / "unpushed.py").write_text("waiting = False\n")
+        gen_diff_data.run(tmp_path / "ahead", "commit", "-q", "-am", "still not pushed")
+        assert gen_diff_data.stamp(str(repo), "main", ["#78"]) != data["stamp"]
+
+        gen_diff_data.run(repo, "update-ref", "refs/heads/ahead", "main")
+        branch = gen_diff_data.collect(str(repo), "main", ["#78"])["branches"][0]
+        assert branch["rev"] == "refs/diffdesk/pull/78"
+        assert "unpushed.py" not in [entry["path"] for entry in branch["files"]]
+    finally:
+        gen_diff_data.run(repo, "worktree", "remove", "--force", str(tmp_path / "ahead"))
+        gen_diff_data.run(repo, "branch", "-D", "ahead")
+        gen_diff_data.run(repo, "update-ref", "-d", "refs/diffdesk/pull/78")
+        gen_diff_data.LOCAL_HEADS.pop(78, None)
+
+
 def test_a_branch_is_collected_while_github_never_answers(repo, monkeypatch):
     # The diff is read from git alone and what GitHub adds only decorates it, from what GitHub last said, so a network
     # that hangs rather than fails costs the collection nothing.

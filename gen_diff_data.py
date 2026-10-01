@@ -107,6 +107,9 @@ REMEMBERED = {}
 ASKING = set()
 WANTED = set()
 ASKING_LOCK = threading.Lock()
+# The local branch each pull request served by number is read from, filed by number (see `local_head`), so the stamp a
+# page polls follows the commits made there as well as the head fetched from GitHub.
+LOCAL_HEADS = {}
 # Called with the key of every answer that changed what is remembered, which is how a desk learns to decorate what it
 # serves again (see serve_diff).
 LISTENERS = []
@@ -224,6 +227,20 @@ def fetch_pull(root, upstream, number):
             raise RuntimeError(f"#{number} could not be fetched: {' '.join(brought.stderr.split())[:200]}")
         print(f"#{number} could not be fetched; showing the head fetched earlier", flush=True)
     return local, request
+
+
+def local_head(root, ref, request):
+    """The ref a fetched pull request is read from: the local branch it is worked on, when that builds on the fetch.
+
+    A pull request is fetched as GitHub holds it, so the commits made on its branch and not pushed yet would stay out of
+    the review until they are. The local branch named after the head of the pull request holds everything the fetch
+    does and the work waiting to be pushed whenever the fetched head is one of its ancestors, and it is read instead.
+    """
+    name = request.get("headRefName") or ""
+    if not name or not run(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{name}").strip():
+        return ref
+    builds = subprocess.run(["git", "merge-base", "--is-ancestor", ref, f"refs/heads/{name}"], cwd=root, check=False)
+    return name if builds.returncode == 0 else ref
 
 
 def desk_version():
@@ -407,7 +424,8 @@ def stamp(root, base, refs):
     collecting the diffs and rebuilding itself around them.
     """
     root = str(pathlib.Path(root).expanduser())
-    marks = [run(root, "rev-parse", ref).strip() for ref in (base, *refs)]
+    heads = [LOCAL_HEADS.get(pull_number(ref), ref) for ref in refs]
+    marks = [run(root, "rev-parse", ref).strip() for ref in (base, *refs, *heads)]
     marks.append(run(root, "status", "--porcelain").strip())
     marks.append(run(root, "diff", "HEAD").strip())
     return hashlib.sha1("\x1f".join(marks).encode()).hexdigest()[:16]
@@ -472,26 +490,27 @@ def collect(root, base, refs):
     for wanted in refs:
         number = pull_number(wanted)
         request = None
-        ref = wanted
+        ref = head = wanted
         if number is not None:
             ref, request = fetch_pull(root, upstream, number)
+            head = LOCAL_HEADS[number] = local_head(root, ref, request)
         commits = []
-        log = run(root, "log", "--format=%h%x1f%s", f"{base}..{ref}").strip().split("\n")
+        log = run(root, "log", "--format=%h%x1f%s", f"{base}..{head}").strip().split("\n")
         for row in reversed([line for line in log if line]):
             sha, subject = row.split("\x1f")
             files = parse(run(root, "show", "--format=", "--unified=3", sha))
             mark_strings(root, files, f"{sha}^", sha)
             commits.append({"sha": sha, "subject": subject, "files": files})
-        fork = run(root, "merge-base", base, ref).strip()
+        fork = run(root, "merge-base", base, head).strip()
         # What the ref has committed, read from the ref rather than from disk, so work saved there says nothing about
         # where the base stands.
-        touched = [row for row in run(root, "diff", "--name-only", fork, ref).split("\n") if row]
-        carried = bool(touched) and not run(root, "diff", "--name-only", base, ref, "--", *touched).strip()
+        touched = [row for row in run(root, "diff", "--name-only", fork, head).split("\n") if row]
+        carried = bool(touched) and not run(root, "diff", "--name-only", base, head, "--", *touched).strip()
         if carried:
             # The base stands where this ref stands everywhere it touched, so it has taken the work in, squashed or
             # rebased or not. What is left to review is what no commit carries, and reading from the fork point would
             # hand the base its own work back as though it were new.
-            whole = run(root, "diff", "--unified=3", "HEAD") if ref == current else ""
+            whole = run(root, "diff", "--unified=3", "HEAD") if head == current else ""
             revs = ("HEAD", "")
         else:
             # A ref is read from where it forked, so a base that moved on since does not appear in it backwards. One
@@ -499,10 +518,10 @@ def collect(root, base, refs):
             start = fork if commits else base
             whole = (
                 run(root, "diff", "--unified=3", start)
-                if ref == current
-                else run(root, "diff", "--unified=3", start, ref)
+                if head == current
+                else run(root, "diff", "--unified=3", start, head)
             )
-            revs = (start, "" if ref == current else ref)
+            revs = (start, "" if head == current else head)
         files = parse(whole)
         mark_strings(root, files, *revs)
         # A ref that differs from the base nowhere has nothing to review, whatever it carries in commits.
@@ -513,12 +532,12 @@ def collect(root, base, refs):
                 "ref": ref,
                 "blurb": f"#{number}" if number else ref.split("/")[-1].replace("_", " "),
                 "pr": request,
-                "tip": run(root, "rev-parse", "--short", ref).strip(),
+                "tip": run(root, "rev-parse", "--short", head).strip(),
                 # Empty means the working tree, which is what the checked-out branch is shown as.
-                "rev": "" if ref == current else ref,
+                "rev": "" if head == current else head,
                 "commits": commits,
                 "files": files,
-                "dirty": ref == current,
+                "dirty": head == current,
             }
         )
     decorate(data)
