@@ -1766,11 +1766,22 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+class Server(ThreadingHTTPServer):
+    """The desk's server, with a listen queue deep enough for a page and a session asking at once.
+
+    The standard queue holds five connections, and a page firing its requests together with a session posting comments
+    overflows it: the operating system turns the connections it has no room for away, and their requests fail on a
+    broken pipe rather than wait their turn.
+    """
+
+    request_queue_size = 128
+
+
 def main(source=None, started_by=None):
     Serving.source = source
     Serving.started_by = started_by
     print(f"diff desk on http://127.0.0.1:{PORT}/  (comments -> {NOTES})", flush=True)
-    Serving.server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    Serving.server = Server(("127.0.0.1", PORT), Handler)
     Serving.server.serve_forever()
 
 
