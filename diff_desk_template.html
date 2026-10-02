@@ -405,7 +405,7 @@
   .bar .a { background: var(--add-gutter); }
   .bar .d { background: var(--del-gutter); }
 
-  main { padding: 16px 20px 60vh; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  main { padding: 16px 2px 60vh; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 
   .commitnote {
     display: flex;
@@ -555,10 +555,14 @@
   body.hide-context tr.c { display: none; }
   /* The semantic view lays two texts side by side, so its lines wrap rather than scroll: two columns of long lines
      would otherwise push each other out of the card. */
-  table.aligned { table-layout: fixed; }
-  table.aligned col.ln { width: 4.6em; }
+  /* Every row is a whole number of lines tall, so the stripes of a pad, tiled one line apart, run on from row to row
+     instead of starting over at each one. A normal line height would let a badge or a marked token stretch a row. */
+  table.aligned { table-layout: fixed; line-height: 1.25; }
+  /* Five digits and no more, since every pixel a line number takes is one the code beside it lacks. */
+  table.aligned col.ln { width: calc(5ch + 7px); }
   table.aligned col.gut { width: 21px; }
-  table.aligned td.ln { width: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  table.aligned td.ln { width: auto; padding: 0 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  table.aligned tr.sfold td.ln { padding: 2px 3px; font-family: var(--mono); font-size: inherit; }
   table.aligned td.ln.ghost { font-style: italic; }
   table.aligned td.code { white-space: pre-wrap; overflow-wrap: anywhere; }
   table.aligned td.code.k-del { background: var(--del-bg); }
@@ -567,7 +571,11 @@
   table.aligned td.code.k-moved { background: var(--accent-soft); }
   table.aligned td.code.k-moved.k-edit { background: linear-gradient(90deg, var(--accent-soft), var(--stale-bg)); }
   table.aligned td.code.ghost { background: var(--surface-sunk); opacity: 0.62; }
-  table.aligned td.code.pad { background: repeating-linear-gradient(135deg, var(--surface-sunk) 0 4px, var(--surface) 4px 8px); }
+  table.aligned td.code.pad {
+    background: linear-gradient(135deg, var(--surface-sunk) 25%, var(--surface) 25% 50%, var(--surface-sunk) 50% 75%, var(--surface) 75%);
+    background-size: 1lh 1lh;
+  }
+  table.aligned .sbadge { line-height: 1.2; }
   table.aligned .tok { background: color-mix(in srgb, var(--stale) 32%, transparent); border-radius: 2px; }
   tr.sfold td { background: var(--surface-sunk); color: var(--muted); padding: 2px 8px; cursor: pointer; font-family: var(--sans); font-size: 11.5px; white-space: normal; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
   tr.sfold.away td { background: color-mix(in srgb, var(--accent-soft) 70%, var(--surface-sunk)); }
