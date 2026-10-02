@@ -3576,3 +3576,29 @@ def test_a_thread_is_reached_from_the_panel_even_when_its_file_is_filtered_away(
           return box.top >= covered - 2 && box.top < window.innerHeight;
         }}"""
     )
+
+
+def test_the_semantic_view_faces_both_versions_and_comments_on_the_line_shown(page, desk):
+    page.locator("#semantic").click()
+    page.wait_for_function("() => aligned.files !== null")
+    card = page.locator("section.file[data-path='pkg/sub/deep.py']")
+    card.scroll_into_view_if_needed()
+    edited = card.locator("table.aligned tr[data-new-no='2']")
+    edited.wait_for()
+    assert edited.locator("td.code").first.inner_text() == "    return 1"
+    assert edited.locator("td.code .tok").all_inner_texts() == ["1", "2"]
+    # A file that is no Python is still read as a line diff.
+    sample(page).scroll_into_view_if_needed()
+    sample(page).locator("tr[data-line]").first.wait_for()
+    assert sample(page).locator("table.aligned").count() == 0
+    edited.locator("td.code").last.hover()
+    edited.locator("button.pin").click()
+    submit(page, "on the new return")
+    note = until(lambda: next((note for note in desk.get("/comments") if note["text"] == "on the new return"), None))
+    assert (note["path"], note["line"], note["side"]) == ("pkg/sub/deep.py", 2, "new")
+    # The reader's choice of view outlives a reload.
+    page.reload()
+    page.wait_for_selector("section.file")
+    assert page.locator("#semantic").get_attribute("aria-pressed") == "true"
+    # Left behind, the comment would reopen a file other tests fold away.
+    desk.post("/drop", {"seq": note["seq"]})

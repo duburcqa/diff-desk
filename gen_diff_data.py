@@ -252,7 +252,7 @@ def desk_version():
     """
     here = pathlib.Path(__file__).parent
     said = hashlib.sha1()
-    for name in ("diff_desk_template.html", "gen_diff_data.py", "serve_diff.py", "desk.py"):
+    for name in ("diff_desk_template.html", "gen_diff_data.py", "serve_diff.py", "desk.py", "semantic.py"):
         held = here / name
         said.update(held.read_bytes() if held.exists() else b"")
     return said.hexdigest()[:12]
@@ -535,6 +535,8 @@ def collect(root, base, refs):
                 "tip": run(root, "rev-parse", "--short", head).strip(),
                 # Empty means the working tree, which is what the checked-out branch is shown as.
                 "rev": "" if head == current else head,
+                # What the whole branch is read against: where it forked, or the base when it has nothing of its own.
+                "start": revs[0],
                 "commits": commits,
                 "files": files,
                 "dirty": head == current,

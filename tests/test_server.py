@@ -54,6 +54,26 @@ def test_pull_requests_are_offered_beside_the_branches(desk):
     assert info["upstream"] == ""
 
 
+def test_the_python_files_of_a_view_are_lined_up_by_statement(desk):
+    query = urllib.parse.urlencode(
+        [
+            ("dir", str(desk.repo)),
+            ("oldrev", "main"),
+            ("rev", "feature"),
+            ("path", "pkg/sub/deep.py"),
+            ("path", "sample.py"),
+        ]
+    )
+    files = desk.get(f"/semantic?{query}")["files"]
+    deep = files["pkg/sub/deep.py"]
+    assert (deep["old"][1], deep["new"][1]) == ("    return 1", "    return 2")
+    kind, spans, _ = deep["newInfo"][1]
+    assert kind == "edit"
+    assert [deep["new"][1][low:high] for low, high in spans] == ["2"]
+    # Lines of prose are no Python, and are left to the line diff.
+    assert "sample.py" not in files
+
+
 def test_a_slice_of_the_file_fills_a_gap(desk):
     where = f"/lines?dir={urllib.parse.quote(str(desk.repo))}&rev=feature&path=sample.py&from=20&to=24"
     answer = desk.get(where)
@@ -1341,7 +1361,7 @@ def test_serving_over_a_desk_started_from_other_code_replaces_it(repo, tmp_path)
     # one puts that desk down and takes over rather than telling it what to show.
     other = tmp_path / "other"
     other.mkdir()
-    for name in ("desk.py", "gen_diff_data.py", "serve_diff.py", "diff_desk_template.html"):
+    for name in ("desk.py", "gen_diff_data.py", "serve_diff.py", "semantic.py", "diff_desk_template.html"):
         shutil.copy(ROOT / name, other / name)
     shutil.copytree(ROOT / "vendor", other / "vendor")
     (other / "gen_diff_data.py").write_text(f"{(other / 'gen_diff_data.py').read_text()}\n# built otherwise\n")
@@ -1830,7 +1850,14 @@ def test_the_desk_updates_itself_over_https_when_ssh_cannot_be_reached(tmp_path)
     gen_diff_data.run(published, "init", "--quiet", "--initial-branch=main")
     gen_diff_data.run(published, "config", "user.email", "desk@test")
     gen_diff_data.run(published, "config", "user.name", "Desk")
-    for name in ("desk.py", "gen_diff_data.py", "serve_diff.py", "diff_desk_template.html", ".gitignore"):
+    for name in (
+        "desk.py",
+        "gen_diff_data.py",
+        "serve_diff.py",
+        "semantic.py",
+        "diff_desk_template.html",
+        ".gitignore",
+    ):
         shutil.copy(ROOT / name, published / name)
     gen_diff_data.run(published, "add", "-A")
     gen_diff_data.run(published, "commit", "--quiet", "-m", "the desk as published")

@@ -30,6 +30,7 @@ The page comes up on `127.0.0.1:8787`, each ref a tab, scoped to the whole range
 
 - The file list is a tree following the repository's folders, foldable and remembered, with a count per folder. A chain of single-child directories is one row.
 - `j`/`k` walk the files, `/` filters them, `c` comments on the selection, `r` marks the current file reviewed.
+- **Semantic** lays Python files out side by side, lined up by statement rather than by line. A class moved up the file, a method moved to another class or file, a docstring rewritten around unchanged code: each is paired with what it was, labelled (`docstring only`, `renamed a → b`, `body edited`) and marked word by word. Moved code is shown once, at its new place, beside its old version; where it was, one bar says where it went. Old lines facing nothing fold behind a bar naming the functions deleted. Comments are written and shown on the lines the diff holds, as in the line view. What it costs: the whole files are read and matched, a second or two for a large branch the first time a view is opened, and a file that does not parse is shown as a line diff.
 - **Changes only** hides context lines, **Hide reviewed** clears what you are done with, and **Reviewed** folds one file away. The tick is kept per file digest, so a file whose diff moves reopens itself.
 - **`+20 up` / `+20 down` / `all N` / `+20 below`** bring in the lines the diff left out, read from the file at that revision.
 - A file is built when you come within reach of it and let go once you are well past, standing at the height its lines measured. A six-thousand-line review is 5,700 nodes rather than 218,000 and opens in half a second rather than seven. What it costs: the browser's own search reaches the files you are near.
@@ -103,6 +104,7 @@ A review is identified by its pull request, not by the ref it is read from. The 
 | `desk.py` | the entry point: `serve`, `stop`, `watch`, `comments`, `reply`, `edit`, `resolve`, `bind`, `sync`, `refs` |
 | `gen_diff_data.py` | turns a git range into the payload a page renders: hunks, digests, pull request threads |
 | `serve_diff.py` | the local server: the page, rescans, file slices, comments, resolutions, pull request posts |
+| `semantic.py` | the semantic view: Python statements matched across the old and new files, laid out in two columns |
 | `diff_desk_template.html` | the page itself, with `__DIFF_DATA__` and `__BUILD__` substituted at build time |
 | `SKILL.md` | how a Claude Code session drives all of the above |
 

@@ -553,6 +553,30 @@
   body.hide-closed .noterow[data-done="true"][data-reveal="true"] { display: table-row; }
   body.hide-closed .filenote[data-done="true"][data-reveal="true"] { display: block; }
   body.hide-context tr.c { display: none; }
+  /* The semantic view lays two texts side by side, so its lines wrap rather than scroll: two columns of long lines
+     would otherwise push each other out of the card. */
+  table.aligned { table-layout: fixed; }
+  table.aligned col.ln { width: 4.6em; }
+  table.aligned col.gut { width: 21px; }
+  table.aligned td.ln { width: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  table.aligned td.ln.ghost { font-style: italic; }
+  table.aligned td.code { white-space: pre-wrap; overflow-wrap: anywhere; }
+  table.aligned td.code.k-del { background: var(--del-bg); }
+  table.aligned td.code.k-add { background: var(--add-bg); }
+  table.aligned td.code.k-edit { background: var(--stale-bg); }
+  table.aligned td.code.k-moved { background: var(--accent-soft); }
+  table.aligned td.code.k-moved.k-edit { background: linear-gradient(90deg, var(--accent-soft), var(--stale-bg)); }
+  table.aligned td.code.ghost { background: var(--surface-sunk); opacity: 0.62; }
+  table.aligned td.code.pad { background: repeating-linear-gradient(135deg, var(--surface-sunk) 0 4px, var(--surface) 4px 8px); }
+  table.aligned .tok { background: color-mix(in srgb, var(--stale) 32%, transparent); border-radius: 2px; }
+  tr.sfold td { background: var(--surface-sunk); color: var(--muted); padding: 2px 8px; cursor: pointer; font-family: var(--sans); font-size: 11.5px; white-space: normal; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+  tr.sfold.away td { background: color-mix(in srgb, var(--accent-soft) 70%, var(--surface-sunk)); }
+  tr.sfold.region td { background: color-mix(in srgb, var(--del-bg) 60%, var(--surface-sunk)); }
+  .sbadge { font: 10px/1.6 var(--sans); padding: 0 6px; margin-left: 8px; border: 0; border-radius: 8px; white-space: nowrap; background: var(--rule); color: var(--ink); vertical-align: 1px; }
+  .sbadge.moved { background: var(--accent); color: var(--surface); cursor: pointer; }
+  .sbadge.renamed { background: color-mix(in srgb, var(--accent) 30%, var(--surface)); }
+  .sbadge.edited { background: color-mix(in srgb, var(--stale) 40%, var(--surface)); }
+  tr.flash td { box-shadow: inset 0 0 0 2px var(--accent); }
   body.dragging { user-select: none; cursor: ns-resize; }
 
   /* The affordance is always in the layout, so revealing it cannot shift the code sideways. */
@@ -977,6 +1001,9 @@
     <button class="toggle" id="ctx" aria-pressed="false" title="Changes only: show only added and removed lines" aria-label="Changes only">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5h5M5.5 2v5M3 11.5h10M9.5 4.5h3.5"/></svg>
     </button>
+    <button class="toggle" id="semantic" aria-pressed="false" title="Semantic view: Python files side by side, lined up by statement, moved code shown at its new place beside its old version" aria-label="Semantic view">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2.5" width="4.5" height="11" rx="1"/><rect x="9.5" y="2.5" width="4.5" height="11" rx="1"/><path d="M6.5 5.5l3 5"/></svg>
+    </button>
     <button class="toggle" id="hidedone" aria-pressed="false" title="Hide the files marked reviewed" aria-label="Hide reviewed">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 8.5l3 3 7-8"/><path d="M2 13.5l12-11" opacity=".55"/></svg>
     </button>
@@ -1156,7 +1183,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "qx", "ctx", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "logresolved", "logunread", "logonlynew", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "find", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
+  for (const id of ["tabs", "scope", "q", "qx", "ctx", "semantic", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "logresolved", "logunread", "logonlynew", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "find", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -1205,6 +1232,7 @@
       hideDone: els.hidedone.getAttribute("aria-pressed") === "true",
       hideFiles: els.hidefiles.getAttribute("aria-pressed") === "true",
       hideClosed: els.hideclosed.getAttribute("aria-pressed") === "true",
+      semantic: els.semantic.getAttribute("aria-pressed") === "true",
     };
     try {
       localStorage.setItem("diffdesk.choices", JSON.stringify(choices));
@@ -1230,6 +1258,8 @@
     document.body.classList.toggle("hide-files", Boolean(choices.hideFiles));
     els.hideclosed.setAttribute("aria-pressed", String(Boolean(choices.hideClosed)));
     document.body.classList.toggle("hide-closed", Boolean(choices.hideClosed));
+    els.semantic.setAttribute("aria-pressed", String(Boolean(choices.semantic)));
+    document.body.classList.toggle("semantic", Boolean(choices.semantic));
   }
 
   function loadFolded() {
@@ -4240,12 +4270,366 @@
     return wrap;
   }
 
+  /* ---------- the semantic view ---------- */
+
+  // The Python files of the view lined up by statement, as the desk answers them (see semantic.py). Matching runs over
+  // every file of the view at once, which is how code moved between files is found, so the whole view is asked for in
+  // one request, again whenever the view or the payload changes.
+  const aligned = { key: null, files: null, painted: new Map() };
+
+  const semanticOn = () => document.body.classList.contains("semantic");
+  const alignable = (file) => !file.binary && file.path.endsWith(".py");
+
+  function askAligned() {
+    const { commit } = view();
+    const key = `${branch().ref}|${commit ? commit.sha : "all"}|${data.stamp}`;
+    if (aligned.key === key) return;
+    Object.assign(aligned, { key, files: null, painted: new Map() });
+    // The whole branch is read against where it forked, as its diff is, so a base that moved on since is not shown
+    // backwards in it.
+    const [oldRev, rev] = commit ? [`${commit.sha}^`, commit.sha] : [branch().start || data.baseRef, branch().rev];
+    const query = new URLSearchParams({ dir: data.root, oldrev: oldRev, rev });
+    for (const file of view().files.filter(alignable)) query.append("path", file.path);
+    const settle = (files) => {
+      if (aligned.key !== key) return;
+      aligned.files = files;
+      // Built again only where the reader is, as any card is: the rest are built as the reader reaches them.
+      for (const body of document.querySelectorAll('section.file > .body[data-waiting="semantic"]')) {
+        delete body.dataset.waiting;
+        body.dataset.filled = "false";
+        settleBody(body.parentElement);
+      }
+    };
+    // A desk that cannot line the view up leaves its files to the line diff, which is what an empty answer shows.
+    fetch(`semantic?${query}`)
+      .then(asked)
+      .then((answer) => settle(answer.files || {}))
+      .catch(() => settle({}));
+  }
+
+  // One side of a file painted whole, so a string spanning lines is coloured as one, cut back into its lines.
+  function paintedSide(path, side) {
+    const key = `${side}|${path}`;
+    if (!aligned.painted.has(key)) {
+      const lines = aligned.files[path][side];
+      const html = window.hljs && lines.length ? hljs.highlight(lines.join("\n"), { language: "python", ignoreIllegals: true }).value : null;
+      aligned.painted.set(key, html === null ? null : splitPainted(html));
+    }
+    return aligned.painted.get(key);
+  }
+
+  // Wraps the characters of a cell that the spans name, whatever colouring already cuts its text into.
+  function markSpans(cell, spans) {
+    const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+    const texts = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) texts.push(node);
+    let at = 0;
+    for (const node of texts) {
+      const text = node.nodeValue;
+      const from = at;
+      at += text.length;
+      const cuts = spans
+        .filter(([low, high]) => high > from && low < at)
+        .map(([low, high]) => [Math.max(low, from) - from, Math.min(high, at) - from]);
+      if (!cuts.length) continue;
+      const pieces = document.createDocumentFragment();
+      let spot = 0;
+      for (const [low, high] of cuts) {
+        if (low > spot) pieces.append(text.slice(spot, low));
+        const mark = document.createElement("span");
+        mark.className = "tok";
+        mark.textContent = text.slice(low, high);
+        pieces.append(mark);
+        spot = high;
+      }
+      if (spot < text.length) pieces.append(text.slice(spot));
+      node.replaceWith(pieces);
+    }
+  }
+
+  const fileName = (path) => path.split("/").pop();
+
+  function movedLink(path, line, side, label) {
+    const link = document.createElement("button");
+    link.className = "sbadge moved";
+    link.textContent = label;
+    link.title = `${side === "new" ? "Now at" : "Was at"} ${path}, line ${line}`;
+    link.addEventListener("click", (event) => {
+      event.stopPropagation();
+      reachLine(path, line, side);
+    });
+    return link;
+  }
+
+  function badgesOf(badge, side) {
+    const said = [];
+    if (badge.moved) {
+      const [path, line] = badge.moved;
+      // A badge on the old side says where the code went, one on the new side where it came from.
+      const label = `${side === "old" ? "→" : "←"} ${fileName(path)}:${line}`;
+      said.push(movedLink(path, line, side === "old" ? "new" : "old", label));
+    }
+    const plain = (kind, text, title) => {
+      const span = document.createElement("span");
+      span.className = `sbadge ${kind}`;
+      span.textContent = text;
+      if (title) span.title = title;
+      said.push(span);
+    };
+    if (badge.renamed) {
+      const pairs = badge.renamed.map(([before, after]) => `${before} → ${after}`);
+      plain("renamed", `renamed ${pairs.slice(0, 3).join(", ")}${pairs.length > 3 ? ", …" : ""}`, pairs.join("\n"));
+    }
+    if (badge.docstring) plain("docstring", "docstring only");
+    if (badge.edited) plain("edited", "body edited");
+    return said;
+  }
+
+  // One line of one side: its code coloured, what changed in it marked, and the badge its statement carries.
+  function alignedCode(path, side, number, ghost) {
+    const lined = aligned.files[path];
+    const [kind, spans, badge] = lined[`${side}Info`][number - 1];
+    const cell = document.createElement("td");
+    cell.className = ghost ? "code ghost" : `code ${kind.split(" ").map((word) => `k-${word}`).join(" ")}`;
+    const painted = paintedSide(path, side);
+    if (painted) cell.innerHTML = painted[number - 1];
+    else cell.textContent = lined[side][number - 1];
+    if (spans && spans.length) markSpans(cell, spans);
+    if (badge && !ghost) cell.append(...badgesOf(badge, side));
+    return cell;
+  }
+
+  function padCell() {
+    const cell = document.createElement("td");
+    cell.className = "code pad";
+    return cell;
+  }
+
+  function numberCell(text, extra) {
+    const cell = document.createElement("td");
+    cell.className = extra ? `ln ${extra}` : "ln";
+    cell.textContent = text;
+    return cell;
+  }
+
+  // Shows the rows a fold holds, unfolding first whatever fold holds the fold itself.
+  function openFold(tbody, fold) {
+    const bar = tbody.querySelector(`tr.sfold[data-opens="${CSS.escape(fold)}"]`);
+    if (!bar) return;
+    if (bar.hidden) openFold(tbody, bar.dataset.fold);
+    for (const row of tbody.querySelectorAll(`tr[data-fold="${CSS.escape(fold)}"]`)) row.hidden = false;
+    bar.remove();
+  }
+
+  // Takes the reader to a line of a file in the semantic view, unfolding whatever holds it.
+  function reachLine(path, line, side) {
+    const wrap = document.querySelector(`section.file[data-path="${CSS.escape(path)}"]`);
+    if (!wrap) return;
+    wrap.dataset.open = "true";
+    const held = drawn.get(wrap);
+    if (held) fillBody(wrap, held.file, held.index);
+    const row = wrap.querySelector(`tr[data-${side}-no="${line}"]`);
+    if (!row) {
+      wrap.scrollIntoView({ block: "start" });
+      return;
+    }
+    if (row.hidden) openFold(row.closest("tbody"), row.dataset.fold);
+    row.scrollIntoView({ block: "center" });
+    row.classList.add("flash");
+    setTimeout(() => row.classList.remove("flash"), 1600);
+  }
+
+  function plural(count, word) {
+    return `${count} ${word}${count === 1 ? "" : "s"}`;
+  }
+
+  function targetLinks(targets) {
+    const links = targets.slice(0, 4).map(([path, line, name]) => movedLink(path, line, "new", `${name} · ${fileName(path)}:${line}`));
+    if (targets.length > 4) links.push(document.createTextNode(` +${targets.length - 4} more`));
+    return links;
+  }
+
+  // Fills a card with its file lined up by statement. Says false for a file the desk could not line up, which is then
+  // shown as a line diff.
+  function fillSemantic(body, file) {
+    if (!alignable(file)) return false;
+    askAligned();
+    if (aligned.files === null) {
+      const note = document.createElement("div");
+      note.className = "empty";
+      note.textContent = "Lining up the statements…";
+      body.dataset.waiting = "semantic";
+      body.append(note);
+      return true;
+    }
+    const lined = aligned.files[file.path];
+    if (!lined) return false;
+    // A comment is written against a line the pull request shows, which is a line its diff holds: added and kept lines
+    // on the new side, removed ones on the old. The rest of the file is shown for reading alone.
+    const commentable = { old: new Set(), new: new Set() };
+    for (const [kind, oldNo, newNo] of file.lines) {
+      if (kind === "d") commentable.old.add(oldNo);
+      else if (kind === "a" || kind === "c") commentable.new.add(newNo);
+    }
+    const stranded = mine().filter((note) => note.path === file.path && isOutdated(note));
+    const behind = new Set(stranded.map((note) => note.seq));
+    const table = document.createElement("table");
+    table.className = "aligned";
+    const columns = document.createElement("colgroup");
+    for (const kind of ["ln", "code", "ln", "gut", "code"]) {
+      const column = document.createElement("col");
+      column.className = kind;
+      columns.append(column);
+    }
+    table.append(columns);
+    const tbody = document.createElement("tbody");
+    let order = 0;
+    let folds = 0;
+
+    const lineRow = (entry, fold) => {
+      const row = document.createElement("tr");
+      const oldNo = entry.old;
+      const newNo = entry.new;
+      const from = entry.from;
+      const left = numberCell(oldNo ? String(oldNo) : from ? (from[0] === file.path ? String(from[1]) : `${fileName(from[0])}:${from[1]}`) : "", from && !oldNo ? "ghost" : "");
+      if (from && !oldNo) left.title = `The old version, from ${from[0]}, line ${from[1]}`;
+      const leftCode = oldNo ? alignedCode(file.path, "old", oldNo, false) : from ? alignedCode(from[0], "old", from[1], true) : padCell();
+      const right = numberCell(newNo ? String(newNo) : "");
+      const rightCode = newNo ? alignedCode(file.path, "new", newNo, false) : padCell();
+      const anchor = newNo && commentable.new.has(newNo) ? ["new", newNo] : oldNo && commentable.old.has(oldNo) ? ["old", oldNo] : null;
+      let gut;
+      if (anchor) {
+        row.dataset.path = file.path;
+        row.dataset.side = anchor[0];
+        row.dataset.line = String(anchor[1]);
+        row.dataset.seq = String(order);
+        order += 1;
+        gut = commentGutter(row);
+        armRow(row, [left, right, gut]);
+      } else {
+        gut = document.createElement("td");
+        gut.className = "gut";
+      }
+      if (oldNo) row.dataset.oldNo = String(oldNo);
+      if (newNo) row.dataset.newNo = String(newNo);
+      const quiet = (cell) => cell.classList.contains("pad") || cell.classList.contains("k-same") || cell.classList.contains("k-blank");
+      row.className = !from && quiet(leftCode) && quiet(rightCode) ? "c" : "s";
+      if (fold !== null) {
+        row.hidden = true;
+        row.dataset.fold = fold;
+      }
+      row.append(left, leftCode, right, gut, rightCode);
+      tbody.append(row);
+      for (const [side, number] of [["new", newNo], ["old", oldNo]]) {
+        if (!number) continue;
+        for (const note of notesAt(file.path, number, side).filter((note) => !behind.has(note.seq))) {
+          note.source = notes.drafts.find((draft) => draft.text === note.text && draft.line === note.line && draft.path === note.path);
+          tbody.append(noteRow(note));
+        }
+      }
+    };
+
+    const foldBar = (kind, first, parts, fold) => {
+      const bar = document.createElement("tr");
+      bar.className = `sfold ${kind}`;
+      folds += 1;
+      bar.dataset.opens = `${file.path}#${folds}`;
+      if (fold !== null) {
+        bar.hidden = true;
+        bar.dataset.fold = fold;
+      }
+      const number = numberCell(first ? String(first) : "");
+      const said = document.createElement("td");
+      said.colSpan = 4;
+      said.append(...parts);
+      bar.append(number, said);
+      bar.addEventListener("click", () => openFold(tbody, bar.dataset.opens));
+      tbody.append(bar);
+      return bar.dataset.opens;
+    };
+
+    const draw = (entries, fold) => {
+      for (const entry of entries) {
+        if (entry.same) {
+          const inner = foldBar("same", 0, [`⋯ ${plural(entry.same.length, "unchanged line")}`], fold);
+          draw(entry.same, inner);
+        } else if (entry.away) {
+          const count = entry.away.filter((number) => lined.oldInfo[number - 1][0] !== "blank").length;
+          const inner = foldBar("away", entry.away[0], [`⇢ ${plural(count, "line")} moved to `, ...targetLinks(entry.to)], fold);
+          draw(entry.away.map((number) => ({ old: number })), inner);
+        } else if (entry.region) {
+          const parts = [`▸ old ${entry.lines[0]}–${entry.lines[1]}: `];
+          const said = [];
+          if (entry.deleted) {
+            const names = entry.names.slice(0, 8).join(", ") + (entry.names.length > 8 ? ` +${entry.names.length - 8}` : "");
+            said.push([`${plural(entry.deleted, "line")} deleted${names ? `: ${names}` : ""}`]);
+          }
+          if (entry.moved) said.push([`${plural(entry.moved, "line")} moved to `, ...targetLinks(entry.to)]);
+          said.forEach((piece, at) => parts.push(...(at ? [" · ", ...piece] : piece)));
+          const inner = foldBar("region", entry.lines[0], parts, fold);
+          draw(entry.region, inner);
+        } else {
+          lineRow(entry, fold);
+        }
+      }
+    };
+    draw(lined.rows, null);
+    // A thread on a line folded away is news about that line, so its fold opens.
+    for (const thread of tbody.querySelectorAll("tr.noterow")) {
+      const line = thread.previousElementSibling;
+      if (line && line.hidden) openFold(tbody, line.dataset.fold);
+    }
+    for (const note of stranded) tbody.append(noteRow({ ...note, outdated: true }));
+    table.append(tbody);
+    body.append(table);
+    return true;
+  }
+
+  // The cell holding a line's comment pin: pressed it starts a range, clicked it opens the box on what is selected.
+  function commentGutter(row) {
+    const gut = document.createElement("td");
+    gut.className = "gut";
+    const pin = document.createElement("button");
+    pin.className = "pin";
+    pin.textContent = "+";
+    pin.title = "Comment on the selected lines";
+    pin.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (pin.setPointerCapture) pin.setPointerCapture(event.pointerId);
+      pin.classList.add("held");
+      startDrag(row);
+    });
+    pin.addEventListener("click", () => {
+      if (!selRows().includes(row)) pick(row, false);
+      composeSel();
+    });
+    gut.append(pin);
+    return gut;
+  }
+
+  // A row a comment can be written on: a click on its rail picks it, and a press there starts a range.
+  function armRow(row, rail) {
+    const select = (event) => pick(row, event.shiftKey);
+    for (const cell of rail) cell.addEventListener("click", select);
+    row.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0 || event.shiftKey) return;
+      if (event.target.closest("button, textarea, input")) return;
+      // Only the rail starts a range: it carries no text. Dragging across the code is how one selects the code
+      // itself, and a range drag there would wipe that selection the moment it left the line.
+      if (event.target.closest("td.code")) return;
+      startDrag(row);
+    });
+  }
+
   function fillBody(wrap, file, index) {
     const body = wrap.querySelector(":scope > .body");
     if (!body || body.dataset.filled === "true") return;
     body.dataset.filled = "true";
     body.style.minHeight = "";
     body.replaceChildren();
+    if (semanticOn() && fillSemantic(body, file)) return;
     if (file.binary) {
       const note = document.createElement("div");
       note.className = "empty";
@@ -4325,25 +4709,7 @@
         const right = document.createElement("td");
         right.className = "ln";
         right.textContent = kind === "d" ? "" : String(newNo);
-        const gut = document.createElement("td");
-        gut.className = "gut";
-        const pin = document.createElement("button");
-        pin.className = "pin";
-        pin.textContent = "+";
-        pin.title = "Comment on the selected lines";
-        pin.addEventListener("pointerdown", (event) => {
-          if (event.button !== 0) return;
-          event.preventDefault();
-          event.stopPropagation();
-          if (pin.setPointerCapture) pin.setPointerCapture(event.pointerId);
-          pin.classList.add("held");
-          startDrag(row);
-        });
-        pin.addEventListener("click", () => {
-          if (!selRows().includes(row)) pick(row, false);
-          composeSel();
-        });
-        gut.append(pin);
+        const gut = commentGutter(row);
         const mark = document.createElement("td");
         mark.className = "mark";
         mark.textContent = kind === "a" ? "+" : kind === "d" ? "−" : " ";
@@ -4353,16 +4719,7 @@
         if (coloured === undefined) code.textContent = text;
         else code.innerHTML = coloured;
 
-        const select = (event) => pick(row, event.shiftKey);
-        for (const cell of [left, right, gut, mark]) cell.addEventListener("click", select);
-        row.addEventListener("pointerdown", (event) => {
-          if (event.button !== 0 || event.shiftKey) return;
-          if (event.target.closest("button, textarea, input")) return;
-          // Only the rail starts a range: it carries no text. Dragging across the code is how one selects the code
-          // itself, and a range drag there would wipe that selection the moment it left the line.
-          if (event.target.closest("td.code")) return;
-          startDrag(row);
-        });
+        armRow(row, [left, right, gut, mark]);
         row.append(left, right, gut, mark, code);
         tbody.append(row);
 
@@ -4687,6 +5044,16 @@
     const on = els.ctx.getAttribute("aria-pressed") !== "true";
     els.ctx.setAttribute("aria-pressed", String(on));
     document.body.classList.toggle("hide-context", on);
+  });
+  els.semantic.addEventListener("click", () => {
+    const on = els.semantic.getAttribute("aria-pressed") !== "true";
+    const staying = visible(view().files)[0];
+    holdPlace(staying && staying.path, () => {
+      els.semantic.setAttribute("aria-pressed", String(on));
+      document.body.classList.toggle("semantic", on);
+      keepChoices();
+      render();
+    });
   });
   els.hidedone.addEventListener("click", () => {
     const on = els.hidedone.getAttribute("aria-pressed") !== "true";

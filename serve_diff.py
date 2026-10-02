@@ -27,6 +27,8 @@ Endpoints, all on 127.0.0.1 so nothing is exposed off the machine:
                               and the comments written there that this desk has none of
   POST /media?name=           the bytes of one image or video a comment is to carry, kept beside the log
   GET  /media/<file>          one file kept that way, which is what the page shows a comment carrying
+  GET  /semantic?dir=&oldrev=&rev=&path=...
+                              the Python files named, old and new, lined up by statement for the semantic view
 
 Deleting is the one thing that does discard: a dropped comment leaves the page and every exchange with the pull
 request, and a dropped reply is gone from the thread. What was posted is deleted on the pull request first, so a
@@ -83,6 +85,7 @@ from typing import NamedTuple
 from urllib.parse import parse_qs, quote, urlparse
 
 import gen_diff_data
+import semantic
 
 
 class Source(NamedTuple):
@@ -984,6 +987,13 @@ def changing():
         write_notes(rows)
 
 
+# The views lined up lately, newest last. A page toggled between scopes asks for each again, and lining up a large
+# branch takes seconds; one lock keeps the cards of a view asking at once from lining it up once each.
+ALIGNED = {}
+ALIGNED_KEPT = 8
+ALIGNING = threading.Lock()
+
+
 class Handler(BaseHTTPRequestHandler):
     def _send(self, code, body=b"", kind="text/plain; charset=utf-8"):
         self.send_response(code)
@@ -1050,8 +1060,8 @@ class Handler(BaseHTTPRequestHandler):
                     "startedBy": Serving.started_by,
                 }
             )
-        elif path == "/lines":
-            self._lines(query)
+        elif path in ("/lines", "/semantic"):
+            {"/lines": self._lines, "/semantic": self._semantic}[path](query)
         elif path.startswith("/media/"):
             self._kept(path[len("/media/") :])
         elif path == "/favicon.ico":
@@ -1124,6 +1134,30 @@ class Handler(BaseHTTPRequestHandler):
         self._json(
             {"total": len(rows), "from": low - shift, "to": high - shift, "lines": rows[low - 1 : high], "opens": opens}
         )
+
+    def _semantic(self, query):
+        """The files named, read at both revisions and lined up by statement (see 'semantic.align').
+
+        Matching runs across every file at once, which is what lets a function moved from one file to another be found,
+        so a view asks for all its Python files in one request. What it answers is kept by what the files read: the
+        same texts are answered again at once, while work saved on disk, which changes them, is lined up afresh.
+        """
+        root = pathlib.Path(query.get("dir", ["."])[0])
+        old_rev = query.get("oldrev", [""])[0]
+        rev = query.get("rev", [""])[0]
+        texts = {
+            name: (gen_diff_data.file_text(root, old_rev, name), gen_diff_data.file_text(root, rev, name))
+            for name in query.get("path", [])
+        }
+        said = hashlib.sha1(json.dumps(texts, sort_keys=True).encode()).hexdigest()
+        with ALIGNING:
+            files = ALIGNED.pop(said, None)
+            if files is None:
+                files = semantic.align(texts)
+            ALIGNED[said] = files
+            while len(ALIGNED) > ALIGNED_KEPT:
+                ALIGNED.pop(next(iter(ALIGNED)))
+        self._json({"files": files})
 
     def _kept(self, file):
         """One file a comment carries, as the page asks for it.
