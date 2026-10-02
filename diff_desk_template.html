@@ -3160,10 +3160,22 @@
     if (!selection || selection.isCollapsed || !event.clipboardData) return;
     const holder = document.createElement("div");
     holder.append(selection.getRangeAt(0).cloneContents());
-    const cells = [...holder.querySelectorAll("td.code")];
+    let cells = [...holder.querySelectorAll("td.code")];
     // One row is the common case - a single line lifted out - and it carries the numbers just as a span of rows does.
     // Only a selection wholly inside one line's text brings no cell with it, and that one the browser already gets right.
     if (!cells.length) return;
+    // The semantic view sets both versions in every row, a line one side lacks standing as an empty pad and a moved
+    // line as a ghost where it was. Joined as they come, the pads read as blank lines between every line copied, so a
+    // copy takes the version the selection started in, and only the lines that version holds there.
+    if (cells.some((cell) => cell.dataset.side)) {
+      const anchor = selection.anchorNode;
+      const start = (anchor.nodeType === Node.ELEMENT_NODE ? anchor : anchor.parentElement).closest("td.code");
+      const side = start && start.dataset.side ? start.dataset.side : "new";
+      cells = cells.filter((cell) => cell.dataset.side === side && !cell.matches(".pad, .ghost"));
+      if (!cells.length) return;
+    }
+    // The badges a statement carries sit inside its cell, and their labels are no part of its code.
+    for (const badge of holder.querySelectorAll(".sbadge")) badge.remove();
     const code = cells.map((cell) => cell.textContent).join("\n");
     event.clipboardData.setData("text/plain", code);
     // Only take over the copy once the replacement is known to have been accepted: preventing the default after a
@@ -4391,6 +4403,7 @@
     const [kind, spans, badge] = lined[`${side}Info`][number - 1];
     const cell = document.createElement("td");
     cell.className = ghost ? "code ghost" : `code ${kind.split(" ").map((word) => `k-${word}`).join(" ")}`;
+    cell.dataset.side = side;
     const painted = paintedSide(path, side);
     if (painted) cell.innerHTML = painted[number - 1];
     else cell.textContent = lined[side][number - 1];
@@ -4399,9 +4412,10 @@
     return cell;
   }
 
-  function padCell() {
+  function padCell(side) {
     const cell = document.createElement("td");
     cell.className = "code pad";
+    cell.dataset.side = side;
     return cell;
   }
 
@@ -4493,9 +4507,9 @@
       const from = entry.from;
       const left = numberCell(oldNo ? String(oldNo) : from ? (from[0] === file.path ? String(from[1]) : `${fileName(from[0])}:${from[1]}`) : "", from && !oldNo ? "ghost" : "");
       if (from && !oldNo) left.title = `The old version, from ${from[0]}, line ${from[1]}`;
-      const leftCode = oldNo ? alignedCode(file.path, "old", oldNo, false) : from ? alignedCode(from[0], "old", from[1], true) : padCell();
+      const leftCode = oldNo ? alignedCode(file.path, "old", oldNo, false) : from ? alignedCode(from[0], "old", from[1], true) : padCell("old");
       const right = numberCell(newNo ? String(newNo) : "");
-      const rightCode = newNo ? alignedCode(file.path, "new", newNo, false) : padCell();
+      const rightCode = newNo ? alignedCode(file.path, "new", newNo, false) : padCell("new");
       const anchor = newNo && commentable.new.has(newNo) ? ["new", newNo] : oldNo && commentable.old.has(oldNo) ? ["old", oldNo] : null;
       let gut;
       if (anchor) {

@@ -1427,6 +1427,58 @@ def test_copying_a_single_line_yields_the_code_alone(page):
     page.evaluate("() => window.getSelection().removeAllRanges()")
 
 
+def test_copying_lines_in_the_semantic_view_yields_one_version(page):
+    # The view is a choice that outlives a reload, so it is turned on only where it is off, and left as it was found.
+    was_on = page.locator("#semantic").get_attribute("aria-pressed") == "true"
+    if not was_on:
+        page.locator("#semantic").click()
+    page.wait_for_function("() => aligned.files !== null")
+    page.evaluate("""() => {
+      window.__copied = null;
+      document.addEventListener('copy', (event) => {
+        window.__copied = event.clipboardData.getData('text/plain');
+      });
+    }""")
+    copy_rows = """([path, column]) => {
+      const card = document.querySelector(`section.file[data-path="${path}"]`);
+      card.scrollIntoView();
+      const rows = [...card.querySelectorAll('table.aligned tbody tr')].filter((row) => row.querySelector('td.code'));
+      const range = document.createRange();
+      range.setStart(rows[0].querySelectorAll('td.code')[column], 0);
+      const last = rows[rows.length - 1].querySelectorAll('td.code')[column];
+      range.setEnd(last, last.childNodes.length);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.execCommand('copy');
+      // The code each line shows, without the badges its statement carries beside it.
+      const shown = rows
+        .map((row) => row.querySelectorAll('td.code')[column])
+        .filter((cell) => !cell.matches('.pad'))
+        .map((cell) => {
+          const code = cell.cloneNode(true);
+          for (const badge of code.querySelectorAll('.sbadge')) badge.remove();
+          return code.textContent;
+        });
+      return [window.__copied, shown.join('\\n')];
+    }"""
+    for path in ("added.py", "pkg/sub/deep.py"):
+        page.locator(f"section.file[data-path='{path}'] table.aligned").first.wait_for()
+    # A file the branch adds has nothing on its old side: what is copied is its new version line by line, with no
+    # blank line between them for the side that lacks it.
+    copied, shown = page.evaluate(copy_rows, ["added.py", 1])
+    assert copied == shown
+    assert copied.startswith('"""What it is for,\nsaid over two lines."""\n# said about the file\nname = "brand new"\n')
+    # Started on either side, a copy takes that version alone.
+    for column, version in ((0, "    return 1"), (1, "    return 2")):
+        copied, shown = page.evaluate(copy_rows, ["pkg/sub/deep.py", column])
+        assert copied == shown
+        assert copied.startswith(f"def area(r):\n{version}\nthree")
+    page.evaluate("() => window.getSelection().removeAllRanges()")
+    if not was_on:
+        page.locator("#semantic").click()
+
+
 def test_a_letter_held_with_a_modifier_is_left_to_the_browser(page):
     page.evaluate("""() => {
       window.__taken = {};
