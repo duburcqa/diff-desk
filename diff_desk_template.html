@@ -3858,7 +3858,9 @@
     for (const file of visible(view().files)) {
       file.lines.forEach((row, order) => {
         if (row[0] === "h" || (bare && row[0] === "c")) return;
-        if (pattern.test(String(row[3]))) hits.push({ path: file.path, order });
+        if (!pattern.test(String(row[3]))) return;
+        const side = row[0] === "d" ? "old" : "new";
+        hits.push({ path: file.path, order, side, line: side === "old" ? row[1] : row[2] });
       });
     }
     return hits;
@@ -3866,11 +3868,13 @@
 
   // The words found, painted as a range over the code cell's text, which leaves the syntax colours under them alone.
   // Engines without the highlight registry paint the row alone.
-  function markWords(row, pattern) {
+  function markWords(row, pattern, side) {
     if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
     const nodes = [];
     let text = "";
-    const walker = document.createTreeWalker(row.querySelector("td.code"), NodeFilter.SHOW_TEXT);
+    // A row of the semantic view holds both versions, and the words found are in the one the line belongs to.
+    const cell = row.querySelector(`td.code[data-side="${side}"]`) || row.querySelector("td.code");
+    const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       if (node.parentElement.closest("button")) continue;
       nodes.push({ node, start: text.length });
@@ -3911,10 +3915,15 @@
     folds.set(hit.path, { digest: card.dataset.digest, open: true, upTo: latest() });
     const held = drawn.get(card);
     if (held) fillBody(card, held.file, held.index);
-    const row = card.querySelector(`:scope > .body tr[data-seq="${hit.order}"]`);
+    // The semantic view lines its rows up by statement rather than in diff order, so a line is found there by its number.
+    const semantic = card.querySelector(":scope > .body table.aligned");
+    const row = semantic
+      ? semantic.querySelector(`tr[data-${hit.side}-no="${hit.line}"]`)
+      : card.querySelector(`:scope > .body tr[data-seq="${hit.order}"]`);
     if (!row) return;
+    if (row.hidden) openFold(row.closest("tbody"), row.dataset.fold);
     row.classList.add("hit");
-    markWords(row, pattern);
+    markWords(row, pattern, hit.side);
     row.scrollIntoView({ block: "center" });
   }
 

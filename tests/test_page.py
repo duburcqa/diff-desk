@@ -1479,6 +1479,44 @@ def test_copying_lines_in_the_semantic_view_yields_one_version(page):
         page.locator("#semantic").click()
 
 
+def test_text_found_in_the_semantic_view_is_marked_on_its_line_and_side(page):
+    was_on = page.locator("#semantic").get_attribute("aria-pressed") == "true"
+    if not was_on:
+        page.locator("#semantic").click()
+    page.wait_for_function("() => aligned.files !== null")
+    page.keyboard.press("Control+f")
+    page.wait_for_selector("#find:not([hidden])")
+    marked = """() => {
+      const row = document.querySelector('tr.hit');
+      const found = 'highlights' in CSS ? CSS.highlights.get('found') : null;
+      const range = found ? [...found][0] : null;
+      const cell = range ? range.startContainer.parentElement.closest('td.code') : null;
+      return {
+        path: row.closest('section.file').dataset.path,
+        old: row.dataset.oldNo || null,
+        new: row.dataset.newNo || null,
+        words: range ? range.toString() : null,
+        side: cell ? cell.dataset.side : null,
+      };
+    }"""
+    # A line only the new version holds, beside an empty old side: the row is that line's, and its words are marked.
+    page.locator("#fq").fill("brand new")
+    page.wait_for_function("() => document.getElementById('fcount').textContent === '1/1'")
+    hit = page.evaluate(marked)
+    assert (hit["path"], hit["new"]) == ("added.py", "4")
+    assert hit["words"] in (None, "brand new") and hit["side"] in (None, "new")
+    # A line the branch removed is found on the old side.
+    page.locator("#fq").fill("return 1")
+    page.wait_for_function("() => document.getElementById('fcount').textContent === '1/1'")
+    hit = page.evaluate(marked)
+    assert (hit["path"], hit["old"]) == ("pkg/sub/deep.py", "2")
+    assert hit["words"] in (None, "return 1") and hit["side"] in (None, "old")
+    page.locator("#fq").press("Escape")
+    page.wait_for_selector("#find", state="hidden")
+    if not was_on:
+        page.locator("#semantic").click()
+
+
 def test_a_letter_held_with_a_modifier_is_left_to_the_browser(page):
     page.evaluate("""() => {
       window.__taken = {};
