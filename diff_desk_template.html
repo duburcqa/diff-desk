@@ -2583,15 +2583,32 @@
 
   function quotes(chunk) {
     // The chunk in runs of lines, each said to be quoted or not: consecutive quoted lines are one passage, so a
-    // paragraph answered line by line reads as the paragraph it is.
+    // paragraph answered line by line reads as the paragraph it is. As in markdown, a line that follows a quoted line
+    // without a blank one between carries the passage on: a passage copied from the middle of a line gets its mark on
+    // the first line alone, the lines below it keeping the indentation of where they were copied from, which is
+    // removed down to what sets them apart from one another.
     const runs = [];
+    let carried = [];
+    const settle = () => {
+      if (!carried.length) return;
+      const lines = runs[runs.length - 1][1].split("\n");
+      const indent = Math.min(...carried.map((line) => line.match(/^\s*/)[0].length));
+      lines.splice(-carried.length, carried.length, ...carried.map((line) => line.slice(indent)));
+      runs[runs.length - 1][1] = lines.join("\n");
+      carried = [];
+    };
     for (const line of chunk.split("\n")) {
-      const quoted = /^\s*>\s?/.test(line);
-      const said = quoted ? line.replace(/^\s*>\s?/, "") : line;
       const last = runs[runs.length - 1];
+      const marked = /^\s*>\s?/.test(line);
+      const continued = !marked && last && last[0] && line.trim() !== "";
+      if (!continued) settle();
+      const quoted = marked || continued;
+      const said = marked ? line.replace(/^\s*>\s?/, "") : line;
+      if (continued) carried.push(said);
       if (last && last[0] === quoted) last[1] += `\n${said}`;
       else runs.push([quoted, said]);
     }
+    settle();
     // The break between a passage and the words around it is the blockquote's own, so it is not kept twice.
     return runs.map(([quoted, said]) => [quoted, quoted ? said : said.replace(/^\n/, "").replace(/\n$/, "")]);
   }

@@ -2838,7 +2838,11 @@ def test_a_reply_quoting_a_passage_shows_it_as_a_quote(page, desk):
         "/reply",
         {
             "seq": made,
-            "text": "> the passage being answered\n> and the rest of it\n\nwhat I make of it, with `code` in it",
+            "text": (
+                "> the passage being answered\n> and the rest of it\n\nwhat I make of it, with `code` in it\n\n"
+                "> copied from the middle of a line\n        and carried on below it\n          one step further\n\n"
+                "and the last word"
+            ),
             "who": "session",
         },
     )
@@ -2846,9 +2850,11 @@ def test_a_reply_quoting_a_passage_shows_it_as_a_quote(page, desk):
     page.wait_for_selector("section.file")
 
     quoted = page.locator(f"#note-{made} .line.reply blockquote")
-    assert quoted.count() == 1
+    assert quoted.count() == 2
     # One passage, not one quote per line, and the marks that made it are gone.
-    assert quoted.inner_text() == "the passage being answered\nand the rest of it"
+    assert quoted.first.inner_text() == "the passage being answered\nand the rest of it"
+    # Lines pasted below a single mark belong to its passage, rid of the indentation they were copied with.
+    assert quoted.nth(1).inner_text() == "copied from the middle of a line\nand carried on below it\n  one step further"
     answer = page.locator(f"#note-{made} .line.reply .said .text").first.inner_text()
     assert "what I make of it" in answer
     assert ">" not in answer
