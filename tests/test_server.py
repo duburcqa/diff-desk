@@ -2393,9 +2393,9 @@ def test_the_sync_command_says_what_it_brought_back(desk):
     try:
         assert desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": ["feature"]})["ok"]
         # The pull request the branch is opened as lands after the diffs, since collecting never waits on GitHub, and
-        # the state a page polls carries the stamp of what is served.
-        until(lambda: desk.get("/data")["branches"][0]["pr"])
-        assert desk.get("/data")["branches"][0]["pr"]["number"] == 33
+        # the state a page polls carries the stamp of what is served. Until it lands, the branch still shows the one an
+        # earlier test bound it to.
+        until(lambda: (desk.get("/data")["branches"][0]["pr"] or {}).get("number") == 33)
         assert desk.get("/state")["decor"] == desk.get("/data")["decor"]
         told = desk.cli("sync").communicate(timeout=60)[0]
     finally:
