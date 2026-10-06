@@ -1980,6 +1980,11 @@
     return thread || document.querySelector(`section.file[data-path="${CSS.escape(path)}"]`);
   }
 
+  // How close to where it is aimed a target counts as there. A scroll moves by whole pixels and a card stands where
+  // its layout puts it, a fraction of one included, so an aim can only come this close, and the reader counts as on a
+  // file as soon as it has.
+  const LANDED = 2;
+
   function missedBy(target, seq) {
     // How far the target stands from where an aim leaves it: a thread in the middle of the room under the header, and
     // a file with its head on the line its own scroll margin asks for, which is where the reader is said to be on it.
@@ -2008,7 +2013,7 @@
       }
       // Landed is landed and still there a frame later: a file built because the aim brought it within reach is
       // measured after that aim, and what its lines turn out to take moves the thread from under where it landed.
-      if (Math.abs(off) < 2) {
+      if (Math.abs(off) < LANDED) {
         if (again) land();
         else aim(aimed, tries - 1, true);
         return;
@@ -2038,7 +2043,7 @@
       const thread = aimingAt(aimed);
       if (!thread || !thread.isConnected) return;
       const off = missedBy(thread, aimed.seq);
-      if (Math.abs(off) >= 2) window.scrollTo({ top: Math.max(0, window.scrollY + off), behavior: "auto" });
+      if (Math.abs(off) >= LANDED) window.scrollTo({ top: Math.max(0, window.scrollY + off), behavior: "auto" });
       if (tries > 0) centre(tries - 1);
     });
     centre(4);
@@ -4996,7 +5001,7 @@
     const cards = [...document.querySelectorAll("section.file")];
     if (!cards.length) return undefined;
     const covered = document.querySelector("header").getBoundingClientRect().bottom;
-    const resting = Math.max(covered, parseFloat(getComputedStyle(cards[0]).scrollMarginTop) || covered) + 1;
+    const resting = Math.max(covered, parseFloat(getComputedStyle(cards[0]).scrollMarginTop) || covered) + LANDED;
     const below = cards.findIndex((card) => card.getBoundingClientRect().top > resting);
     const here = below === -1 ? cards.length - 1 : below - 1;
     const ahead = down ? cards.slice(here + 1) : cards.slice(0, Math.max(0, here)).reverse();
