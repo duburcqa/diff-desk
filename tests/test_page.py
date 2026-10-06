@@ -1098,9 +1098,9 @@ def test_stepping_lands_on_the_file_left_to_review_nearest_the_reader(page):
     page.locator(f"section.file[data-path='{paths[0]}'] input[type=checkbox]").check()
     page.evaluate("() => window.scrollTo(0, 0)")
     settle(page)
-    # A step scrolls smoothly, and where the next one goes is counted from where that scroll leaves the reader, so each
-    # is waited out rather than paused over. A step aims the file it takes at the line its own scroll margin asks for,
-    # so that file sitting on that line is the scroll having arrived.
+    # A step is aimed at its file over several frames, and where the next one goes is counted from where that aim leaves
+    # the reader, so each is waited out rather than paused over. A step aims the file it takes at the line its own
+    # scroll margin asks for, so that file sitting on that line is the aim having arrived.
     landed = """() => {
       const card = document.getElementById(`f${state.current}`);
       const aimed = parseFloat(getComputedStyle(card).scrollMarginTop);
@@ -3687,6 +3687,9 @@ def test_the_semantic_view_faces_both_versions_and_comments_on_the_line_shown(pa
     sample(page).scroll_into_view_if_needed()
     sample(page).locator("tr[data-line]").first.wait_for()
     assert sample(page).locator("table.aligned").count() == 0
+    # The lines of a file the reader has gone well past are let go, so they are come back to before being commented on.
+    card.scroll_into_view_if_needed()
+    edited.wait_for()
     edited.locator("td.code").last.hover()
     edited.locator("button.pin").click()
     submit(page, "on the new return")

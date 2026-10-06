@@ -1956,34 +1956,41 @@
     // Aimed again until it lands, since unfolding the card moved everything below it. Nothing else may move while it
     // is going: the files the aim brings within reach are settled once it has landed, which is what stops the page
     // unfolding under the reader for as long as the aim keeps chasing the thread down it.
-    aim(note.seq, 24);
+    aim(reaching, 24);
   }
 
-  function aimingAt(seq) {
+  function aimingAt(aimed) {
     // Found again on every frame rather than held as a node: the poll redraws the card every few seconds, and a node
-    // it has replaced answers with the rect of something detached, which sends the aim to the top of the page.
-    return (
-      document.getElementById(`note-${seq}`) ||
-      document.querySelector(`.filenote[data-seq="${seq}"]`) ||
-      (reaching && document.querySelector(`section.file[data-path="${CSS.escape(reaching.path)}"]`))
-    );
+    // it has replaced answers with the rect of something detached, which sends the aim to the top of the page. An aim
+    // without a thread is at the file itself.
+    const { path, seq } = aimed;
+    const thread =
+      seq !== null && (document.getElementById(`note-${seq}`) || document.querySelector(`.filenote[data-seq="${seq}"]`));
+    return thread || document.querySelector(`section.file[data-path="${CSS.escape(path)}"]`);
   }
 
-  function aim(seq, tries, again) {
+  function missedBy(target, seq) {
+    // How far the target stands from where an aim leaves it: a thread in the middle of the room under the header, and
+    // a file with its head on the line its own scroll margin asks for, which is where the reader is said to be on it.
+    const box = target.getBoundingClientRect();
+    if (seq === null) return box.top - parseFloat(getComputedStyle(target).scrollMarginTop);
+    const covered = document.querySelector("header").getBoundingClientRect().bottom;
+    return box.top - covered - Math.max(0, (window.innerHeight - covered - box.height) / 2);
+  }
+
+  function aim(aimed, tries, again) {
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      const thread = aimingAt(seq);
+      // Another aim taken since is where the reader is going now, and this one is let go rather than landed.
+      if (reaching !== aimed) return;
+      const thread = aimingAt(aimed);
       // Redrawn this very frame and not back yet: waiting for it costs a frame, where aiming at nothing costs the
       // reader their place.
       if (!thread || !thread.isConnected) {
-        if (tries > 0) aim(seq, tries - 1, again);
+        if (tries > 0) aim(aimed, tries - 1, again);
         else land();
         return;
       }
-      const box = thread.getBoundingClientRect();
-      const covered = document.querySelector("header").getBoundingClientRect().bottom;
-      const room = window.innerHeight - covered;
-      const middle = Math.max(0, (room - box.height) / 2);
-      const off = box.top - covered - middle;
+      const off = missedBy(thread, aimed.seq);
       if (tries <= 0) {
         land();
         return;
@@ -1992,7 +1999,7 @@
       // measured after that aim, and what its lines turn out to take moves the thread from under where it landed.
       if (Math.abs(off) < 2) {
         if (again) land();
-        else aim(seq, tries - 1, true);
+        else aim(aimed, tries - 1, true);
         return;
       }
       // Told to go there outright: an animated scroll answers with where it is rather than where it is going, so the
@@ -2000,29 +2007,26 @@
       // leaving the reader a screen away from the comment they asked for. The thread flashes where it arrives, which
       // is what says where that is.
       window.scrollTo({ top: Math.max(0, window.scrollY + off), behavior: "auto" });
-      aim(seq, tries - 1, false);
+      aim(aimed, tries - 1, false);
     }));
   }
 
   function land() {
     // What the aim held off now happens, all of it at once: the files it flew past are settled here rather than under
     // it, which is what kept the page from unfolding as it went.
-    const seq = reaching && reaching.seq;
+    const aimed = reaching;
     reaching = null;
     if (owedSettle) {
       owedSettle = false;
       settleNear();
     }
-    if (seq === null || seq === undefined) return;
+    if (!aimed) return;
     // Then the thread is put back under the reader, whatever moved it since the aim called it landed: settling those
     // files, and the box itself taking the size the width gives it, which is delivered a frame or two after it lands.
     const centre = (tries) => requestAnimationFrame(() => {
-      const thread = aimingAt(seq);
+      const thread = aimingAt(aimed);
       if (!thread || !thread.isConnected) return;
-      const covered = document.querySelector("header").getBoundingClientRect().bottom;
-      const box = thread.getBoundingClientRect();
-      const middle = Math.max(0, (window.innerHeight - covered - box.height) / 2);
-      const off = box.top - covered - middle;
+      const off = missedBy(thread, aimed.seq);
       if (Math.abs(off) >= 2) window.scrollTo({ top: Math.max(0, window.scrollY + off), behavior: "auto" });
       if (tries > 0) centre(tries - 1);
     });
@@ -4989,7 +4993,10 @@
       shelf.dataset.open = "true";
     }
     markCurrent();
-    target.scrollIntoView({ behavior: "smooth", block: "start" });
+    // Aimed as a thread is, rather than scrolled to: the files a scroll passes are built as it reaches them, which
+    // pushes the file further down than where the scroll was told to go.
+    reaching = { path: target.dataset.path, seq: null };
+    aim(reaching, 24);
   }
 
   els.pback.addEventListener("click", () => stepThroughWhatIsLeft(false));
