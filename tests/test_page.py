@@ -523,9 +523,14 @@ def test_a_comment_keeps_its_code_and_its_line_breaks(page, desk):
     assert page.locator(".thread .said", has_text="<b>bold</b>").count() >= 1
 
     # What a pull request holds is read for what it says: a badge for the word it stands for, a heading in bold, and the
-    # subscripts that carried the picture gone. The address it was fetched from is never asked for from this page.
+    # subscripts that carried the picture gone. The address it was fetched from is never asked for from this page. The
+    # markers a bot hides in its comment stay hidden, what it folds stays folded behind its summary, and the code it
+    # suggests is said to be a suggestion.
     reported = (
-        "**<sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow)</sub></sub> Mind the shift**\n\nsaid why."
+        "<!-- bot:run=1 -->\n"
+        "**<sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow)</sub></sub> Mind the shift**\n\nsaid why.\n\n"
+        "<details>\n<summary>Prompt for agents</summary>\n\n```text\nfix the shift\n```\n\n</details>\n\n"
+        "```suggestion\n    return x << 1\n```"
     )
     desk.post(
         "/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": reported}]
@@ -535,8 +540,15 @@ def test_a_comment_keeps_its_code_and_its_line_breaks(page, desk):
     told = page.locator(".thread .said", has_text="Mind the shift").first
     assert told.locator("strong").inner_text() == "P2 Mind the shift"
     assert told.locator("img").count() == 0
-    for markup in ("<sub>", "![", "shields.io", "**"):
+    for markup in ("<sub>", "![", "shields.io", "**", "<!--", "bot:run", "<details>", "<summary>"):
         assert markup not in told.inner_text()
+    folded = told.locator("details")
+    assert folded.locator("summary").inner_text() == "Prompt for agents"
+    assert not folded.evaluate("(details) => details.open")
+    assert folded.locator("pre code").text_content() == "fix the shift"
+    suggested = told.locator("pre", has_text="return x << 1")
+    assert suggested.locator("code").inner_text() == "    return x << 1"
+    assert suggested.evaluate("(pre) => getComputedStyle(pre, '::before').content") == '"Suggested change"'
 
 
 def test_a_local_comment_can_be_turned_towards_the_pull_request(page, desk):
