@@ -1121,13 +1121,13 @@ def test_stepping_lands_on_the_file_left_to_review_nearest_the_reader(page):
     page.evaluate("() => window.scrollTo(0, 0)")
     settle(page)
     # A step is aimed at its file over several frames, and where the next one goes is counted from where that aim leaves
-    # the reader, so each is waited out rather than paused over. A step aims the file it takes at the line its own
-    # scroll margin asks for, so that file sitting on that line, as near as the page counts as there, is the aim having
-    # arrived.
+    # the reader, so each is waited out rather than paused over. The file reaches its line a few frames before the aim
+    # is over: the aim checks it stays there, then builds the files it held off and puts the file back. So a step has
+    # arrived once the aim is over and the file sits on the line its scroll margin asks for, as near as the page counts.
     landed = """() => {
       const card = document.getElementById(`f${state.current}`);
       const aimed = parseFloat(getComputedStyle(card).scrollMarginTop);
-      return Math.abs(card.getBoundingClientRect().top - aimed) < LANDED;
+      return reaching === null && Math.abs(card.getBoundingClientRect().top - aimed) < LANDED;
     }"""
 
     # Nothing above the top of the page, and what lies below it is what is left to review.
