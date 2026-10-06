@@ -730,7 +730,8 @@
     border: 1px solid var(--rule);
     border-radius: 6px;
   }
-  .thread .said pre code { font-family: var(--mono); font-size: 11.5px; white-space: pre; }
+  /* The padding of inline code stands before the first line of a block alone, which would set it apart from the rest. */
+  .thread .said pre code { padding: 0; font-family: var(--mono); font-size: 11.5px; white-space: pre; }
   .thread .said pre[data-label]::before {
     content: attr(data-label);
     display: block;

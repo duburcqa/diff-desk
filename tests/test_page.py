@@ -530,7 +530,7 @@ def test_a_comment_keeps_its_code_and_its_line_breaks(page, desk):
         "<!-- bot:run=1 -->\n"
         "**<sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow)</sub></sub> Mind the shift**\n\nsaid why.\n\n"
         "<details>\n<summary>Prompt for agents</summary>\n\n```text\nfix the shift\n```\n\n</details>\n\n"
-        "```suggestion\n    return x << 1\n```"
+        "```suggestion\n    shifted = x << 1\n    return shifted\n```"
     )
     desk.post(
         "/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": reported}]
@@ -546,8 +546,18 @@ def test_a_comment_keeps_its_code_and_its_line_breaks(page, desk):
     assert folded.locator("summary").inner_text() == "Prompt for agents"
     assert not folded.evaluate("(details) => details.open")
     assert folded.locator("pre code").text_content() == "fix the shift"
-    suggested = told.locator("pre", has_text="return x << 1")
-    assert suggested.locator("code").inner_text() == "    return x << 1"
+    suggested = told.locator("pre", has_text="return shifted")
+    assert suggested.locator("code").inner_text() == "    shifted = x << 1\n    return shifted"
+    # Lines indented alike start in the same column, the first one included.
+    starts = suggested.locator("code").evaluate(
+        """(code) => [0, code.textContent.indexOf("\\n") + 1].map((offset) => {
+          const range = document.createRange();
+          range.setStart(code.firstChild, offset);
+          range.setEnd(code.firstChild, offset + 1);
+          return range.getBoundingClientRect().left;
+        })"""
+    )
+    assert abs(starts[0] - starts[1]) < 0.5
     assert suggested.evaluate("(pre) => getComputedStyle(pre, '::before').content") == '"Suggested change"'
 
 
