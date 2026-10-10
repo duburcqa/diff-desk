@@ -63,8 +63,7 @@ here. One going out is uploaded to GitHub's asset store first, and
 the body posted is what was written with a link to each file under it - so a screenshot says the same thing on the pull
 request as it does on this desk. What GitHub gives for a file is kept on the comment, so a send that failed, and the
 send after it, carry the file GitHub already holds rather than another copy of it, and every body compared against the
-pull request - a thread found by the text that opened it, a reply told from one already there - is compared as it was
-posted.
+pull request - a thread not yet known by its id, a reply told from one already there - is compared as it was posted.
 
 A comment also carries where it stands with the pull request, apart from whether it is resolved: `none` when it was
 never meant to go there, `pending` while it still owes a post, `failed` after an attempt worth trying again, `refused`
@@ -224,12 +223,23 @@ def spoken_as(item):
     return "\n\n".join([said for said in (item.get("text") or "", *links) if said])
 
 
+def wordings(item):
+    """Every body one remark or reply may stand under on the pull request: what it says now, and each wording it was
+    edited from.
+
+    Rewording is never carried to the pull request, so the copy there keeps the wording it was sent with. Matching on
+    the current wording alone would read that copy as somebody else's word, brought back beside the reworded one.
+    """
+    return {spoken_as(item)} | {spoken_as(earlier) for earlier in item.get("edits") or ()}
+
+
 THREADS = """
-query($owner: String!, $name: String!, $number: Int!) {
+query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       headRefName
-      reviewThreads(first: 100) {
+      reviewThreads(first: 100, after: $endCursor) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           isResolved
@@ -239,7 +249,7 @@ query($owner: String!, $name: String!, $number: Int!) {
           originalLine
           originalStartLine
           diffSide
-          comments(first: 50) { nodes { databaseId body path createdAt author { login } } }
+          comments(first: 50) { nodes { databaseId body path state createdAt author { login } } }
         }
       }
     }
@@ -251,6 +261,8 @@ RESOLVE = "mutation($thread: ID!) { resolveReviewThread(input: {threadId: $threa
 
 # A comment whose thread is nowhere on the pull request, which is the one failure decided without asking GitHub.
 NOWHERE = "its thread could not be found on the pull request"
+# A reply GitHub holds in a review it never submitted, which it shows to its author and to nobody else.
+PENDING = "GitHub holds it in a pending review, shown to its author alone"
 
 
 class Owing(NamedTuple):
@@ -266,16 +278,22 @@ class Owing(NamedTuple):
 
 
 def review_threads(repo, number):
-    """Every review thread of a pull request and the ref it is opened on, or nothing and why it could not be read."""
+    """Every review thread of a pull request and the ref it is opened on, or nothing and why it could not be read.
+
+    Read page after page: GitHub answers a hundred threads at a time, and a thread left unread is one a send cannot find
+    and a sync takes for never written.
+    """
     owner, _, name = repo.partition("/")
     variables = ["-F", f"owner={owner}", "-F", f"name={name}", "-F", f"number={number}"]
-    done = gen_diff_data.gh("api", "graphql", "-f", f"query={THREADS}", *variables, repeatable=True)
+    query = ["api", "graphql", "--paginate", "--slurp", "-f", f"query={THREADS}", *variables]
+    done = gen_diff_data.gh(*query, repeatable=True)
     if done.returncode != 0:
         return None, " ".join((done.stderr or done.stdout).split())[:300]
     try:
-        pull = json.loads(done.stdout)["data"]["repository"]["pullRequest"]
-        return Reviewed(pull["reviewThreads"]["nodes"], pull.get("headRefName") or f"#{number}"), ""
-    except (KeyError, TypeError, json.JSONDecodeError) as error:
+        pulls = [page["data"]["repository"]["pullRequest"] for page in json.loads(done.stdout)]
+        threads = [thread for pull in pulls for thread in pull["reviewThreads"]["nodes"]]
+        return Reviewed(threads, pulls[0].get("headRefName") or f"#{number}"), ""
+    except (IndexError, KeyError, TypeError, json.JSONDecodeError) as error:
         return None, f"the pull request's threads could not be read: {type(error).__name__}"
 
 
@@ -300,34 +318,22 @@ def resolve_thread(thread):
     return False, "GitHub did not report the thread as resolved"
 
 
-def packed_mutations(wanted):
-    """Ask for every mutation at once, under an alias apiece, and read each answer back against the item that asked.
+def packed_resolutions(wanted):
+    """Resolve every thread at once, under an alias apiece, and read each answer back against the item that asked.
 
     GraphQL carries as many mutations as a document is given aliases for, and answers them one by one - naming, when one
-    of them fails, the alias it failed for. That is what lets a sync spend a single request on everything it owes while
-    each comment still learns the fate of its own reply or resolution.
+    of them fails, the alias it failed for. That is what lets a send spend a single request on every resolution it owes
+    while each comment still learns the fate of its own. A document of nothing but resolutions can be asked twice on a
+    lost answer, each of them landing on the same resolved thread it would have anyway.
     """
     names, fields, arguments = [], [], []
     for index, item in enumerate(wanted):
         names.append(f"$t{index}: ID!")
-        # Passed as variables rather than written into the document, so no comment text can be read as part of it.
+        # Passed as variables rather than written into the document, so nothing read back can be part of it.
         arguments += ["-f", f"t{index}={item.thread}"]
-        if item.body:
-            names.append(f"$b{index}: String!")
-            arguments += ["-f", f"b{index}={item.body}"]
-            fields.append(
-                f"  m{index}: addPullRequestReviewThreadReply"
-                f"(input: {{pullRequestReviewThreadId: $t{index}, body: $b{index}}}) {{ comment {{ id }} }}"
-            )
-        else:
-            fields.append(
-                f"  m{index}: resolveReviewThread(input: {{threadId: $t{index}}}) {{ thread {{ isResolved }} }}"
-            )
+        fields.append(f"  m{index}: resolveReviewThread(input: {{threadId: $t{index}}}) {{ thread {{ isResolved }} }}")
     document = "mutation({}) {{\n{}\n}}".format(", ".join(names), "\n".join(fields))
-    # A document that adds a reply must not be sent twice on a lost answer, since GitHub may have added it already.
-    # One of nothing but resolutions can be, each of them landing on the same resolved thread it would have anyway.
-    carries_reply = any(item.body for item in wanted)
-    done = gen_diff_data.gh("api", "graphql", "-f", f"query={document}", *arguments, repeatable=not carries_reply)
+    done = gen_diff_data.gh("api", "graphql", "-f", f"query={document}", *arguments, repeatable=True)
     try:
         answer = json.loads(done.stdout)
     except json.JSONDecodeError:
@@ -342,29 +348,36 @@ def packed_mutations(wanted):
     whole = blamed.get("") or "GitHub did not answer for it"
     data = answer.get("data") or {}
     outcome = []
-    for index, item in enumerate(wanted):
-        held = data.get(f"m{index}")
-        went = bool(held) if item.body else ((held or {}).get("thread") or {}).get("isResolved") is True
+    for index in range(len(wanted)):
+        went = ((data.get(f"m{index}") or {}).get("thread") or {}).get("isResolved") is True
         outcome.append((True, "") if went else (False, blamed.get(f"m{index}") or whole))
     return outcome
 
 
 def carry_out(repo, number, wanted):
-    """Everything owed to a pull request, asked in one request, and what became of each item in the order it was given.
+    """Everything owed to a pull request, and what became of each item in the order it was given.
 
-    A lone item keeps the plain spelling it has always had, so the simple case is exactly the call it always was.
+    Every reply goes out in a request of its own. Several replies added by one document land in a single review of
+    GitHub's making, which submits the first of them and leaves the others pending: held on the pull request, shown to
+    their author alone, and read by everyone else as never said. Resolutions carry no such review, so they share one
+    request.
     """
-    if not wanted:
-        return []
-    if len(wanted) == 1:
-        one = wanted[0]
-        outcome = [reply_on_pull(repo, number, one.comment, one.body) if one.body else resolve_thread(one.thread)]
-    else:
-        outcome = packed_mutations(wanted)
-    for item, (went, trouble) in zip(wanted, outcome, strict=True):
+    outcome = {}
+    resolutions = []
+    for index, item in enumerate(wanted):
+        if item.body:
+            outcome[index] = reply_on_pull(repo, number, item.comment, item.body)
+        else:
+            resolutions.append(index)
+    if len(resolutions) == 1:
+        outcome[resolutions[0]] = resolve_thread(wanted[resolutions[0]].thread)
+    elif resolutions:
+        outcome.update(zip(resolutions, packed_resolutions([wanted[index] for index in resolutions]), strict=True))
+    answers = [outcome[index] for index in range(len(wanted))]
+    for item, (went, trouble) in zip(wanted, answers, strict=True):
         if not went:
             print(f"{'REPLY' if item.body else 'RESOLVE'} REFUSED {trouble}", flush=True)
-    return outcome
+    return answers
 
 
 class Sent(NamedTuple):
@@ -389,11 +402,55 @@ def owes_there(row):
     return row.get("state") == "resolved"
 
 
-def thread_of(threads, text):
-    """The review thread a remark opened, found by the text of it, which is what this desk posted."""
+def thread_of(threads, note):
+    """The review thread a remark opened: the one it was last found on, or else the one opened by the text it was
+    posted with, under any of its wordings.
+
+    The text alone loses a thread whose author edits the remark there, which a review bot does to mark it addressed, so
+    a thread once found is known by its id from then on.
+    """
+    known = next((node for node in threads if note.get("prThread") and node["id"] == note["prThread"]), None)
+    if known is not None:
+        return known
+    spoken = wordings(note)
     return next(
-        (node for node in threads if node["comments"]["nodes"] and node["comments"]["nodes"][0]["body"] == text), None
+        (node for node in threads if node["comments"]["nodes"] and node["comments"]["nodes"][0]["body"] in spoken), None
     )
+
+
+def visible(said):
+    """The comments of a thread that everyone reading the pull request sees."""
+    return [node for node in said if node.get("state") != "PENDING"]
+
+
+def heard_again(row, thread):
+    """Write onto one comment which thread and which comments of it are its own, the words their authors changed
+    there, and which of its replies GitHub shows to their author alone.
+
+    Run before anything else a sync or a send reads from the thread, so a remark or a reply reworded there is matched by
+    its id and taken for what it now says, rather than brought back as a second remark of the same author.
+    """
+    said = thread["comments"]["nodes"]
+    row["prThread"] = thread["id"]
+    ours = ("you", "session", reader())
+    pairs = [(row, said[0])] if said else []
+    for answer in row.get("replies", []):
+        if answer.get("whisper"):
+            continue
+        node = next((node for node in said[1:] if answer.get("prComment") == node["databaseId"]), None)
+        node = node or next((node for node in said[1:] if node["body"] in wordings(answer)), None)
+        if node is None:
+            continue
+        answer["prComment"] = node["databaseId"]
+        if node.get("state") == "PENDING":
+            answer["github"], answer["error"] = "failed", PENDING
+        pairs.append((answer, node))
+    for item, node in pairs:
+        # Only somebody else's word follows the pull request: this desk's own is rewritten here, and one rewritten there
+        # is still known by its id.
+        if item.get("who") and item["who"] not in ours and node["body"] != item["text"]:
+            item.setdefault("edits", []).append({"at": time.strftime("%Y-%m-%d %H:%M:%S"), "text": item["text"]})
+            item["text"] = node["body"]
 
 
 def owed_by(row, thread, going):
@@ -431,7 +488,7 @@ def note_trouble(row, trouble):
 
 def settle_sent(row, thread, going, step):
     """Write what a send came to onto the comment it was asked for: its replies, and where its resolution stands."""
-    spoken = {node["body"] for node in thread["comments"]["nodes"]}
+    spoken = {node["body"] for node in visible(thread["comments"]["nodes"])}
     for answer in row["replies"]:
         if answer.get("whisper"):
             continue
@@ -701,7 +758,7 @@ def heard_from(row, thread):
     """
     if thread is None:
         return Owed([], [], False, None, [])
-    said = thread["comments"]["nodes"]
+    said = visible(thread["comments"]["nodes"])
     # When the pull request says each of these was written, which is the answer for anything this desk holds without
     # one: a reply brought back before it kept them has a date after all, and it is the pull request that knows it.
     stamps = {node["body"]: said_at(node) for node in said}
@@ -754,6 +811,7 @@ def settle(row, landed, incoming, resolved, stamps=()):
             continue
         if answer["text"] in landed:
             answer["github"] = "posted"
+            answer.pop("error", None)
         if not answer.get("at") and spoken_as(answer) in stamps:
             answer["at"] = stamps[spoken_as(answer)]
     if incoming:
@@ -779,7 +837,7 @@ def going_out(row, said):
     Read at the moment a send is asked for and no later: a reply written afterwards waits for the reader to send the
     thread again, since what leaves this desk is never decided by what happens to be written in it.
     """
-    spoken = {answer["body"] for answer in said}
+    spoken = {answer["body"] for answer in visible(said)}
     return [
         spoken_as(answer)
         for answer in row["replies"]
@@ -790,9 +848,9 @@ def going_out(row, said):
 def brought_in(thread, order, ref):
     """One review thread this desk has no record of, as a comment of its own.
 
-    Recorded as posted, which it is: replies, resolution and deletion all find their thread by the text that opened it,
-    so a comment written on the pull request travels the same way as one written here. It carries its author, which is
-    what tells the reader whose remark it is and keeps this desk from rewriting somebody else's words.
+    Recorded as posted, which it is, and with the ids of the thread and of its comments, by which replies, resolution
+    and deletion find them from then on. It carries its author, which is what tells the reader whose remark it is and
+    keeps this desk from rewriting somebody else's words.
 
     A thread whose lines the diff no longer holds is placed by the lines it was written against; one the pull request
     reports no line for at all is a remark on the file.
@@ -818,11 +876,18 @@ def brought_in(thread, order, ref):
         "state": "resolved" if thread["isResolved"] else "open",
         "github": "posted",
         "replies": [
-            {"who": author_of(answer), "text": answer["body"], "at": said_at(answer), "github": "posted"}
+            {
+                "who": author_of(answer),
+                "text": answer["body"],
+                "at": said_at(answer),
+                "github": "posted",
+                "prComment": answer["databaseId"],
+            }
             for answer in said[1:]
         ],
         "edits": [],
         "prResolve": "done" if thread["isResolved"] else "none",
+        "prThread": thread["id"],
     }
 
 
@@ -872,11 +937,18 @@ def author_of(said):
 
 def incoming(row, said):
     """The replies the thread holds that this desk does not, as replies of its own."""
-    ours = {spoken_as(answer) for answer in row.get("replies", [])} | {spoken_as(row)}
+    ours = wordings(row).union(*(wordings(answer) for answer in row.get("replies", [])))
+    known = {answer.get("prComment") for answer in row.get("replies", [])}
     return [
-        {"who": author_of(answer), "text": answer["body"], "at": said_at(answer), "github": "posted"}
+        {
+            "who": author_of(answer),
+            "text": answer["body"],
+            "at": said_at(answer),
+            "github": "posted",
+            "prComment": answer["databaseId"],
+        }
         for answer in said[1:]
-        if answer["body"] not in ours
+        if answer["body"] not in ours and answer["databaseId"] not in known
     ]
 
 
@@ -1544,11 +1616,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": False, "error": f"comment {seq} is {found['who']}'s word, written on the pull request"})
             return
         # Newest first, so the comment that opened the thread is the last to go.
-        going = (
-            [spoken_as(replies[-1])]
-            if last_only
-            else [spoken_as(answer) for answer in reversed(replies)] + [spoken_as(found)]
-        )
+        going = [replies[-1]] if last_only else [*reversed(replies), found]
         gone = 0
         if found.get("github") == "posted" and order.get("repo") and order.get("pr"):
             reviewed, trouble = review_threads(order["repo"], order["pr"])
@@ -1556,22 +1624,17 @@ class Handler(BaseHTTPRequestHandler):
                 print(f"DROP FAILED {trouble}", flush=True)
                 self._json({"ok": False, "error": trouble})
                 return
-            thread = next(
-                (
-                    node
-                    for node in reviewed.threads
-                    if node["comments"]["nodes"] and node["comments"]["nodes"][0]["body"] == spoken_as(found)
-                ),
-                None,
-            )
-            there = {
-                answer["body"]: answer["databaseId"]
-                for answer in (thread or {"comments": {"nodes": []}})["comments"]["nodes"]
-            }
-            for text in going:
-                if text not in there:
+            thread = thread_of(reviewed.threads, found)
+            said = (thread or {"comments": {"nodes": []}})["comments"]["nodes"]
+            there = {answer["body"]: answer["databaseId"] for answer in said}
+            ids = set(there.values())
+            for item in going:
+                # By its id once known, else under the wording it was sent with, which a rewording here leaves there.
+                comment = item.get("prComment") if item.get("prComment") in ids else None
+                comment = comment or next((there[text] for text in wordings(item) if text in there), None)
+                if comment is None:
                     continue
-                went, trouble = delete_comment(order["repo"], there[text])
+                went, trouble = delete_comment(order["repo"], comment)
                 if not went:
                     print(f"DROP FAILED {trouble}", flush=True)
                     self._json({"ok": False, "error": trouble, "deleted": gone})
@@ -1696,15 +1759,14 @@ class Handler(BaseHTTPRequestHandler):
     def _carry_threads(self, order, carrying):
         """Carry out what these threads owe the pull request: the replies it does not hold, and their resolutions.
 
-        Every thread is read in one look at the pull request and asked for in one request, so sending several costs
-        what sending one does.
+        Every thread is read in one look at the pull request, and what they owe is asked for as `carry_out` says.
         """
         if not carrying:
             return 0, 0, ""
         reviewed, trouble = review_threads(order["repo"], order["pr"])
         owing, plans = [], []
         for row in carrying:
-            thread = None if reviewed is None else thread_of(reviewed.threads, spoken_as(row))
+            thread = None if reviewed is None else thread_of(reviewed.threads, row)
             if thread is None:
                 trouble = trouble or NOWHERE
                 # Written onto the comment, so the reader sees on the thread why the last send did not land: nothing
@@ -1715,6 +1777,7 @@ class Handler(BaseHTTPRequestHandler):
                             note_trouble(held, trouble)
                             touched(fresh, held, "session")
                 continue
+            heard_again(row, thread)
             going = going_out(row, thread["comments"]["nodes"])
             asked = owed_by(row, thread, going)
             plans.append((row["seq"], thread, going, len(owing), len(asked)))
@@ -1729,6 +1792,7 @@ class Handler(BaseHTTPRequestHandler):
                 trouble = trouble or step.trouble
                 for held in fresh:
                     if held["seq"] == seq:
+                        heard_again(held, thread)
                         settle_sent(held, thread, going, step)
                         touched(fresh, held, "session")
         if replies or resolved:
@@ -1740,8 +1804,7 @@ class Handler(BaseHTTPRequestHandler):
 
         A sync only listens: replies come back, a thread resolved there is closed here since the pull request is the
         copy everyone else reads, and threads written there arrive as comments of their own. What this desk holds goes
-        out when the reader sends that thread, never as a consequence of a sync. A thread is matched by the body of the
-        comment that opened it, which is the text this desk posted.
+        out when the reader sends that thread, never as a consequence of a sync. Threads are matched by `thread_of`.
         """
         order = self._body()
         reviewed, trouble = review_threads(order["repo"], order["pr"])
@@ -1756,24 +1819,30 @@ class Handler(BaseHTTPRequestHandler):
             for row in rows
             if row.get("github") == "posted" and row.get("state") != "deleted" and under_review(row, order)
         }
-        theirs = {}
-        for thread in reviewed.threads:
-            said = thread["comments"]["nodes"]
-            if said:
-                theirs[said[0]["body"]] = thread
         # Threads opened on the pull request itself, which is where a comment this desk never wrote comes from. Matched
-        # by the same body text a thread of its own is matched by, so a second sync finds them already here.
-        known = {spoken_as(row) for row in rows}
-        arriving = [thread for body, thread in theirs.items() if body not in known]
-        found = {seq: heard_from(row, theirs.get(spoken_as(row))) for seq, row in posted.items()}
-        brought = sum(len(step.incoming) for step in found.values())
-        closed = len([seq for seq, step in found.items() if step.settled and posted[seq].get("state") != "resolved"])
+        # the way a thread of its own is matched, so a second sync finds them already here.
+        known = set().union(*(wordings(row) for row in rows))
+        threads_known = {row.get("prThread") for row in rows if under_review(row, order)}
+        arriving = [
+            thread
+            for thread in reviewed.threads
+            if thread["comments"]["nodes"]
+            and thread["id"] not in threads_known
+            and thread["comments"]["nodes"][0]["body"] not in known
+        ]
+        threads = {seq: thread_of(reviewed.threads, row) for seq, row in posted.items()}
+        brought, closed = 0, 0
         with changing() as fresh:
             for row in fresh:
-                step = found.get(row["seq"])
-                if step is None:
+                if row["seq"] not in posted:
                     continue
+                thread = threads[row["seq"]]
+                if thread is not None:
+                    heard_again(row, thread)
+                step = heard_from(row, thread)
                 was_open = row.get("state") != "resolved"
+                brought += len(step.incoming)
+                closed += 1 if step.settled and was_open else 0
                 settle(row, step.landed, step.incoming, step.settled, step.stamps)
                 # A reply brought back from the pull request is somebody else's word, so it is news for this side, and
                 # so is a thread somebody closed there. A sync that found neither is not news, and saying it is would

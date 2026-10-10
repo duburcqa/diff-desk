@@ -41,6 +41,11 @@ with spent.with_suffix(".lock").open("w") as held:
     spent.write_text(json.dumps(kept))
 # Whatever is being piped in is left unread: only a posted review is given anything, and the calls that resolve a
 # repository inherit a standard input that never ends, which reading would wait on for good.
-sys.stdout.write(wanted.get("out", ""))
+# Asked to slurp its pages, gh answers them as one array: a rule carrying `pages` answers several, and one carrying a
+# plain answer is the only page.
+said = wanted.get("out", "")
+if "--slurp" in sys.argv and not wanted.get("code"):
+    said = json.dumps(wanted["pages"]) if "pages" in wanted else f"[{said}]"
+sys.stdout.write(said)
 sys.stderr.write(wanted.get("err", ""))
 raise SystemExit(wanted.get("code", 0))
