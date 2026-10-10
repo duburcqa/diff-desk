@@ -823,7 +823,7 @@ def test_sending_a_thread_resolves_there_what_was_closed_here(desk):
     assert {row["seq"]: row for row in desk.get("/comments")}[seq]["prResolve"] == "done"
 
 
-def test_a_send_asks_for_everything_the_thread_owes_in_one_request_and_answers_for_each(desk):
+def test_a_send_posts_each_reply_alone_and_answers_for_each(desk):
     made = desk.post(
         "/comments",
         {
@@ -853,35 +853,32 @@ def test_a_send_asks_for_everything_the_thread_owes_in_one_request_and_answers_f
             ]
         },
     }
-    # The three replies, then the resolution. The second reply is refused, and GitHub says so naming its alias.
-    answered = {
-        "data": {
-            "m0": {"comment": {"id": "C_first"}},
-            "m1": None,
-            "m2": {"comment": {"id": "C_third"}},
-            "m3": {"thread": {"isResolved": True}},
-        },
-        "errors": [{"path": ["m1"], "message": "Body is too long (maximum is 65536 characters)"}],
-    }
+    # The three replies, then the resolution. The second reply is refused.
     desk.github_answers(
         rules=[
             {
                 "match": "reviewThreads",
                 "out": json.dumps({"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": [thread]}}}}}),
             },
-            {"match": "addPullRequestReviewThreadReply", "out": json.dumps(answered), "code": 1},
+            {"match": "second of three", "code": 1, "err": "Body is too long (maximum is 65536 characters) (HTTP 422)"},
+            {"match": "/replies", "out": json.dumps({"id": 901})},
+            {
+                "match": "resolveReviewThread",
+                "out": json.dumps({"data": {"resolveReviewThread": {"thread": {"isResolved": True}}}}),
+            },
         ]
     )
     before = len(desk.github_calls())
     outcome = desk.post("/publish", {"seq": [seq], "repo": "someone/somewhere", "pr": 21})
     calls = desk.github_calls()[before:]
-    # The thread read, then one request carrying everything it owes, however much that is.
-    assert len(calls) == 2
-    assert all(text in calls[1] for text in ("first of three", "second of three", "third of three"))
-    assert "resolveReviewThread" in calls[1]
+    # Several replies added by one request land in one review that GitHub leaves pending past its first comment, shown
+    # to their author alone, so every reply is a request of its own.
+    assert len([call for call in calls if "/replies" in call]) == 3
+    assert not any("addPullRequestReviewThreadReply" in call for call in calls)
+    assert any("resolveReviewThread" in call for call in calls)
     assert (outcome["replies"], outcome["resolved"]) == (2, 1)
 
-    # Each reply is told the fate of its own mutation rather than of the request it was asked for in.
+    # Each reply is told the fate of its own request.
     row = {row["seq"]: row for row in desk.get("/comments")}[seq]
     assert [answer["github"] for answer in row["replies"]] == ["posted", "failed", "posted"]
     assert "too long" in row["replies"][1]["error"]
@@ -986,24 +983,28 @@ def test_a_lost_answer_is_asked_again_only_where_asking_twice_is_harmless(desk):
     assert outcome["replies"] == 0
     assert {row["seq"]: row for row in desk.get("/comments")}[seq]["replies"][0]["github"] == "failed"
 
-    # A document carrying that reply is no more repeatable than the reply was.
+    # Resolutions are asked again, since a thread resolved twice is resolved all the same.
     desk.post("/resolve", {"seq": [seq], "who": "you"})
     desk.github_answers(
         rules=[
             {"match": "reviewThreads", "out": json.dumps(threads)},
-            {"match": "addPullRequestReviewThreadReply", **reset},
-            {"match": "addPullRequestReviewThreadReply", "out": json.dumps({"data": {"m0": {}, "m1": {}}})},
+            {"match": "/replies", **reset},
+            {"match": "/replies", "out": json.dumps({"id": 971})},
+            {"match": "resolveReviewThread", **reset},
+            {
+                "match": "resolveReviewThread",
+                "out": json.dumps({"data": {"resolveReviewThread": {"thread": {"isResolved": True}}}}),
+            },
         ]
     )
     before = len(desk.github_calls())
     assert desk.post("/publish", {"seq": [seq], "repo": "someone/somewhere", "pr": 23})["replies"] == 0
     calls = desk.github_calls()[before:]
-    assert len([call for call in calls if "addPullRequestReviewThreadReply" in call]) == 1
+    assert len([call for call in calls if "/replies" in call]) == 1
+    assert len([call for call in calls if "resolveReviewThread" in call]) == 2
     row = {row["seq"]: row for row in desk.get("/comments")}[seq]
     assert row["replies"][0]["github"] == "failed"
-    # Both halves of the document are reported to the comment that asked for them, with what came back.
-    assert row["prResolve"] == "failed"
-    assert "connection reset" in row["prResolveError"]
+    assert row["prResolve"] == "done"
 
 
 def test_a_refusal_from_github_is_taken_at_its_first_word(desk):
@@ -1119,11 +1120,21 @@ def test_a_sync_brings_replies_back_and_a_send_carries_ours_out(desk):
     assert len(desk.github_calls()) == asked
     assert kept["replies"][0]["editedAfterPost"] is True
 
-    # Syncing again brings nothing back twice, a reply reworded here included.
+    # Syncing again brings nothing back twice, a reply reworded here included: the thread holds the wording it was sent
+    # with, which is this desk's own reply under an earlier wording.
+    said_there = threads["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"][0]["comments"]["nodes"]
+    said_there.append(
+        {"databaseId": 777, "body": "written here, not there yet", "path": "sample.py", "author": {"login": "duburcqa"}}
+    )
+    desk.github_answers(rules=[{"match": "reviewThreads", "out": json.dumps(threads)}])
     steady = {row["seq"]: row for row in desk.get("/comments")}[seq]["event"]
     assert desk.post("/sync", {"repo": "someone/somewhere", "pr": 4})["brought"] == 0
     again = {row["seq"]: row for row in desk.get("/comments")}[seq]
     assert len(again["replies"]) == 2
+    # Nor a reply reworded on the pull request by whoever sent it, which stays the one reply it was.
+    said_there[-1]["body"] = "written there, reworded on GitHub"
+    desk.github_answers(rules=[{"match": "reviewThreads", "out": json.dumps(threads)}])
+    assert desk.post("/sync", {"repo": "someone/somewhere", "pr": 4})["brought"] == 0
     # A sync that found nothing said nothing, so it leaves the thread where it stood in what is recent: were it to
     # count as news, every synced thread would outrank the answers written here since, however much newer they are.
     assert again["event"] == steady
@@ -1132,6 +1143,11 @@ def test_a_sync_brings_replies_back_and_a_send_carries_ours_out(desk):
         {"comments": [{"branch": "feature", "path": "sample.py", "line": 19, "side": "new", "text": "said after"}]},
     )
     assert {row["seq"]: row for row in desk.get("/comments")}[written["seqs"][0]]["event"] > again["event"]
+
+    # A remark reworded after it was posted still opens its thread there, so a sync does not take it in a second time.
+    assert desk.post("/edit", {"seq": seq, "text": "worth syncing, reworded"})["ok"] is True
+    synced = desk.post("/sync", {"repo": "someone/somewhere", "pr": 4})
+    assert (synced["brought"], synced["took"]) == (0, 0)
 
 
 def test_a_comment_github_rejects_is_kept_and_not_retried(desk):
@@ -1221,11 +1237,10 @@ def test_a_comment_settled_here_is_not_sent_unless_it_is_asked_for(desk):
                 "match": "reviewThreads",
                 "out": json.dumps({"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": [thread]}}}}}),
             },
+            {"match": "/replies", "out": json.dumps({"id": 815})},
             {
-                "match": "addPullRequestReviewThreadReply",
-                "out": json.dumps(
-                    {"data": {"m0": {"comment": {"id": "C_settled"}}, "m1": {"thread": {"isResolved": True}}}}
-                ),
+                "match": "resolveReviewThread",
+                "out": json.dumps({"data": {"resolveReviewThread": {"thread": {"isResolved": True}}}}),
             },
         ],
     )
@@ -1310,6 +1325,16 @@ def test_replies_added_at_the_same_time_all_survive(desk):
 
 
 def test_the_comments_survive_as_a_readable_log(desk):
+    # Written here, so the log holds both files whichever tests ran before this one.
+    desk.post(
+        "/comments",
+        {
+            "comments": [
+                {"branch": "feature", "path": path, "line": 1, "side": "new", "text": "kept"}
+                for path in ("sample.py", "added.py")
+            ]
+        },
+    )
     rows = [json.loads(line) for line in (desk.home / "comments.jsonl").read_text().splitlines() if line.strip()]
     assert [row["seq"] for row in rows] == list(range(1, len(rows) + 1))
     assert {row["path"] for row in rows} >= {"sample.py", "added.py"}
@@ -1899,7 +1924,7 @@ def test_syncing_takes_in_the_comments_written_on_the_pull_request(desk):
     desk.post("/publish", {"repo": "someone/somewhere", "pr": 14, "seq": [seq]})
 
     ours = {
-        "id": "T_ours",
+        "id": "T_ours_taken",
         "isResolved": False,
         "path": "sample.py",
         "line": 40,
@@ -1921,7 +1946,7 @@ def test_syncing_takes_in_the_comments_written_on_the_pull_request(desk):
     }
     # A reviewer's remark on a range of lines, answered once, and a bot's report the pull request places nowhere.
     theirs = {
-        "id": "T_theirs",
+        "id": "T_theirs_taken",
         "isResolved": False,
         "path": "sample.py",
         "line": 12,
@@ -1949,7 +1974,7 @@ def test_syncing_takes_in_the_comments_written_on_the_pull_request(desk):
         },
     }
     settled = {
-        "id": "T_settled",
+        "id": "T_settled_taken",
         "isResolved": True,
         "path": "sample.py",
         "line": None,
@@ -1978,7 +2003,12 @@ def test_syncing_takes_in_the_comments_written_on_the_pull_request(desk):
             }
         }
     )
-    desk.github_answers(rules=[{"match": "reviewThreads", "out": answer}])
+    # GitHub answers a page of threads at a time, and the thread on the last page is as much the pull request's.
+    pages = [
+        {"data": {"repository": {"pullRequest": {"headRefName": "feature", "reviewThreads": {"nodes": nodes}}}}}
+        for nodes in ([ours, theirs], [settled])
+    ]
+    desk.github_answers(rules=[{"match": "reviewThreads", "pages": pages}])
     outcome = desk.post("/sync", {"repo": "someone/somewhere", "pr": 14})
     assert outcome["took"] == 2
 
@@ -2005,11 +2035,10 @@ def test_syncing_takes_in_the_comments_written_on_the_pull_request(desk):
     desk.github_answers(
         rules=[
             {"match": "reviewThreads", "out": answer},
+            {"match": "/replies", "out": json.dumps({"id": 640})},
             {
-                "match": "addPullRequestReviewThreadReply",
-                "out": json.dumps(
-                    {"data": {"m0": {"comment": {"id": "C_answer"}}, "m1": {"thread": {"isResolved": True}}}}
-                ),
+                "match": "resolveReviewThread",
+                "out": json.dumps({"data": {"resolveReviewThread": {"thread": {"isResolved": True}}}}),
             },
         ]
     )
@@ -2017,7 +2046,7 @@ def test_syncing_takes_in_the_comments_written_on_the_pull_request(desk):
     outcome = desk.post("/publish", {"seq": [brought["seq"]], "repo": "someone/somewhere", "pr": 14})
     calls = desk.github_calls()[before:]
     assert (outcome["ok"], outcome["replies"], outcome["resolved"]) == (True, 1, 1)
-    assert "documented now" in calls[-1]
+    assert any("/replies" in call and "documented now" in call for call in calls)
     assert "resolveReviewThread" in calls[-1]
     assert not any("could we document this?" in call for call in calls[1:])
     carried = {row["seq"]: row for row in desk.get("/comments")}[brought["seq"]]
@@ -2030,6 +2059,64 @@ def test_syncing_takes_in_the_comments_written_on_the_pull_request(desk):
     again = desk.post("/sync", {"repo": "someone/somewhere", "pr": 14})
     assert again["took"] == 0
     assert len([row for row in desk.get("/comments") if row["text"] == "could we document this?"]) == 1
+
+
+def test_a_sync_follows_what_is_edited_and_held_back_on_the_pull_request(desk):
+    thread = {
+        "id": "T_edited",
+        "isResolved": False,
+        "path": "sample.py",
+        "line": 44,
+        "startLine": None,
+        "originalLine": 44,
+        "originalStartLine": None,
+        "diffSide": "RIGHT",
+        "comments": {
+            "nodes": [
+                {"databaseId": 1101, "body": "a bot's report", "path": "sample.py", "author": {"login": "some-bot"}},
+                {"databaseId": 1102, "body": "agreed", "path": "sample.py", "author": {"login": "someone-else"}},
+            ]
+        },
+    }
+    threads = {
+        "data": {"repository": {"pullRequest": {"headRefName": "feature", "reviewThreads": {"nodes": [thread]}}}}
+    }
+    desk.github_answers(rules=[{"match": "reviewThreads", "out": json.dumps(threads)}])
+    assert desk.post("/sync", {"repo": "someone/somewhere", "pr": 15})["took"] == 1
+    seq = next(row["seq"] for row in desk.get("/comments") if row["text"] == "a bot's report")
+    desk.post("/reply", {"seq": seq, "text": "fixed now", "who": "session"})
+    desk.github_answers(
+        rules=[{"match": "reviewThreads", "out": json.dumps(threads)}, {"match": "/replies", "out": "{}"}]
+    )
+    assert desk.post("/publish", {"seq": [seq], "repo": "someone/somewhere", "pr": 15})["replies"] == 1
+
+    # Their authors edit them there, as a review bot does to mark a remark addressed: the remark keeps its thread and
+    # follows the edit, and so does the reply. The reply this desk sent sits in a review GitHub never submitted.
+    said = thread["comments"]["nodes"]
+    said[0]["body"] = "a bot's report\n\nAddressed in abc1234"
+    said[1]["body"] = "agreed, twice"
+    said.append({"databaseId": 1103, "body": "fixed now", "state": "PENDING", "author": {"login": "duburcqa"}})
+    desk.github_answers(rules=[{"match": "reviewThreads", "out": json.dumps(threads)}])
+    edited = desk.post("/sync", {"repo": "someone/somewhere", "pr": 15})
+    assert (edited["took"], edited["brought"]) == (0, 0)
+    row = {row["seq"]: row for row in desk.get("/comments")}[seq]
+    assert row["text"] == "a bot's report\n\nAddressed in abc1234"
+    assert [(reply["who"], reply["text"], reply["github"]) for reply in row["replies"]] == [
+        ("someone-else", "agreed, twice", "posted"),
+        ("session", "fixed now", "failed"),
+    ]
+    assert "pending" in row["replies"][1]["error"]
+
+    # Sent again, it goes out as a reply of its own, which is the copy the thread is read by from then on.
+    desk.github_answers(
+        rules=[{"match": "reviewThreads", "out": json.dumps(threads)}, {"match": "/replies", "out": "{}"}]
+    )
+    assert desk.post("/publish", {"seq": [seq], "repo": "someone/somewhere", "pr": 15})["replies"] == 1
+    said.append({"databaseId": 1104, "body": "fixed now", "author": {"login": "duburcqa"}})
+    desk.github_answers(rules=[{"match": "reviewThreads", "out": json.dumps(threads)}])
+    assert desk.post("/sync", {"repo": "someone/somewhere", "pr": 15})["brought"] == 0
+    row = {row["seq"]: row for row in desk.get("/comments")}[seq]
+    assert [(reply["github"], reply.get("error")) for reply in row["replies"]] == [("posted", None), ("posted", None)]
 
 
 def test_a_whisper_stays_on_the_desk_whatever_the_thread_sends(desk):
@@ -2069,7 +2156,7 @@ def test_a_whisper_stays_on_the_desk_whatever_the_thread_sends(desk):
                 "match": "reviewThreads",
                 "out": json.dumps({"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": [thread]}}}}}),
             },
-            {"match": "addPullRequestReviewThreadReply", "out": json.dumps({"data": {"m0": {"comment": {"id": "C"}}}})},
+            {"match": "/replies", "out": json.dumps({"id": 650})},
         ]
     )
     before = len(desk.github_calls())
