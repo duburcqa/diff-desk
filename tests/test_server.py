@@ -1325,6 +1325,16 @@ def test_replies_added_at_the_same_time_all_survive(desk):
 
 
 def test_the_comments_survive_as_a_readable_log(desk):
+    # Written here, so the log holds both files whichever tests ran before this one.
+    desk.post(
+        "/comments",
+        {
+            "comments": [
+                {"branch": "feature", "path": path, "line": 1, "side": "new", "text": "kept"}
+                for path in ("sample.py", "added.py")
+            ]
+        },
+    )
     rows = [json.loads(line) for line in (desk.home / "comments.jsonl").read_text().splitlines() if line.strip()]
     assert [row["seq"] for row in rows] == list(range(1, len(rows) + 1))
     assert {row["path"] for row in rows} >= {"sample.py", "added.py"}
