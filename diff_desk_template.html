@@ -531,8 +531,8 @@
   tr.a td.ln { background: color-mix(in srgb, var(--add-bg) 70%, var(--surface-sunk)); }
   tr.d td.code, tr.d td.mark { background: var(--del-bg); color: var(--ink); }
   tr.d td.ln { background: color-mix(in srgb, var(--del-bg) 70%, var(--surface-sunk)); }
-  /* The line a find stands on, said over whatever the row's own kind paints it, and the words themselves where the
-     engine can paint a range without touching the syntax colours under it. */
+  /* The line a find stands on, said over whatever the row's own kind paints it, and the words of every hit where the
+     engine can paint a range without touching the syntax colours under it, those of the line it stands on brighter. */
   tr.hit td.code, tr.hit td.mark, tr.hit td.ln {
     background-image: linear-gradient(
       color-mix(in srgb, var(--accent) 30%, transparent),
@@ -540,7 +540,8 @@
     );
   }
   tr.hit td.ln:first-child { box-shadow: inset 2px 0 0 var(--accent); }
-  ::highlight(found) { background-color: color-mix(in srgb, var(--accent) 60%, transparent); color: var(--ink); }
+  ::highlight(found) { background-color: color-mix(in srgb, var(--accent) 28%, transparent); color: var(--ink); }
+  ::highlight(found-hit) { background-color: color-mix(in srgb, var(--accent) 70%, transparent); color: var(--ink); }
   tr.h td { background: var(--surface-sunk); color: var(--muted); border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); padding: 3px 8px; }
   tr.sel td {
     background-image: linear-gradient(
@@ -3895,7 +3896,7 @@
 
   // The browser's own find reads what is on the page, which is the rows built around the reader and none of a folded
   // file. This one reads every line of the diff, and brings the reader to the line it finds.
-  const finding = { hits: [], at: -1 };
+  const finding = { hits: [], byPath: new Map(), at: -1 };
 
   // How the box is read: in its case, as whole words, as a pattern. Off by default, as the browser's own find.
   const modes = { matchCase: false, wholeWord: false, regex: false };
@@ -3929,10 +3930,30 @@
     return hits;
   }
 
-  // The words found, painted as a range over the code cell's text, which leaves the syntax colours under them alone.
-  // Engines without the highlight registry paint the row alone.
-  function markWords(row, pattern, side) {
-    if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
+  // The row a hit stands on in a built card, or null. The semantic view lines its rows up by statement rather than in
+  // diff order, so a line is found there by its number.
+  function hitRow(card, hit) {
+    const semantic = card.querySelector(":scope > .body table.aligned");
+    return semantic
+      ? semantic.querySelector(`tr[data-${hit.side}-no="${hit.line}"]`)
+      : card.querySelector(`:scope > .body tr[data-seq="${hit.order}"]`);
+  }
+
+  // The words found, painted as ranges over the code cell's text, which leaves the syntax colours under them alone.
+  // Engines without the highlight registry paint the line the reader is on alone.
+  const canMark = "highlights" in CSS && typeof Highlight !== "undefined";
+  const foundMarks = canMark ? new Highlight() : null;
+  const hitMarks = canMark ? new Highlight() : null;
+  if (canMark) {
+    hitMarks.priority = 1;
+    CSS.highlights.set("found", foundMarks);
+    CSS.highlights.set("found-hit", hitMarks);
+  }
+  // The ranges painted in each file, so a file built again as the reader scrolls trades its old ones for new ones.
+  const marked = new Map();
+
+  // Every place the pattern matches in the code of a row.
+  function wordRanges(row, pattern, side) {
     const nodes = [];
     let text = "";
     // A row of the semantic view holds both versions, and the words found are in the one the line belongs to.
@@ -3943,22 +3964,52 @@
       nodes.push({ node, start: text.length });
       text += node.data;
     }
-    const found = pattern.exec(text);
-    if (!found || !found[0].length) return;
-    const at = found.index;
     const spot = (offset) => {
       const held = nodes.filter((entry) => entry.start <= offset).pop();
       return [held.node, Math.min(offset - held.start, held.node.data.length)];
     };
-    const range = new Range();
-    range.setStart(...spot(at));
-    range.setEnd(...spot(at + found[0].length));
-    CSS.highlights.set("found", new Highlight(range));
+    const ranges = [];
+    for (const found of text.matchAll(new RegExp(pattern.source, `${pattern.flags}g`))) {
+      if (!found[0].length) continue;
+      const range = new Range();
+      range.setStart(...spot(found.index));
+      range.setEnd(...spot(found.index + found[0].length));
+      ranges.push(range);
+    }
+    return ranges;
+  }
+
+  // Paints every hit among the rows a card has built, and nothing once the find bar is closed. Called whenever the
+  // rows of a card are built or let go of, since the ranges over the old ones paint nothing.
+  function markFile(card) {
+    if (!canMark) return;
+    const path = card.dataset.path;
+    for (const range of marked.get(path) || []) foundMarks.delete(range);
+    marked.delete(path);
+    const pattern = wanted();
+    if (els.find.hidden || !pattern) return;
+    const ranges = [];
+    for (const hit of finding.byPath.get(path) || []) {
+      const row = hitRow(card, hit);
+      if (row) ranges.push(...wordRanges(row, pattern, hit.side));
+    }
+    for (const range of ranges) foundMarks.add(range);
+    marked.set(path, ranges);
+  }
+
+  function markAll() {
+    for (const card of document.querySelectorAll("section.file")) markFile(card);
   }
 
   function unmarkHit() {
     for (const old of document.querySelectorAll("tr.hit")) old.classList.remove("hit");
-    if ("highlights" in CSS) CSS.highlights.delete("found");
+    if (canMark) hitMarks.clear();
+  }
+
+  // Where the diff starts being visible, under the header and the find bar hung below it.
+  function viewTop() {
+    const header = document.querySelector("header").getBoundingClientRect().bottom;
+    return els.find.hidden ? header : Math.max(header, els.find.getBoundingClientRect().bottom);
   }
 
   function showHit() {
@@ -3978,23 +4029,27 @@
     folds.set(hit.path, { digest: card.dataset.digest, open: true, upTo: latest() });
     const held = drawn.get(card);
     if (held) fillBody(card, held.file, held.index);
-    // The semantic view lines its rows up by statement rather than in diff order, so a line is found there by its number.
-    const semantic = card.querySelector(":scope > .body table.aligned");
-    const row = semantic
-      ? semantic.querySelector(`tr[data-${hit.side}-no="${hit.line}"]`)
-      : card.querySelector(`:scope > .body tr[data-seq="${hit.order}"]`);
+    const row = hitRow(card, hit);
     if (!row) return;
     if (row.hidden) openFold(row.closest("tbody"), row.dataset.fold);
     row.classList.add("hit");
-    markWords(row, pattern, hit.side);
-    row.scrollIntoView({ block: "center" });
+    if (canMark) for (const range of wordRanges(row, pattern, hit.side)) hitMarks.add(range);
+    // The view moves only for a line out of sight: hits already on screen stay where the reader is following them.
+    const box = row.getBoundingClientRect();
+    if (box.top < viewTop() || box.bottom > window.innerHeight) row.scrollIntoView({ block: "center" });
   }
 
   function findAgain(step) {
     finding.hits = findAll(wanted());
+    finding.byPath.clear();
+    for (const hit of finding.hits) {
+      if (!finding.byPath.has(hit.path)) finding.byPath.set(hit.path, []);
+      finding.byPath.get(hit.path).push(hit);
+    }
     if (!finding.hits.length) finding.at = -1;
     else if (step === undefined) finding.at = 0;
     else finding.at = (Math.max(finding.at, 0) + step + finding.hits.length) % finding.hits.length;
+    markAll();
     showHit();
   }
 
@@ -4013,6 +4068,7 @@
     els.fq.blur();
     els.find.hidden = true;
     unmarkHit();
+    markAll();
   }
 
   function movePick(step) {
@@ -4715,7 +4771,10 @@
     body.dataset.filled = "true";
     body.style.minHeight = "";
     body.replaceChildren();
-    if (semanticOn() && fillSemantic(body, file)) return;
+    if (semanticOn() && fillSemantic(body, file)) {
+      markFile(wrap);
+      return;
+    }
     if (file.binary) {
       const note = document.createElement("div");
       note.className = "empty";
@@ -4844,6 +4903,7 @@
       table.append(tbody);
       body.append(table);
     }
+    markFile(wrap);
   }
 
   function releaseBody(wrap) {
@@ -4861,6 +4921,7 @@
     if (across && of) widths.set(of.file.path, across);
     delete body.dataset.filled;
     body.replaceChildren();
+    markFile(wrap);
     // Its lines reached this far across, so something has to go on reaching it: emptied, the card would scroll no
     // further than its own edge, and the horizontal scrollbar would come and go with every settle as the reader
     // passes - on a card they never scrolled sideways at all.

@@ -1511,7 +1511,7 @@ def test_text_found_in_the_semantic_view_is_marked_on_its_line_and_side(page):
     page.wait_for_selector("#find:not([hidden])")
     marked = """() => {
       const row = document.querySelector('tr.hit');
-      const found = 'highlights' in CSS ? CSS.highlights.get('found') : null;
+      const found = 'highlights' in CSS ? CSS.highlights.get('found-hit') : null;
       const range = found ? [...found][0] : null;
       const cell = range ? range.startContainer.parentElement.closest('td.code') : null;
       return {
@@ -2362,7 +2362,7 @@ def test_text_is_found_across_the_whole_diff_folded_files_included(page):
         painted = page.evaluate(
             """() => {
               const cell = document.querySelector('tr.hit td.code');
-              const found = 'highlights' in CSS ? CSS.highlights.get('found') : null;
+              const found = 'highlights' in CSS ? CSS.highlights.get('found-hit') : null;
               const words = found ? [...found].map((range) => range.toString()) : null;
               const box = getComputedStyle(document.getElementById('fq'));
               const lum = (node) => {
@@ -2434,6 +2434,32 @@ def test_text_is_found_across_the_whole_diff_folded_files_included(page):
         page.locator("#hidedone").click()
         page.wait_for_function("() => !document.body.classList.contains('hide-done')")
         card.locator("input[type=checkbox]").uncheck()
+
+
+def test_every_hit_is_marked_and_one_in_sight_keeps_the_view(page):
+    page.keyboard.press("Control+f")
+    page.wait_for_selector("#find:not([hidden])")
+    page.locator("#fq").fill("rewritten")
+    page.wait_for_function("() => document.getElementById('fcount').textContent.endsWith('/9')")
+    # Stepping to a hit already in sight leaves the view where it is, so the hits the reader follows stay put.
+    while page.locator("tr.hit").evaluate("row => row.closest('section.file').dataset.path") != "wide.py":
+        page.locator("#fq").press("Enter")
+    # Every hit is marked at once where the engine paints ranges: the whole block rewritten in the file stepped into.
+    marked = page.evaluate(
+        """() => {
+          const found = 'highlights' in CSS ? CSS.highlights.get('found') : null;
+          if (!found) return null;
+          const paths = [...found].map((range) => range.startContainer.parentElement.closest('section.file'));
+          return paths.filter((card) => card && card.dataset.path === 'wide.py').length;
+        }"""
+    )
+    assert marked in (None, 7)
+    scrolled = page.evaluate("() => window.scrollY")
+    page.locator("#fq").press("Enter")
+    assert page.locator("tr.hit").evaluate("row => row.closest('section.file').dataset.path") == "wide.py"
+    assert page.evaluate("() => window.scrollY") == scrolled
+    page.locator("#fq").press("Escape")
+    page.wait_for_selector("#find", state="hidden")
 
 
 def test_the_progress_counts_the_files_the_filter_leaves(page):
