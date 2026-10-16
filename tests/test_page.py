@@ -1188,6 +1188,23 @@ def test_the_path_filter_lists_what_it_matches_for_picking_by_name(page):
     assert page.locator("section.file").count() == len(paths)
 
 
+def test_a_file_pressed_in_the_list_is_taken_through_a_redraw_of_it(page):
+    keys_reach(page)
+    page.keyboard.press("/")
+    page.wait_for_selector("#palette:not([hidden])")
+    listed = page.locator("#picks .pick")
+    wanted = listed.nth(2).get_attribute("data-path")
+    # The diff answering a filter redraws the list behind the reader's back, and a press it lands in the middle of is
+    # still a click on the row it started on.
+    listed.nth(2).hover()
+    page.mouse.down()
+    page.evaluate("() => render()")
+    page.mouse.up()
+    page.wait_for_selector("#palette", state="hidden")
+    reached(page, wanted)
+    assert page.evaluate(NEAREST) == wanted
+
+
 def test_stepping_lands_on_the_file_left_to_review_nearest_the_reader(page):
     page.set_viewport_size({"width": 1200, "height": 500})
     paths = page.evaluate("() => [...document.querySelectorAll('section.file')].map((card) => card.dataset.path)")

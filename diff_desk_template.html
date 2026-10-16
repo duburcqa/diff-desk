@@ -4034,6 +4034,18 @@
   function drawPicks() {
     const shown = visible(view().files);
     picked = Math.min(picked, Math.max(0, shown.length - 1));
+    // The rows a reader is pressing stay the rows they press: a list naming the same files is redrawn in place, so a
+    // press that a redraw lands in the middle of - the diff answering a filter, a pointer moving onto a row - still ends
+    // on the row it started on, which is what makes it a click.
+    const rows = [...els.picks.querySelectorAll(".pick")];
+    if (rows.length && rows.length === shown.length && rows.every((row, order) => row.dataset.path === shown[order].path)) {
+      rows.forEach((row, order) => {
+        row.dataset.on = String(order === picked);
+        row.dataset.done = String(seenState(shown[order]) === "done");
+      });
+      rows[picked].scrollIntoView({ block: "nearest" });
+      return;
+    }
     els.picks.innerHTML = "";
     if (!shown.length) {
       const none = document.createElement("div");
