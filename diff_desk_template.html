@@ -722,7 +722,53 @@
   /* Whose it is, in the voice their replies are read in: the reader's own, or somebody else's from the pull request. */
   .thread .who .by.you { color: var(--add-ink); }
   .thread .who .by.them { color: var(--stale); }
-  .thread .said { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; color: var(--ink); }
+  .thread .said { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: normal; color: var(--ink); }
+  /* What is said reads as text set in blocks: the first paragraph runs on from the name that opens it, and every block
+     after it starts on a line of its own, a little apart from the one above. */
+  .thread .said p { margin: 6px 0 0; }
+  .thread .said .text > p:first-child { display: inline; }
+  .thread .said .heading { margin-top: 10px; font-weight: 600; }
+  .thread .said .heading.h1, .thread .said .heading.h2 { font-size: 13.5px; }
+  .thread .said > .text > .heading:first-child { margin-top: 2px; }
+  /* A list hangs its items off their markers, so a long item wraps under its own words rather than under the dash. */
+  .thread .said ul, .thread .said ol { margin: 4px 0 0; padding-left: 20px; }
+  .thread .said li { margin: 1px 0; padding-left: 2px; }
+  .thread .said li > ul, .thread .said li > ol { margin-top: 1px; }
+  /* An item holding points of its own is a section of the list, so the next one is set a little apart from it. */
+  .thread .said li:has(> ul, > ol) + li { margin-top: 6px; }
+  .thread .said li > p { margin-top: 3px; }
+  .thread .said ul.loose > li + li, .thread .said ol.loose > li + li { margin-top: 5px; }
+  .thread .said ol > li::marker { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .thread .said ul > li::marker { color: var(--muted); }
+  .thread .said li.task { list-style: none; margin-left: -18px; }
+  .thread .said .tick {
+    display: inline-block;
+    width: 11px;
+    height: 11px;
+    margin-right: 6px;
+    vertical-align: -1px;
+    border: 1px solid var(--rule-strong);
+    border-radius: 3px;
+    box-sizing: border-box;
+    background: var(--surface);
+  }
+  .thread .said .tick[data-checked="true"] {
+    border-color: var(--accent);
+    background: var(--accent);
+    box-shadow: inset 0 0 0 2px var(--surface);
+  }
+  .thread .said .inset { white-space: pre; }
+  .thread .said hr { margin: 8px 0 2px; border: 0; border-top: 1px solid var(--rule-strong); }
+  .thread .said .grid { margin-top: 6px; overflow-x: auto; }
+  .thread .said table { border-collapse: collapse; font-size: 12px; }
+  .thread .said th, .thread .said td {
+    padding: 3px 9px;
+    text-align: left;
+    vertical-align: top;
+    border: 1px solid var(--rule-strong);
+  }
+  .thread .said th { font-weight: 600; background: var(--surface-sunk); }
+  .thread .said tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--surface-sunk) 45%, transparent); }
   .thread .said pre {
     margin: 4px 0;
     padding: 6px 8px;
@@ -757,6 +803,8 @@
   .thread.folded .said { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
   .thread.done > .line:first-child .said { color: var(--muted); }
   .thread .reply { padding-left: 10px; border-left: 1px solid currentColor; }
+  /* A reply laid out in blocks would otherwise run into the next one, whose name is all that tells them apart. */
+  .thread .reply + .reply { margin-top: 5px; }
   .thread .reply.session { color: var(--accent); }
   /* A whisper is set apart from the answers around it: it stays on this desk whatever the thread sends. */
   .thread .reply.aside { border-left-style: dashed; }
@@ -808,8 +856,8 @@
     padding: 1px 0 1px 9px;
     border-left: 2px solid var(--rule-strong);
     color: var(--muted);
-    white-space: pre-wrap;
   }
+  .thread blockquote > p:first-child, .whisper blockquote > p:first-child { margin-top: 0; }
   .thread.stale { border-style: dotted; background: var(--stale-bg); }
   .thread.found { outline: 2px solid var(--accent); outline-offset: 1px; }
   body.hide-done .file[data-done="true"][data-reveal="true"] { display: block; }
@@ -2564,14 +2612,30 @@
       .replace(/<img[^>]*\balt="([^"]*)"[^>]*>/gi, "$1")
       .replace(/<\/?(?:sub|sup)\s*\/?>/gi, "");
 
+  // What a mark looks like when it opens and closes on one line. Emphasis needs words on both sides of it, and a
+  // marker typed inside a word (a snake_case name, an a*b product) is part of the word.
+  const MARKS = new RegExp(
+    [
+      String.raw`!?\[[^\]\n]*\]\([^)\s]+\)`,
+      String.raw`\*\*[^*\n]+\*\*`,
+      String.raw`(?<![\w_])__[^_\n]+__(?![\w_])`,
+      String.raw`~~[^~\n]+~~`,
+      String.raw`(?<![\w*])\*(?![\s*])[^*\n]*?[^\s*]\*(?![\w*])`,
+      String.raw`(?<![\w_])_(?![\s_])[^_\n]*?[^\s_]_(?![\w_])`,
+      String.raw`https?:\/\/[^\s<>()]*[^\s<>().,;:!?'"]`,
+    ].join("|"),
+  );
+
   function phrase(into, text) {
     // Bold as bold, a link as a link, and a badge as the word it stands for: assembled as nodes, so nothing said on a
     // pull request can become part of this page.
-    for (const piece of text.split(/(!?\[[^\]\n]*\]\([^)\s]+\)|\*\*[^*\n]+\*\*)/)) {
+    for (const piece of text.split(new RegExp(`(${MARKS.source})`))) {
       if (!piece) continue;
       const badge = piece.match(/^!\[([^\]\n]*)\]\([^)\s]+\)$/);
-      const link = piece.match(/^\[([^\]\n]*)\]\(([^)\s]+)\)$/);
-      const bold = piece.match(/^\*\*([^*\n]+)\*\*$/);
+      const link = piece.match(/^\[([^\]\n]*)\]\(([^)\s]+)\)$/) || piece.match(/^()(https?:\/\/\S+)$/);
+      const bold = piece.match(/^\*\*([^*\n]+)\*\*$/) || piece.match(/^__([^_\n]+)__$/);
+      const struck = piece.match(/^~~([^~\n]+)~~$/);
+      const leaned = piece.match(/^\*([^*\n]+)\*$/) || piece.match(/^_([^_\n]+)_$/);
       if (badge) {
         const word = badge[1].replace(/\s*badge$/i, "").trim();
         if (word) into.append(document.createTextNode(word));
@@ -2582,13 +2646,27 @@
         anchor.rel = "noopener noreferrer";
         anchor.textContent = link[1] || link[2];
         into.append(anchor);
-      } else if (bold) {
+      } else if (bold || struck || leaned) {
         // Read on: a heading from a pull request carries its badge inside the bold rather than beside it.
-        const strong = document.createElement("strong");
-        phrase(strong, bold[1]);
-        into.append(strong);
+        const marked = document.createElement(bold ? "strong" : struck ? "s" : "em");
+        phrase(marked, (bold || struck || leaned)[1]);
+        into.append(marked);
       } else {
         into.append(document.createTextNode(piece));
+      }
+    }
+  }
+
+  function inline(into, text) {
+    // A code span holds what was typed between its backticks, so it is cut out before any other mark is looked for.
+    for (const piece of text.split(/(`[^`\n]+`)/)) {
+      if (!piece) continue;
+      if (piece.length > 2 && piece.startsWith("`") && piece.endsWith("`")) {
+        const code = document.createElement("code");
+        code.textContent = piece.slice(1, -1);
+        into.append(code);
+      } else {
+        phrase(into, piece);
       }
     }
   }
@@ -2599,7 +2677,8 @@
       .replace(/```[a-z0-9+#-]*/gi, " ")
       .replace(/!\[([^\]\n]*)\]\([^)\s]+\)/g, (whole, alt) => alt.replace(/\s*badge$/i, ""))
       .replace(/\[([^\]\n]*)\]\([^)\s]+\)/g, "$1")
-      .replace(/\*\*/g, "")
+      .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+      .replace(/\*\*|~~/g, "")
       .replace(/`/g, "")
       .replace(/\s+/g, " ")
       .trim();
@@ -2636,10 +2715,153 @@
     return runs.map(([quoted, said]) => [quoted, quoted ? said : said.replace(/^\n/, "").replace(/\n$/, "")]);
   }
 
+  const LIST_ITEM = /^(\s*)([-*+]|\d{1,9}[.)])(\s+)(.*)$/;
+  const RULE = /^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/;
+  const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/;
+  const TASK = /^\[([ xX])\]\s+/;
+
+  // The cells of a table row: the pipes at either end are its edges, and an escaped pipe is part of a cell.
+  const cells = (line) =>
+    line
+      .trim()
+      .replace(/^\|/, "")
+      .replace(/(?<!\\)\|$/, "")
+      .split(/(?<!\\)\|/)
+      .map((cell) => cell.trim().replace(/\\\|/g, "|"));
+
+  function table(host, lines) {
+    // The line under the head says how each column is aligned, and a row is as wide as the head whatever it holds.
+    const [head, divider, ...rows] = lines.map(cells);
+    const aligns = divider.map((cell) =>
+      cell.startsWith(":") && cell.endsWith(":") ? "center" : cell.endsWith(":") ? "right" : "",
+    );
+    const frame = host.appendChild(document.createElement("div"));
+    frame.className = "grid";
+    const grid = frame.appendChild(document.createElement("table"));
+    for (const [index, row] of [head, ...rows].entries()) {
+      const line = (index ? grid.tBodies[0] || grid.createTBody() : grid.createTHead()).insertRow();
+      head.forEach((_, column) => {
+        const cell = line.appendChild(document.createElement(index ? "td" : "th"));
+        if (aligns[column]) cell.style.textAlign = aligns[column];
+        inline(cell, row[column] || "");
+      });
+    }
+  }
+
+  function blocks(host, text) {
+    // The blocks a comment is laid out in, as a pull request lays them out: paragraphs, lists nested by how far they
+    // are indented, headings, rules and tables. A line break inside a paragraph stays where it was put, as it does in a
+    // comment on GitHub, so a reply reads the same in both places.
+    const lines = text.split("\n");
+    // The lists still open, outermost first, each with the column its items' words start at: a line indented that far
+    // belongs to the last item rather than to the paragraph around the list.
+    let lists = [];
+    let paragraph = null;
+    let gap = false;
+    // A line of a paragraph keeps the indentation left once what sets its block in is taken off: a passage copied
+    // from the middle of a line is quoted with the steps its lines had between them.
+    const say = (into, line, inset = 0) => {
+      if (into.childNodes.length) into.append(document.createElement("br"));
+      const kept = line.slice(Math.min(inset, line.match(/^\s*/)[0].length)).trimEnd();
+      const step = kept.match(/^\s*/)[0].length;
+      if (step) {
+        const inset = into.appendChild(document.createElement("span"));
+        inset.className = "inset";
+        inset.textContent = kept.slice(0, step);
+      }
+      inline(into, kept.slice(step));
+    };
+    const fresh = (into) => {
+      paragraph = into.appendChild(document.createElement("p"));
+      return paragraph;
+    };
+    for (let at = 0; at < lines.length; at++) {
+      const line = lines[at];
+      if (!line.trim()) {
+        paragraph = null;
+        gap = true;
+        continue;
+      }
+      const indent = line.match(/^\s*/)[0].length;
+      const innermost = lists[lists.length - 1];
+      const item = !RULE.test(line) && line.match(LIST_ITEM);
+      const heading = line.match(HEADING);
+      const tabled = !item && line.includes("|") && at + 1 < lines.length && /^[\s|:-]+$/.test(lines[at + 1]);
+      if (item) {
+        const ordered = /\d/.test(item[2]);
+        while (lists.length && indent < lists[lists.length - 1].indent) lists.pop();
+        const top = lists[lists.length - 1];
+        // Points typed flush under a numbered item, with no blank line between, are read as the item's own points: that
+        // is what they are written as, and leaving them beside it would cut the numbered list in two.
+        const nested = !gap && top && top.ordered && !ordered && indent === top.indent;
+        if (top && indent < top.content && top.ordered !== ordered && !nested) lists.pop();
+        const parent = lists[lists.length - 1];
+        let list = parent && indent < parent.content && !nested ? parent : null;
+        if (!list) {
+          const element = (parent ? parent.item : host).appendChild(document.createElement(ordered ? "ol" : "ul"));
+          if (ordered && Number.parseInt(item[2], 10) !== 1) element.start = Number.parseInt(item[2], 10);
+          list = { element, ordered, indent, content: indent + item[2].length + item[3].length, item: null };
+          lists.push(list);
+        }
+        list.item = list.element.appendChild(document.createElement("li"));
+        // A loose list, with a blank line between its items, is still one list: the gap only spaces it out.
+        if (gap) list.element.classList.add("loose");
+        let words = item[4];
+        const task = words.match(TASK);
+        if (task) {
+          // Drawn rather than an input: it says what was ticked when it was written, and the page's own checkboxes are
+          // the controls a reader works the review with.
+          const box = list.item.appendChild(document.createElement("span"));
+          box.className = "tick";
+          box.setAttribute("role", "img");
+          box.dataset.checked = String(task[1] !== " ");
+          box.setAttribute("aria-label", task[1] !== " " ? "done" : "to do");
+          list.item.classList.add("task");
+          words = words.slice(task[0].length);
+        }
+        paragraph = list.item.appendChild(document.createElement("span"));
+        say(paragraph, words);
+      } else if (lists.length && !heading && !tabled && (!gap || indent >= innermost.content)) {
+        // Words under an item are the item's: carried on without a break, or a paragraph of its own after one.
+        say(gap || !paragraph ? fresh(innermost.item) : paragraph, line, innermost.content);
+      } else {
+        lists = [];
+        if (heading) {
+          paragraph = null;
+          const title = host.appendChild(document.createElement("p"));
+          title.className = `heading h${heading[1].length}`;
+          inline(title, heading[2]);
+        } else if (RULE.test(line)) {
+          paragraph = null;
+          host.append(document.createElement("hr"));
+        } else if (tabled && cells(line).length === cells(lines[at + 1]).length) {
+          paragraph = null;
+          let end = at + 2;
+          while (end < lines.length && lines[end].includes("|")) end++;
+          table(host, lines.slice(at, end));
+          at = end - 1;
+        } else {
+          say(paragraph || fresh(host), line);
+        }
+      }
+      gap = false;
+    }
+  }
+
+  function prose(host, text) {
+    // A run of quoted lines is what a reply looks like when it answers a passage: shown as the passage it quotes, set
+    // apart from the words answering it, rather than as the marks that were typed. What it quotes is laid out the way
+    // the rest is, quotes inside it included.
+    for (const [quoted, part] of quotes(text)) {
+      if (quoted) prose(host.appendChild(document.createElement("blockquote")), part);
+      else blocks(host, part);
+    }
+  }
+
   function written(host, text) {
-    // Comments are typed by hand, so the little markdown that carries meaning is honoured: a fenced block stays code
-    // with its indentation, backticks stay code, and line breaks stay where they were put. Assembled as nodes rather
-    // than as markup, so nothing a reviewer pastes can become part of the page.
+    // Comments are written in the markdown a pull request reads, so they are laid out the way it lays them out: a
+    // fenced block stays code with its indentation, and the rest is set in paragraphs, lists and tables. Assembled as
+    // nodes rather than as markup, so nothing a reviewer pastes can become part of the page.
     // A folded section, which review bots wrap their longer print in, stays folded behind its summary, and what it
     // holds is written as the rest once opened.
     const folded = spoken(text).match(/<details>\s*(?:<summary>([\s\S]*?)<\/summary>)?([\s\S]*?)<\/details>/i);
@@ -2670,21 +2892,7 @@
           host.append(block);
           return;
         }
-        // A run of quoted lines is what a reply looks like when it answers a passage: shown as the passage it quotes,
-        // set apart from the words answering it, rather than as the marks that were typed.
-        for (const [quoted, part] of quotes(spoken(chunk))) {
-          const into = quoted ? host.appendChild(document.createElement("blockquote")) : host;
-          for (const piece of part.split(/(`[^`\n]+`)/)) {
-            if (!piece) continue;
-            if (piece.length > 2 && piece.startsWith("`") && piece.endsWith("`")) {
-              const code = document.createElement("code");
-              code.textContent = piece.slice(1, -1);
-              into.append(code);
-            } else {
-              phrase(into, piece);
-            }
-          }
-        }
+        prose(host, spoken(chunk));
       });
     return host;
   }

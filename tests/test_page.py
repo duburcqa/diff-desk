@@ -561,6 +561,56 @@ def test_a_comment_keeps_its_code_and_its_line_breaks(page, desk):
     assert suggested.evaluate("(pre) => getComputedStyle(pre, '::before').content") == '"Suggested change"'
 
 
+def test_a_comment_is_laid_out_in_paragraphs_lists_and_tables(page, desk):
+    branch = page.evaluate("() => data.branches[0].ref")
+    # A reply is laid out the way the pull request lays it out: paragraphs, lists nested by indentation and hanging off
+    # their markers, a table with its columns aligned, a heading, and emphasis. A marker typed inside a word is the
+    # word's, and points typed flush under a numbered item are that item's own.
+    laid = (
+        "Every difference:\n\n### Setters\n\n1. Setter on a *rigid* entity\n- main: ~~slept~~ a full reset\n"
+        "- branch: syncs `right away`\n2. Paused step\n   carried on\n\n   a paragraph of its own\n\n"
+        "| entry | main | branch |\n|:--|:-:|--:|\n| `step` | **sleeps** | repaints |\n\n"
+        "- [x] done\n- [ ] snake_case_name and a*b*c stay as typed\n\n---\nsaid at https://example.com/x."
+    )
+    desk.post("/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": laid}])
+    page.reload(wait_until="load")
+    page.wait_for_selector("section.file")
+    told = page.locator(".thread .said", has_text="Every difference").first
+    assert told.locator("p.heading.h3").inner_text() == "Setters"
+    numbered = told.locator("ol")
+    assert numbered.count() == 1
+    assert numbered.locator(":scope > li").count() == 2
+    points = numbered.locator(":scope > li").first.locator(":scope > ul > li")
+    assert points.count() == 2
+    assert points.first.locator("s").inner_text() == "slept"
+    assert points.nth(1).locator("code").inner_text() == "right away"
+    assert numbered.locator(":scope > li").first.locator("em").inner_text() == "rigid"
+    second = numbered.locator(":scope > li").nth(1)
+    assert second.locator(":scope > span").inner_text() == "Paused step\ncarried on"
+    assert second.locator(":scope > p").inner_text() == "a paragraph of its own"
+    # Wrapped words start under the item's first word rather than under its marker.
+    item = points.first.evaluate(
+        """(li) => { const range = document.createRange(); range.selectNodeContents(li);
+          return [range.getClientRects()[0].left, li.getBoundingClientRect().left]; }"""
+    )
+    assert item[0] >= item[1]
+    grid = told.locator("table")
+    assert grid.locator("th").all_inner_texts() == ["entry", "main", "branch"]
+    assert grid.locator("td").all_inner_texts() == ["step", "sleeps", "repaints"]
+    assert grid.locator("td strong").inner_text() == "sleeps"
+    assert [cell.evaluate("(td) => getComputedStyle(td).textAlign") for cell in grid.locator("td").all()] == [
+        "left",
+        "center",
+        "right",
+    ]
+    assert [box.get_attribute("data-checked") for box in told.locator("li.task .tick").all()] == ["true", "false"]
+    assert "snake_case_name and a*b*c stay as typed" in told.inner_text()
+    assert told.locator("hr").count() == 1
+    assert told.locator("a", has_text="https://example.com/x").get_attribute("href") == "https://example.com/x"
+    for markup in ("###", "~~", "|", "[x]", "**"):
+        assert markup not in told.inner_text()
+
+
 def test_a_local_comment_can_be_turned_towards_the_pull_request(page, desk):
     branch = page.evaluate("() => data.branches[0].ref")
     # Turning a comment towards a pull request needs one to be there, so this arms its own rather than reading
