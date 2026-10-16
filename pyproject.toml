@@ -3,7 +3,7 @@ line-length = 120
 
 [tool.ruff.lint]
 # Pinned rather than inherited, so a newer ruff does not change what passes.
-select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "PL", "DTZ", "BLE"]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF", "PL", "DTZ", "BLE"]
 
 [tool.ruff.lint.per-file-ignores]
 # A status code or a row count read straight from the assertion is clearer than a name for it.
@@ -19,3 +19,5 @@ skip-magic-trailing-comma = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-xsv"
+# The groups a parallel run keeps on one worker, declared here as well since a run without pytest-xdist reads them too.
+markers = ["xdist_group(name): run on the same worker as the other tests of the group under pytest-xdist"]

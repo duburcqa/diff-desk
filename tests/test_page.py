@@ -71,6 +71,31 @@ def settle(page):
     page.evaluate("() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))")
 
 
+def at_rest(page, frames=5):
+    """Wait for the page to stop moving: where it is scrolled and where the hit stands unchanged over several frames.
+
+    A step leaves work behind it - the files it brought near are built, and the boxes in them sized to what they hold a
+    frame later - and the browser holds the reader's place through it only to the pixel. Where a step left the reader
+    is read once that is over.
+    """
+    page.wait_for_function(
+        """(frames) => new Promise((done) => {
+          let last = null;
+          let still = 0;
+          const look = () => {
+            const hit = document.querySelector('tr.hit');
+            const now = `${window.scrollY}|${hit ? hit.getBoundingClientRect().top : ''}`;
+            still = now === last ? still + 1 : 0;
+            last = now;
+            if (still >= frames) done(true);
+            else requestAnimationFrame(look);
+          };
+          requestAnimationFrame(look);
+        })""",
+        arg=frames,
+    )
+
+
 def comments_reach(page):
     """Wait for the page to have read the comments, which it draws its cards a second time for.
 
@@ -2416,7 +2441,7 @@ def test_text_is_found_across_the_whole_diff_folded_files_included(page):
               const words = found ? [...found].map((range) => range.toString()) : null;
               const box = getComputedStyle(document.getElementById('fq'));
               const lum = (node) => {
-                const [r, g, b] = getComputedStyle(node).backgroundColor.match(/[\d.]+/g).map(Number);
+                const [r, g, b] = getComputedStyle(node).backgroundColor.match(/[\\d.]+/g).map(Number);
                 const lin = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
                 return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
               };
@@ -2504,9 +2529,11 @@ def test_every_hit_is_marked_and_one_in_sight_keeps_the_view(page):
         }"""
     )
     assert marked in (None, 7)
+    at_rest(page)
     scrolled = page.evaluate("() => window.scrollY")
     page.locator("#fq").press("Enter")
     assert page.locator("tr.hit").evaluate("row => row.closest('section.file').dataset.path") == "wide.py"
+    at_rest(page)
     assert page.evaluate("() => window.scrollY") == scrolled
     page.locator("#fq").press("Escape")
     page.wait_for_selector("#find", state="hidden")
