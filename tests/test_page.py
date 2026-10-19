@@ -716,7 +716,15 @@ def test_code_and_comments_stay_legible_in_every_theme(page, desk):
     branch = page.evaluate("() => data.branches[0].ref")
     made = desk.post(
         "/comments",
-        [{"branch": branch, "path": "sample.py", "line": SECOND_EDIT, "side": "new", "text": "words, not a code line"}],
+        [
+            {
+                "branch": branch,
+                "path": "sample.py",
+                "line": SECOND_EDIT,
+                "side": "new",
+                "text": "words, not a code line, see https://example.com/notes",
+            }
+        ],
     )
     page.reload(wait_until="load")
     page.wait_for_selector(f"#note-{made['seq']} .thread")
@@ -750,7 +758,7 @@ def test_code_and_comments_stay_legible_in_every_theme(page, desk):
       };
       const tokens = {};
       for (const name of ["--ink", "--muted", "--faint", "--surface", "--surface-sunk", "--add-ink", "--add-bg",
-                          "--del-ink", "--del-bg", "--rule", "--rule-strong"]) {
+                          "--del-ink", "--del-bg", "--rule", "--rule-strong", "--accent"]) {
         tokens[name] = painted(name);
       }
       probe.remove();
@@ -780,6 +788,10 @@ def test_code_and_comments_stay_legible_in_every_theme(page, desk):
         airAbove: Math.round(box.top - held.top),
         airBelow: Math.round(held.bottom - box.bottom),
         fill: style.backgroundColor,
+        link: (() => {
+          const said = getComputedStyle(thread.querySelector("a"));
+          return { ink: said.color, contrast: against(said.color, style.backgroundColor) };
+        })(),
         edge: style.borderTopColor,
         band: getComputedStyle(row.querySelector("td")).backgroundColor,
         codeFill: getComputedStyle(document.querySelector("tr.a td.code")).backgroundColor,
@@ -826,6 +838,10 @@ def test_code_and_comments_stay_legible_in_every_theme(page, desk):
         # over a dark thread - the one patch a reader cannot read at all.
         assert seen["reply"]["ink"] == seen["tokens"]["--ink"]
         assert seen["reply"]["ground"] == seen["tokens"]["--surface"]
+        # A link is painted in the theme's accent rather than the browser's own blue, which is pitched for a white
+        # ground and all but vanishes on a dark thread.
+        assert seen["link"]["ink"] == seen["tokens"]["--accent"]
+        assert seen["link"]["contrast"] >= 4.5
         # Outlined all round rather than on the left alone, rounded and lifted: a card over the diff, in either theme.
         assert min(seen["outline"]) >= 1
         assert seen["outline"][3] >= 3
