@@ -2211,6 +2211,10 @@ def test_a_comment_whose_line_left_the_diff_is_kept_and_marked(page, desk):
 
 def test_a_release_the_page_never_sees_does_not_leave_it_dragging(page):
     line = rows(page).nth(2)
+    # The comments earlier tests left can push the line near the foot of the view, and a press dragged out of the window
+    # reaches Firefox as a motion with no button held, which ends the drag before the test looks.
+    line.evaluate("node => node.scrollIntoView({block: 'center'})")
+    settle(page)
     line.locator("td.code").first.hover()
     box = line.locator("button.pin").first.bounding_box()
     page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
