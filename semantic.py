@@ -645,6 +645,7 @@ class Layout:
                     if facing is not None:
                         anchors.add((number, facing))
         anchors = longest_rising(anchors)
+        anchors = self.gap_anchors(anchors, old_lines, new_lines, old_info, new_info)
 
         def away(number):
             return old_info[number - 1][0].startswith("moved")
@@ -677,6 +678,38 @@ class Layout:
             "newInfo": new_info,
             "rows": self.fold(rows, old_info, new_info, old_owners),
         }
+
+    @staticmethod
+    def gap_anchors(anchors, old_lines, new_lines, old_info, new_info):
+        """The anchors, with the lines reading the same between two of them paired too.
+
+        Comments and blank lines between statements belong to no statement, so nothing else lines them up: a gap of
+        unchanged comments would show its old lines, then its new ones, as if all of them changed.
+        """
+        said = []
+        old_at, new_at = 1, 1
+        for old_to, new_to in [*anchors, (len(old_lines) + 1, len(new_lines) + 1)]:
+            if old_to >= old_at and new_to >= new_at:
+                # A moved line pairs with nothing (None and False read as no line), and a blank line only extends a
+                # pairing.
+                ours = [
+                    None if old_info[n - 1][0].startswith("moved") else old_lines[n - 1].strip()
+                    for n in range(old_at, old_to)
+                ]
+                theirs = [
+                    False if new_info[n - 1][0].startswith("moved") else new_lines[n - 1].strip()
+                    for n in range(new_at, new_to)
+                ]
+                matcher = difflib.SequenceMatcher(lambda row: not row, ours, theirs, autojunk=False)
+                for i, j, size in matcher.get_matching_blocks():
+                    for step in range(size):
+                        said.extend(
+                            [(old_at + i + step, new_at + j + step), (old_at + i + step + 1, new_at + j + step + 1)]
+                        )
+                old_at, new_at = old_to, new_to
+            if (old_to, new_to) != (len(old_lines) + 1, len(new_lines) + 1):
+                said.append((old_to, new_to))
+        return sorted(set(said))
 
     @staticmethod
     def left_run(numbers, info, away):

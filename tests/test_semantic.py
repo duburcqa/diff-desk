@@ -90,3 +90,13 @@ def test_a_removed_function_folds_behind_a_bar_naming_it():
 def test_a_file_that_does_not_parse_is_left_to_the_line_diff():
     files = semantic.align({"broken.py": ("def f(:\n", "def f():\n    pass\n"), "fine.py": ("x = 1\n", "x = 2\n")})
     assert set(files) == {"fine.py"}
+
+
+def test_unchanged_comments_between_statements_face_each_other():
+    comments = ["", "", "# Kept as it was, across", "# more lines than a gap pairs on its own.", ""]
+    old = code("import os", *comments, "def mean(values, weight):", *body(4))
+    new = code("import os", "import sys", *comments, "def mean(values, weight):", *body(4))
+    lined = semantic.align({"stats.py": (old, new)})["stats.py"]
+    rows = list(rows_of(lined["rows"]))
+    for needle in ("# Kept", "# more"):
+        assert {"old": line_of(old, needle), "new": line_of(new, needle)} in rows
