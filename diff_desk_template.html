@@ -4929,6 +4929,9 @@
           const count = entry.away.filter((number) => lined.oldInfo[number - 1][0] !== "blank").length;
           const inner = foldBar("away", entry.away[0], [`⇢ ${plural(count, "line")} moved to `, ...targetLinks(entry.to)], fold);
           draw(entry.away.map((number) => ({ old: number })), inner);
+        } else if (entry.region && entry.deleted) {
+          // Deleted lines are the change under review, so they are shown rather than summed up behind a bar.
+          draw(entry.region, fold);
         } else if (entry.region) {
           const parts = [`▸ old ${entry.lines[0]}–${entry.lines[1]}: `];
           const said = [];

@@ -1520,7 +1520,8 @@ def test_copying_a_selection_of_lines_yields_the_code_alone(page):
       const rows = [...card.querySelectorAll('.body tr[data-line]')];
       const range = document.createRange();
       range.setStart(rows[0].querySelector('td.code'), 0);
-      range.setEnd(rows[rows.length - 1].querySelector('td.code'), 1);
+      const last = rows[rows.length - 1].querySelector('td.code');
+      range.setEnd(last, last.childNodes.length);
       const selection = window.getSelection();
       selection.removeAllRanges();
       selection.addRange(range);
@@ -3842,6 +3843,11 @@ def test_the_semantic_view_faces_both_versions_and_comments_on_the_line_shown(pa
     edited.wait_for()
     assert edited.locator("td.code").first.inner_text() == "    return 1"
     assert edited.locator("td.code .tok").all_inner_texts() == ["1", "2"]
+    # A deleted class is shown line by line, with no bar to open first.
+    assert card.locator("tr.sfold.region").count() == 0
+    deleted = card.locator("table.aligned tr[data-old-no='6']")
+    assert deleted.is_visible()
+    assert deleted.locator("td.code").first.inner_text() == "class Square:"
     # A file that is no Python is still read as a line diff.
     sample(page).scroll_into_view_if_needed()
     sample(page).locator("tr[data-line]").first.wait_for()

@@ -71,7 +71,12 @@ def repo(tmp_path_factory):
     # A file a couple of directories down, so the file list has a tree to draw and a chain to fold.
     (root / "pkg" / "sub").mkdir(parents=True)
     # Indented, so a test can tell whether copying a selection keeps the indentation that makes code usable.
-    (root / "pkg" / "sub" / "deep.py").write_text("def area(r):\n    return 1\nthree\n")
+    # Followed by a class the branch deletes, long enough for the desk to sum it up rather than show it line by line.
+    # Without a bracket in it, since a test counts what a search for one finds.
+    (root / "pkg" / "sub" / "deep.py").write_text(
+        "def area(r):\n    return 1\nthree\n\n\nclass Square:\n"
+        + "".join(f"    side_{number} = {number}\n" for number in range(1, 9))
+    )
     git(root, "add", "-A")
     git(root, "commit", "-m", "the file under review")
     git(root, "checkout", "-q", "-b", "feature")
