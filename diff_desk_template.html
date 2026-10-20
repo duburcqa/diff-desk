@@ -132,21 +132,6 @@
     border-bottom: 1px solid var(--rule);
   }
 
-  /* How the diff is being looked at: three toggles in one group, read by their icons and said by their titles. */
-  .views { display: flex; gap: 2px; padding: 2px; background: var(--surface-sunk); border-radius: 7px; flex: none; }
-  .views .toggle {
-    display: grid;
-    place-items: center;
-    width: 30px;
-    height: 26px;
-    padding: 0;
-    border-color: transparent;
-    background: transparent;
-    color: var(--muted);
-  }
-  .views .toggle svg { width: 14px; height: 14px; }
-  .views .toggle:hover { color: var(--ink); }
-  .views .toggle[aria-pressed="true"] { background: var(--surface); color: var(--accent); border-color: var(--rule-strong); box-shadow: var(--shadow); }
   .tabs { display: flex; gap: 2px; padding: 2px; background: var(--surface-sunk); border-radius: 7px; }
   .tab {
     appearance: none;
@@ -591,6 +576,10 @@
   tr.sfold td { background: var(--surface-sunk); color: var(--muted); padding: 2px 8px; cursor: pointer; font-family: var(--sans); font-size: 11.5px; white-space: normal; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
   tr.sfold.away td { background: color-mix(in srgb, var(--accent-soft) 70%, var(--surface-sunk)); }
   tr.sfold.region td { background: color-mix(in srgb, var(--del-bg) 60%, var(--surface-sunk)); }
+  /* A block of deleted code is drawn inline, and folded behind its bar while the reader hides deleted code. */
+  tr.sfold.deleted { display: none; }
+  body.hide-deleted tr.sfold.deleted:not([hidden]):not([data-shown]) { display: table-row; }
+  body.hide-deleted tr[data-deleted]:not([data-shown]) { display: none; }
   .sbadge { font: 10px/1.6 var(--sans); padding: 0 6px; margin-left: 8px; border: 0; border-radius: 8px; white-space: nowrap; background: var(--rule); color: var(--ink); vertical-align: 1px; }
   .sbadge.moved { background: var(--accent); color: var(--surface); cursor: pointer; }
   .sbadge.renamed { background: color-mix(in srgb, var(--accent) 30%, var(--surface)); }
@@ -999,6 +988,50 @@
   .tray li .goes:hover b, .tray li .goes:hover .said { color: var(--accent); }
   .tray .actions { display: flex; gap: 8px; }
 
+  /* The choices of how the diff is shown, one switch each, a choice that only applies under another set beneath it. */
+  #settingsopen { display: grid; place-items: center; width: 30px; height: 28px; padding: 0; color: var(--muted); }
+  #settingsopen svg { width: 15px; height: 15px; }
+  #settingsopen:hover { color: var(--ink); }
+  .settings { position: fixed; top: calc(var(--head) + 8px); z-index: 60; display: none; }
+  .settings[data-open="true"] { display: block; }
+  .settings > .body {
+    display: flex;
+    flex-direction: column;
+    width: 320px;
+    max-width: calc(100vw - 16px);
+    padding: 6px;
+    background: var(--surface);
+    border: 1px solid var(--rule-strong);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+  }
+  .setting {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 7px 8px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--ink);
+    font: inherit;
+    font-size: 12.5px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .setting:hover { background: var(--surface-sunk); }
+  .setting:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .setting.sub { margin-left: 18px; }
+  .setting:disabled { color: var(--faint); cursor: default; background: transparent; }
+  .setting .what { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .setting small { color: var(--muted); font-size: 11px; }
+  .setting:disabled small { color: var(--faint); }
+  .setting .switch { flex: none; position: relative; width: 26px; height: 15px; border-radius: 8px; background: var(--rule-strong); transition: background 0.12s; }
+  .setting .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: var(--surface); transition: transform 0.12s; }
+  .setting[aria-pressed="true"] .switch { background: var(--accent); }
+  .setting[aria-pressed="true"] .switch::after { transform: translateX(11px); }
+  .setting:disabled .switch { opacity: 0.5; }
+
   .source {
     position: fixed;
     top: calc(var(--head) + 8px);
@@ -1075,20 +1108,9 @@
     <input id="q" type="search" placeholder="Filter paths" aria-label="Filter paths" />
     <button id="qx" type="button" aria-label="Clear path filter" hidden>&#215;</button>
   </label>
-  <div class="views" role="group" aria-label="View">
-    <button class="toggle" id="ctx" aria-pressed="false" title="Changes only: show only added and removed lines" aria-label="Changes only">
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5h5M5.5 2v5M3 11.5h10M9.5 4.5h3.5"/></svg>
-    </button>
-    <button class="toggle" id="semantic" aria-pressed="false" title="Semantic view: Python files side by side, lined up by statement, moved code shown at its new place beside its old version" aria-label="Semantic view">
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2.5" width="4.5" height="11" rx="1"/><rect x="9.5" y="2.5" width="4.5" height="11" rx="1"/><path d="M6.5 5.5l3 5"/></svg>
-    </button>
-    <button class="toggle" id="hidedone" aria-pressed="false" title="Hide the files marked reviewed" aria-label="Hide reviewed">
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 8.5l3 3 7-8"/><path d="M2 13.5l12-11" opacity=".55"/></svg>
-    </button>
-    <button class="toggle" id="hideclosed" aria-pressed="false" title="Hide the comments already resolved" aria-label="Hide resolved">
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 7.3c0 2.6-2.7 4.7-6 4.7-.6 0-1.2-.1-1.7-.2L3 13.5l.6-2.6C2.6 10 2 8.7 2 7.3 2 4.7 4.7 2.6 8 2.6s6 2.1 6 4.7z"/><path d="M5.8 7.4l1.6 1.5 2.8-3.2"/></svg>
-    </button>
-  </div>
+  <button class="toggle" id="settingsopen" aria-pressed="false" title="How the diff is shown" aria-label="Settings">
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6"/><circle cx="10" cy="4.5" r="1.5"/><circle cx="6" cy="11.5" r="1.5"/></svg>
+  </button>
   <div class="tally">
     <div class="progress" title="Files marked reviewed">
       <span class="track"><i id="pfill" style="width:0%"></i></span>
@@ -1114,6 +1136,16 @@
   <button class="toggle" id="logopen" title="Every comment recorded, and where each one stands">Comments<i class="dot" id="logdot" aria-hidden="true"></i></button>
   <button class="solid" id="moved" disabled title="Refresh the diffs once the branch has moved on">Refresh</button>
 </header>
+
+<div class="settings" id="settings" data-open="false">
+  <div class="body">
+    <button class="setting" id="ctx" aria-pressed="false"><span class="what">Changes only<small>Show only the added and removed lines</small></span><i class="switch" aria-hidden="true"></i></button>
+    <button class="setting" id="semantic" aria-pressed="false"><span class="what">Semantic view<small>Python files side by side, lined up by statement, moved code shown beside its old version</small></span><i class="switch" aria-hidden="true"></i></button>
+    <button class="setting sub" id="hidedeleted" aria-pressed="false" disabled><span class="what">Fold deleted code<small>Every block of deleted code behind a bar, to read what the branch keeps</small></span><i class="switch" aria-hidden="true"></i></button>
+    <button class="setting" id="hidedone" aria-pressed="false"><span class="what">Hide reviewed files<small>The files marked reviewed leave the page</small></span><i class="switch" aria-hidden="true"></i></button>
+    <button class="setting" id="hideclosed" aria-pressed="false"><span class="what">Hide resolved comments<small>The threads already resolved leave the page</small></span><i class="switch" aria-hidden="true"></i></button>
+  </div>
+</div>
 
 <div class="source" id="source" data-open="false">
     <div class="body">
@@ -1261,7 +1293,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "qx", "ctx", "semantic", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "logresolved", "logunread", "logonlynew", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "find", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
+  for (const id of ["tabs", "scope", "q", "qx", "ctx", "settingsopen", "settings", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "logresolved", "logunread", "logonlynew", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "find", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -1311,6 +1343,7 @@
       hideFiles: els.hidefiles.getAttribute("aria-pressed") === "true",
       hideClosed: els.hideclosed.getAttribute("aria-pressed") === "true",
       semantic: els.semantic.getAttribute("aria-pressed") === "true",
+      hideDeleted: els.hidedeleted.getAttribute("aria-pressed") === "true",
     };
     try {
       localStorage.setItem("diffdesk.choices", JSON.stringify(choices));
@@ -1338,6 +1371,9 @@
     document.body.classList.toggle("hide-closed", Boolean(choices.hideClosed));
     els.semantic.setAttribute("aria-pressed", String(Boolean(choices.semantic)));
     document.body.classList.toggle("semantic", Boolean(choices.semantic));
+    els.hidedeleted.disabled = !choices.semantic;
+    els.hidedeleted.setAttribute("aria-pressed", String(Boolean(choices.hideDeleted)));
+    document.body.classList.toggle("hide-deleted", Boolean(choices.hideDeleted));
   }
 
   function loadFolded() {
@@ -4262,6 +4298,7 @@
     const row = hitRow(card, hit);
     if (!row) return;
     if (row.hidden) openFold(row.closest("tbody"), row.dataset.fold);
+    if (row.dataset.deleted) showDeleted(row.closest("tbody"), row.dataset.deleted);
     row.classList.add("hit");
     if (canMark) for (const range of wordRanges(row, pattern, hit.side)) hitMarks.add(range);
     // The view moves only for a line out of sight: hits already on screen stay where the reader is following them.
@@ -4793,6 +4830,13 @@
     bar.remove();
   }
 
+  // Shows a block of deleted code the reader folded with the rest, and its bar no longer.
+  function showDeleted(tbody, block) {
+    for (const row of tbody.querySelectorAll(`tr[data-deleted="${CSS.escape(block)}"], tr.sfold[data-opens="${CSS.escape(block)}"]`)) {
+      row.dataset.shown = "true";
+    }
+  }
+
   // Takes the reader to a line of a file in the semantic view, unfolding whatever holds it.
   function reachLine(path, line, side) {
     const wrap = document.querySelector(`section.file[data-path="${CSS.escape(path)}"]`);
@@ -4806,6 +4850,7 @@
       return;
     }
     if (row.hidden) openFold(row.closest("tbody"), row.dataset.fold);
+    if (row.dataset.deleted) showDeleted(row.closest("tbody"), row.dataset.deleted);
     row.scrollIntoView({ block: "center" });
     row.classList.add("flash");
     setTimeout(() => row.classList.remove("flash"), 1600);
@@ -4901,7 +4946,7 @@
       }
     };
 
-    const foldBar = (kind, first, parts, fold) => {
+    const foldBar = (kind, first, parts, fold, opens = (bar) => openFold(tbody, bar.dataset.opens)) => {
       const bar = document.createElement("tr");
       bar.className = `sfold ${kind}`;
       folds += 1;
@@ -4915,7 +4960,7 @@
       said.colSpan = 4;
       said.append(...parts);
       bar.append(number, said);
-      bar.addEventListener("click", () => openFold(tbody, bar.dataset.opens));
+      bar.addEventListener("click", () => opens(bar));
       tbody.append(bar);
       return bar.dataset.opens;
     };
@@ -4938,8 +4983,20 @@
           }
           if (entry.moved) said.push([`${plural(entry.moved, "line")} moved to `, ...targetLinks(entry.to)]);
           said.forEach((piece, at) => parts.push(...(at ? [" · ", ...piece] : piece)));
-          const inner = foldBar("region", entry.lines[0], parts, fold);
-          draw(entry.region, inner);
+          if (entry.deleted) {
+            // Deleted lines are the change under review, so they are drawn inline, and the bar summing them up stands
+            // in for them only while the reader hides deleted code.
+            const block = foldBar("region deleted", entry.lines[0], parts, fold, (bar) => showDeleted(tbody, bar.dataset.opens));
+            const start = tbody.children.length;
+            draw(entry.region, fold);
+            const rows = [...tbody.children].slice(start);
+            for (const row of rows) if (!row.classList.contains("noterow")) row.dataset.deleted = block;
+            // A thread on a deleted line is news about it, so its block stays open.
+            if (rows.some((row) => row.classList.contains("noterow"))) showDeleted(tbody, block);
+          } else {
+            const inner = foldBar("region", entry.lines[0], parts, fold);
+            draw(entry.region, inner);
+          }
         } else {
           lineRow(entry, fold);
         }
@@ -5431,8 +5488,20 @@
     holdPlace(staying && staying.path, () => {
       els.semantic.setAttribute("aria-pressed", String(on));
       document.body.classList.toggle("semantic", on);
+      els.hidedeleted.disabled = !on;
       keepChoices();
       render();
+    });
+  });
+  els.hidedeleted.addEventListener("click", () => {
+    const on = els.hidedeleted.getAttribute("aria-pressed") !== "true";
+    const staying = visible(view().files)[0];
+    holdPlace(staying && staying.path, () => {
+      els.hidedeleted.setAttribute("aria-pressed", String(on));
+      document.body.classList.toggle("hide-deleted", on);
+      // Folding is asked of every block, so the blocks the reader opened one by one fold again.
+      if (on) for (const row of document.querySelectorAll("tr[data-shown]")) delete row.dataset.shown;
+      keepChoices();
     });
   });
   els.hidedone.addEventListener("click", () => {
@@ -5461,6 +5530,20 @@
     keepChoices();
   });
   els.showfiles.addEventListener("click", () => els.hidefiles.click());
+  // Open under its button, and kept open while the reader flips several choices: a press anywhere else closes it.
+  function openSettings(open) {
+    els.settings.dataset.open = String(open);
+    els.settingsopen.setAttribute("aria-pressed", String(open));
+    if (!open) return;
+    const box = els.settingsopen.getBoundingClientRect();
+    els.settings.style.left = `${Math.max(8, Math.min(box.left, window.innerWidth - els.settings.firstElementChild.offsetWidth - 8))}px`;
+  }
+  els.settingsopen.addEventListener("click", () => openSettings(els.settings.dataset.open !== "true"));
+  document.addEventListener("pointerdown", (event) => {
+    if (els.settings.dataset.open === "true" && !els.settings.contains(event.target) && !els.settingsopen.contains(event.target)) {
+      openSettings(false);
+    }
+  });
   els.sourceopen.addEventListener("click", () => {
     const open = els.source.dataset.open !== "true";
     els.source.dataset.open = String(open);
@@ -5576,6 +5659,7 @@
     }
     if (event.key === "Escape") {
       els.toast.dataset.open = "false";
+      openSettings(false);
       clearSel();
     }
   });

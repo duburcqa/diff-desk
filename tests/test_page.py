@@ -124,6 +124,13 @@ def rows(page, kind=""):
     return page.locator(f"tr{kind}[data-line]")
 
 
+def flip(page, setting):
+    """Flip one choice of how the diff is shown, from the settings panel, which is closed again after."""
+    page.locator("#settingsopen").click()
+    page.locator(f"#{setting}").click()
+    page.locator("#settingsopen").click()
+
+
 def sample(page):
     """The card of the file both hunks live in, so a range never spans two files by accident."""
     return page.locator("section.file").filter(has=page.locator("text=sample.py")).first
@@ -1003,7 +1010,7 @@ def test_the_comments_panel_reads_by_batch_or_by_what_moved_last(page, desk):
     # header hiding what it hid. A refresh comes to a reload once the desk has been served over, and it must not cost
     # the reader their place.
     page.locator("#logresolved").check()
-    page.locator("#hideclosed").click()
+    flip(page, "hideclosed")
     # The file list folds from its own head, the diff takes the width it held, and a rail at the edge brings it back.
     # The bar holds one row in a laptop window, with nothing in it that is not a control.
     page.set_viewport_size({"width": 1200, "height": 900})
@@ -1520,7 +1527,8 @@ def test_copying_a_selection_of_lines_yields_the_code_alone(page):
       const rows = [...card.querySelectorAll('.body tr[data-line]')];
       const range = document.createRange();
       range.setStart(rows[0].querySelector('td.code'), 0);
-      range.setEnd(rows[rows.length - 1].querySelector('td.code'), 1);
+      const last = rows[rows.length - 1].querySelector('td.code');
+      range.setEnd(last, last.childNodes.length);
       const selection = window.getSelection();
       selection.removeAllRanges();
       selection.addRange(range);
@@ -1562,7 +1570,7 @@ def test_copying_lines_in_the_semantic_view_yields_one_version(page):
     # The view is a choice that outlives a reload, so it is turned on only where it is off, and left as it was found.
     was_on = page.locator("#semantic").get_attribute("aria-pressed") == "true"
     if not was_on:
-        page.locator("#semantic").click()
+        flip(page, "semantic")
     page.wait_for_function("() => aligned.files !== null")
     page.evaluate("""() => {
       window.__copied = null;
@@ -1607,13 +1615,13 @@ def test_copying_lines_in_the_semantic_view_yields_one_version(page):
         assert copied.startswith(f"def area(r):\n{version}\nthree")
     page.evaluate("() => window.getSelection().removeAllRanges()")
     if not was_on:
-        page.locator("#semantic").click()
+        flip(page, "semantic")
 
 
 def test_text_found_in_the_semantic_view_is_marked_on_its_line_and_side(page):
     was_on = page.locator("#semantic").get_attribute("aria-pressed") == "true"
     if not was_on:
-        page.locator("#semantic").click()
+        flip(page, "semantic")
     page.wait_for_function("() => aligned.files !== null")
     page.keyboard.press("Control+f")
     page.wait_for_selector("#find:not([hidden])")
@@ -1645,7 +1653,7 @@ def test_text_found_in_the_semantic_view_is_marked_on_its_line_and_side(page):
     page.locator("#fq").press("Escape")
     page.wait_for_selector("#find", state="hidden")
     if not was_on:
-        page.locator("#semantic").click()
+        flip(page, "semantic")
 
 
 def test_a_letter_held_with_a_modifier_is_left_to_the_browser(page):
@@ -1767,10 +1775,10 @@ def test_a_thread_with_nowhere_to_go_is_read_in_the_panel(page, desk):
     assert "and answered afterwards" in thread.inner_text()
 
     # Hidden with the resolved threads of the diff, it is still shown here: the press on its row asked to read it.
-    page.locator("#hideclosed").click()
+    flip(page, "hideclosed")
     page.wait_for_selector("body.hide-closed")
     assert page.locator(".logthread").get_by_text("and answered afterwards").is_visible()
-    page.locator("#hideclosed").click()
+    flip(page, "hideclosed")
     page.wait_for_function("() => !document.body.classList.contains('hide-closed')")
 
     # Answered from where it is read: the reply stands in the thread at once and the box is emptied, so nothing
@@ -1989,7 +1997,7 @@ def test_the_log_reaches_a_comment_and_leaves_what_is_settled_out(page, desk):
     # Settled threads pile up as a review goes on, so they can be taken out of the diff altogether. Reaching one from
     # the listing shows it again, where it hangs, without bringing back the rest.
     page.locator("#logclose").click()
-    page.locator("#hideclosed").click()
+    flip(page, "hideclosed")
     page.locator(f"#note-{made}").wait_for(state="hidden")
     page.locator("#logopen").click()
     page.wait_for_selector("#log[data-open='true']")
@@ -2005,7 +2013,7 @@ def test_the_log_reaches_a_comment_and_leaves_what_is_settled_out(page, desk):
     page.evaluate("() => render()")
     page.locator(f"#note-{made}").wait_for(state="visible")
     assert page.locator(f"#note-{made} .thread.folded").count() == 0
-    page.locator("#hideclosed").click()
+    flip(page, "hideclosed")
     page.locator("#logopen").click()
     page.wait_for_selector("#log[data-open='true']")
     page.locator("#logresolved").uncheck()
@@ -2451,7 +2459,7 @@ def test_text_is_found_across_the_whole_diff_folded_files_included(page):
     card = page.locator("section.file[data-path='pkg/sub/deep.py']")
     card.locator("input[type=checkbox]").check()
     page.wait_for_selector("section.file[data-path='pkg/sub/deep.py'][data-done='true']")
-    page.locator("#hidedone").click()
+    flip(page, "hidedone")
     page.wait_for_selector("body.hide-done")
     assert not card.is_visible()
     try:
@@ -2539,7 +2547,7 @@ def test_text_is_found_across_the_whole_diff_folded_files_included(page):
         page.locator("#fq").press("Escape")
         page.wait_for_selector("#find", state="hidden")
     finally:
-        page.locator("#hidedone").click()
+        flip(page, "hidedone")
         page.wait_for_function("() => !document.body.classList.contains('hide-done')")
         card.locator("input[type=checkbox]").uncheck()
 
@@ -2974,11 +2982,11 @@ def test_a_box_takes_the_height_of_what_is_written_into_it(page, desk):
         "/comments", {"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": "built hidden"}
     )["seq"]
     desk.post("/resolve", {"seq": [made], "who": "session"})
-    page.locator("#hideclosed").click()
+    flip(page, "hideclosed")
     page.evaluate("() => loadNotes().then(render)")
     page.wait_for_selector(f"#note-{made} textarea", state="attached")
     assert not page.locator(f"#note-{made}").is_visible()
-    page.locator("#hideclosed").click()
+    flip(page, "hideclosed")
     page.wait_for_selector(f"#note-{made} textarea")
     settle(page)
     assert page.locator(f"#note-{made} textarea").bounding_box()["height"] >= 24
@@ -3834,7 +3842,10 @@ def test_a_thread_is_reached_from_the_panel_even_when_its_file_is_filtered_away(
 
 
 def test_the_semantic_view_faces_both_versions_and_comments_on_the_line_shown(page, desk):
-    page.locator("#semantic").click()
+    # Folding deleted code is a choice of the semantic view, offered once that view is on.
+    assert page.locator("#hidedeleted").is_disabled()
+    flip(page, "semantic")
+    assert page.locator("#hidedeleted").is_enabled()
     page.wait_for_function("() => aligned.files !== null")
     card = page.locator("section.file[data-path='pkg/sub/deep.py']")
     card.scroll_into_view_if_needed()
@@ -3842,6 +3853,28 @@ def test_the_semantic_view_faces_both_versions_and_comments_on_the_line_shown(pa
     edited.wait_for()
     assert edited.locator("td.code").first.inner_text() == "    return 1"
     assert edited.locator("td.code .tok").all_inner_texts() == ["1", "2"]
+    # A deleted class is shown line by line, with no bar to open first.
+    bar = card.locator("tr.sfold.deleted")
+    deleted = card.locator("table.aligned tr[data-old-no='6']")
+    assert deleted.is_visible() and not bar.is_visible()
+    assert deleted.locator("td.code").first.inner_text() == "class Square:"
+    # Folding deleted code puts every block of it behind its bar, which opens that one block alone.
+    flip(page, "hidedeleted")
+    assert bar.is_visible() and not deleted.is_visible()
+    assert "lines deleted: Square" in bar.inner_text()
+    bar.click()
+    assert deleted.is_visible() and not bar.is_visible()
+    # Asked again, the fold takes in the block opened by hand, and it holds across a reload.
+    flip(page, "hidedeleted")
+    flip(page, "hidedeleted")
+    assert not deleted.is_visible()
+    page.reload(wait_until="load")
+    page.wait_for_function("() => aligned.files !== null")
+    card.scroll_into_view_if_needed()
+    bar.wait_for()
+    assert not deleted.is_visible()
+    flip(page, "hidedeleted")
+    assert deleted.is_visible()
     # A file that is no Python is still read as a line diff.
     sample(page).scroll_into_view_if_needed()
     sample(page).locator("tr[data-line]").first.wait_for()
