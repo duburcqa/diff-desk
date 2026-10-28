@@ -3063,10 +3063,12 @@ def test_a_reply_quoting_a_passage_shows_it_as_a_quote(page, desk):
 
     quoted = page.locator(f"#note-{made} .line.reply blockquote")
     assert quoted.count() == 2
-    # One passage, not one quote per line, and the marks that made it are gone.
-    assert quoted.first.inner_text() == "the passage being answered\nand the rest of it"
+    # One passage, not one quote per line, and the marks that made it are gone. Read paragraph by paragraph: WebKit
+    # gives a block closing on a paragraph the breaks after that paragraph whenever more of the page follows it.
+    assert quoted.first.locator(":scope > p").all_inner_texts() == ["the passage being answered\nand the rest of it"]
     # Lines pasted below a single mark belong to its passage, rid of the indentation they were copied with.
-    assert quoted.nth(1).inner_text() == "copied from the middle of a line\nand carried on below it\n  one step further"
+    passage = quoted.nth(1).locator(":scope > p").all_inner_texts()
+    assert passage == ["copied from the middle of a line\nand carried on below it\n  one step further"]
     answer = page.locator(f"#note-{made} .line.reply .said .text").first.inner_text()
     assert "what I make of it" in answer
     assert ">" not in answer
