@@ -758,7 +758,9 @@
   }
   .thread .said .inset { white-space: pre; }
   .thread .said hr { margin: 8px 0 2px; border: 0; border-top: 1px solid var(--rule-strong); }
-  .thread .said .grid { margin-top: 6px; overflow-x: auto; }
+  /* An overlay scrollbar takes no room of its own and is drawn over the last row it scrolls, flashed there as the
+     table first shows: the padding is the room it is drawn into instead. */
+  .thread .said .grid { margin-top: 6px; padding-bottom: 10px; overflow-x: auto; }
   .thread .said table { border-collapse: collapse; font-size: 12px; }
   .thread .said th, .thread .said td {
     padding: 3px 9px;
@@ -770,7 +772,8 @@
   .thread .said tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--surface-sunk) 45%, transparent); }
   .thread .said pre {
     margin: 4px 0;
-    padding: 6px 8px;
+    /* Room below the last line for an overlay scrollbar, as for a table (see .grid). */
+    padding: 6px 8px 12px;
     overflow-x: auto;
     background: var(--surface-sunk);
     border: 1px solid var(--rule);
@@ -2335,12 +2338,16 @@
     render();
   }
 
-  // Watching the threads on screen, so a reply counts as read when it has been in front of the reader.
+  // Watching the threads on screen, so a reply counts as read when it has been in front of the reader: 40% of the
+  // thread, or of the screen for a thread too tall to ever show 40% of itself at once. The fine thresholds are what
+  // report a tall thread as it fills the screen, its ratio never reaching the coarse one.
   const noticed = new IntersectionObserver(
     (entries) => {
       let learned = false;
       for (const entry of entries) {
         if (!entry.isIntersecting) continue;
+        const screen = entry.rootBounds ? entry.rootBounds.height : window.innerHeight;
+        if (entry.intersectionRatio < 0.4 && entry.intersectionRect.height < 0.4 * screen) continue;
         const seq = Number(entry.target.dataset.seq);
         const answers = Number(entry.target.dataset.answers);
         if (heard[seq] !== answers) {
@@ -2352,7 +2359,7 @@
       if (!learned) return;
       keepHeard();
     },
-    { threshold: 0.4 },
+    { threshold: Array.from({ length: 101 }, (_, i) => i / 100) },
   );
 
   function grows(box) {
