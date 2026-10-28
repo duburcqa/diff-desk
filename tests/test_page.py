@@ -1724,6 +1724,30 @@ def test_the_panel_marks_what_holds_something_unread(page, desk):
     page.locator("#logclose").click()
 
 
+def test_a_thread_taller_than_the_screen_counts_as_read_once_it_fills_it(page, desk):
+    line = sample(page).locator("tr.a[data-line]").first
+    line.locator("td.code").first.hover()
+    line.locator("button.pin").first.click()
+    saying = f"answered at length, number {len(desk.get('/comments')) + 1}"
+    submit(page, saying)
+    made = desk.get("/comments")[-1]["seq"]
+    # Four screens of answer: a thread that tall never has 40% of itself on screen at once.
+    rows = page.evaluate("() => Math.ceil(window.innerHeight / 18) * 4")
+    answer = "\n\n".join(f"paragraph {index} of the answer" for index in range(rows))
+    desk.post("/reply", {"seq": made, "text": answer, "who": "session"})
+    page.evaluate("() => loadNotes()")
+    page.wait_for_function(
+        "(seq) => document.querySelector(`#note-${seq} .thread`).getBoundingClientRect().height"
+        " > 2.5 * window.innerHeight",
+        arg=made,
+    )
+    page.evaluate("(seq) => document.getElementById(`note-${seq}`).scrollIntoView({block: 'start'})", made)
+    page.evaluate("() => window.scrollBy(0, window.innerHeight)")
+    page.wait_for_function(
+        "(seq) => heard[seq] >= Number(document.querySelector(`#note-${seq} .thread`).dataset.answers)", arg=made
+    )
+
+
 def test_a_thread_with_nowhere_to_go_is_read_in_the_panel(page, desk):
     # Written on a file the diff no longer holds, which is what a comment becomes once the change it stands on is
     # undone: there is no card to be taken to, and a row that answers a press with nothing reads as broken.
