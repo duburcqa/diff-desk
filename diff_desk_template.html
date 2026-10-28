@@ -725,6 +725,10 @@
   /* What is said reads as text set in blocks: the first paragraph runs on from the name that opens it, and every block
      after it starts on a line of its own, a little apart from the one above. */
   .thread .said p { margin: 6px 0 0; }
+  /* The text box holds paragraphs, tables and code blocks, which an inline box can only hold split around them, and
+     Safari sizes that split before a code block grows by its scrollbar, which then covers the line below. Without a
+     box of its own, what it holds is laid out by the block saying it. */
+  .thread .said .text { display: contents; }
   .thread .said .text > p:first-child { display: inline; }
   .thread .said .heading { margin-top: 10px; font-weight: 600; }
   .thread .said .heading.h1, .thread .said .heading.h2 { font-size: 13.5px; }
