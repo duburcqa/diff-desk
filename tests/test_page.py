@@ -591,6 +591,15 @@ def test_a_comment_keeps_its_code_and_its_line_breaks(page, desk):
     )
     assert abs(starts[0] - starts[1]) < 0.5
     assert suggested.evaluate("(pre) => getComputedStyle(pre, '::before').content") == '"Suggested change"'
+    # A block is never held by an inline box, whose split around it leaves the room of a scrollbar the code block
+    # grows by unaccounted for, so the bar is drawn over the line below.
+    assert suggested.evaluate(
+        """(pre) => {
+          for (let box = pre.parentElement; !box.classList.contains('said'); box = box.parentElement)
+            if (getComputedStyle(box).display === 'inline') return false;
+          return true;
+        }"""
+    )
 
 
 def test_a_comment_is_laid_out_in_paragraphs_lists_and_tables(page, desk):
