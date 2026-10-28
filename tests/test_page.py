@@ -1761,7 +1761,8 @@ def test_a_thread_with_nowhere_to_go_is_read_in_the_panel(page, desk):
                     "path": "gone/undone.py",
                     "line": 3,
                     "side": "new",
-                    "text": "written on a change that has gone",
+                    # Carrying a suggestion wider than the panel, which is what a review bot proposes.
+                    "text": f"written on a change that has gone\n\n```suggestion\nwide = 1  # {'x' * 300}\n```",
                 }
             ],
             "github": False,
@@ -1797,6 +1798,22 @@ def test_a_thread_with_nowhere_to_go_is_read_in_the_panel(page, desk):
     thread = page.locator(".logthread")
     thread.wait_for()
     assert "and answered afterwards" in thread.inner_text()
+    # Held to the width of the panel whatever the suggestion carries, which scrolls in its own box: the box to answer
+    # in and the presses under it stay within reach.
+    reach = page.evaluate(
+        """() => {
+          const holder = document.querySelector('.logthread');
+          const edge = holder.getBoundingClientRect().right;
+          const boxes = [...holder.querySelectorAll('.thread .actions textarea, .thread .actions button')];
+          const past = boxes.filter((box) => box.getBoundingClientRect().right > edge + 0.5);
+          return { boxes: boxes.length, past: past.length, spill: holder.scrollWidth - holder.clientWidth };
+        }"""
+    )
+    assert reach["boxes"] > 0
+    assert reach["past"] == 0
+    assert reach["spill"] <= 0
+    # And read once it is shown, which is what the press on its row was for.
+    page.wait_for_function(f"() => (JSON.parse(localStorage.getItem('diffdesk.heard') || '{{}}'))[{seq}] === 1")
 
     # Hidden with the resolved threads of the diff, it is still shown here: the press on its row asked to read it.
     flip(page, "hideclosed")
@@ -3046,10 +3063,12 @@ def test_a_reply_quoting_a_passage_shows_it_as_a_quote(page, desk):
 
     quoted = page.locator(f"#note-{made} .line.reply blockquote")
     assert quoted.count() == 2
-    # One passage, not one quote per line, and the marks that made it are gone.
-    assert quoted.first.inner_text() == "the passage being answered\nand the rest of it"
+    # One passage, not one quote per line, and the marks that made it are gone. Read paragraph by paragraph: WebKit
+    # gives a block closing on a paragraph the breaks after that paragraph whenever more of the page follows it.
+    assert quoted.first.locator(":scope > p").all_inner_texts() == ["the passage being answered\nand the rest of it"]
     # Lines pasted below a single mark belong to its passage, rid of the indentation they were copied with.
-    assert quoted.nth(1).inner_text() == "copied from the middle of a line\nand carried on below it\n  one step further"
+    passage = quoted.nth(1).locator(":scope > p").all_inner_texts()
+    assert passage == ["copied from the middle of a line\nand carried on below it\n  one step further"]
     answer = page.locator(f"#note-{made} .line.reply .said .text").first.inner_text()
     assert "what I make of it" in answer
     assert ">" not in answer
