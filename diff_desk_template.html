@@ -2074,6 +2074,16 @@
     aim(reaching, 24);
   }
 
+  // The thread the reader was taken to stays shown whatever the header hides, until they let go of it: by asking the
+  // header again, or by scrolling it out of sight once the aim has landed.
+  function letGo() {
+    if (!state.reached) return;
+    const { seq, path } = state.reached;
+    state.reached = null;
+    const held = `#note-${seq}, .filenote[data-seq="${seq}"], section.file[data-path="${CSS.escape(path)}"]`;
+    for (const shown of els.main.querySelectorAll(held)) delete shown.dataset.reveal;
+  }
+
   function aimingAt(aimed) {
     // Found again on every frame rather than held as a node: the poll redraws the card every few seconds, and a node
     // it has replaced answers with the rect of something detached, which sends the aim to the top of the page. An aim
@@ -5395,6 +5405,26 @@
     aim(reaching, 24);
   }
 
+  // A thread hidden above the reader as it is let go of would pull the page up under them, so their place is held on
+  // the line in the middle of the view, clear of the heads pinned at its top.
+  let lettingGo = null;
+  window.addEventListener("scroll", () => {
+    if (lettingGo || !state.reached) return;
+    lettingGo = requestAnimationFrame(() => {
+      lettingGo = null;
+      if (!state.reached || reaching !== null) return;
+      const { seq } = state.reached;
+      const thread = els.main.querySelector(`#note-${seq}, .filenote[data-seq="${seq}"]`);
+      const covered = document.querySelector("header").getBoundingClientRect().bottom;
+      const box = thread ? thread.getBoundingClientRect() : null;
+      if (box && box.bottom > covered && box.top < window.innerHeight) return;
+      const anchor = document.elementFromPoint(window.innerWidth / 2, (covered + window.innerHeight) / 2);
+      const before = anchor ? anchor.getBoundingClientRect().top : null;
+      letGo();
+      if (anchor && anchor.isConnected) window.scrollBy(0, anchor.getBoundingClientRect().top - before);
+    });
+  });
+
   els.pback.addEventListener("click", () => stepThroughWhatIsLeft(false));
   els.pnext.addEventListener("click", () => stepThroughWhatIsLeft(true));
   // What lies either side of the reader changes as they move, and a smooth scroll keeps moving after the press.
@@ -5523,6 +5553,7 @@
     // Anchored on the first file still shown, so hiding what is done does not scroll the rest out from under the reader.
     const staying = visible(view().files).find((file) => seenState(file) !== "done");
     holdPlace(staying && staying.path, () => {
+      letGo();
       els.hidedone.setAttribute("aria-pressed", String(on));
       document.body.classList.toggle("hide-done", on);
       keepChoices();
@@ -5532,6 +5563,7 @@
     const on = els.hideclosed.getAttribute("aria-pressed") !== "true";
     const staying = visible(view().files)[0];
     holdPlace(staying && staying.path, () => {
+      letGo();
       els.hideclosed.setAttribute("aria-pressed", String(on));
       document.body.classList.toggle("hide-closed", on);
       keepChoices();

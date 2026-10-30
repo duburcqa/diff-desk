@@ -3151,6 +3151,30 @@ def test_a_comment_can_be_reached_by_its_number(page, desk):
     assert page.locator(f"#note-{made} .thread.folded").count() == 0
     assert page.locator(f"#note-{made} .actions").count() == 1
 
+    # Shown for being gone to rather than for good: with the settled threads hidden, scrolled out of sight or the header
+    # asked again, it is hidden as well.
+    flip(page, "hideclosed")
+    page.locator(f"#note-{made}").wait_for(state="hidden")
+    page.keyboard.press("#")
+    page.keyboard.type(str(made))
+    page.keyboard.press("Enter")
+    page.locator(f"#note-{made}").wait_for(state="visible")
+    size = page.viewport_size
+    page.set_viewport_size({"width": size["width"], "height": 300})
+    # Scrolled once the aim is over, since it keeps the thread under the reader for a few frames after it lands.
+    at_rest(page, frames=10)
+    page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+    page.locator(f"#note-{made}").wait_for(state="hidden")
+    page.set_viewport_size(size)
+    page.keyboard.press("#")
+    page.keyboard.type(str(made))
+    page.keyboard.press("Enter")
+    page.locator(f"#note-{made}").wait_for(state="visible")
+    flip(page, "hideclosed")
+    flip(page, "hideclosed")
+    page.locator(f"#note-{made}").wait_for(state="hidden")
+    flip(page, "hideclosed")
+
     # A number no comment answers to says so rather than going anywhere.
     page.keyboard.press("#")
     page.keyboard.type("999999")
