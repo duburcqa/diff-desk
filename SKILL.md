@@ -39,7 +39,7 @@ Armed without `--once` it never stops of its own accord, which is what a session
 
 One desk holds every review it was given, so a session working one of them arms `watch --branch <ref>`, repeatable, and hears only what is said about those. It is what keeps two sessions out of each other's way: where a watch stopped is remembered per review, so one is never carried past what another has yet to hear. Armed without it, a watch hears everything the desk holds - right for a session that is the only one reading it.
 
-Each comment prints as `[seq] branch path:line-endLine (side) text`, followed by its state, where to open every file it carries, and any replies, each numbered `[0]`, `[1]` ... by its place in the thread. A file is worth opening: the reviewer attached it instead of describing what they saw. Answer in the thread, and close what is done - the page shows both without a reload:
+Each comment prints as `[seq] branch path:line-endLine (side) text`, followed by its state, where to open every file it carries, and any replies, each numbered `[0]`, `[1]` ... by its place in the thread. A file is worth opening: the reviewer attached it instead of describing what they saw. Answer in the thread, and close what is done - the page shows both without a reload. The reviewer reads the page, not the session's terminal: an answer written as a message of the session reaches nobody, so a remark that came from the desk is answered with `reply`, every time, and the session says only in a line that it did:
 
     python3 ~/.claude/skills/diff-desk/desk.py reply 3 "it happens because ..."
     python3 ~/.claude/skills/diff-desk/desk.py reply 3 --whisper "check the sibling call site too"
