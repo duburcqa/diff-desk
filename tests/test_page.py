@@ -1872,6 +1872,11 @@ def test_a_thread_with_nowhere_to_go_is_read_in_the_panel(page, desk):
     for gone in filling:
         desk.post("/drop", {"seq": gone, "who": "you"})
     page.locator("#logsort").select_option("batch")
+    # Pressed once the page has let go of every dropped row: the poll removes them as it hears of them, and a row
+    # moving under the press lands it on another one.
+    page.wait_for_function(
+        "(gone) => !gone.some((seq) => document.querySelector(`#logrows .logrow[data-seq='${seq}']`))", arg=filling
+    )
 
     row.click()
     assert page.locator(".logthread").count() == 0
