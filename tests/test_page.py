@@ -2475,10 +2475,24 @@ def test_a_branch_is_read_against_a_base_of_its_own_chosen_in_the_source_panel(p
         with page.expect_request(lambda asked: asked.url.endswith("/scan")) as asked:
             page.locator("#srcscan").click()
         assert sorted(asked.value.post_data_json["refs"]) == sorted([branch, f"{branch}..upper"])
+
+        # A branch served that is not a local one, such as a fork's, is listed all the same, on the base it is read
+        # against.
+        gen_diff_data.run(desk.repo, "update-ref", "refs/remotes/fork/upper", "upper")
+        assert desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch, f"{branch}..fork/upper"]})[
+            "ok"
+        ]
+        page.reload(wait_until="load")
+        page.locator("#sourceopen").click()
+        page.wait_for_selector("#srcrefs label")
+        forked = page.locator("#srcrefs label").filter(has=page.locator("input[value='fork/upper']"))
+        assert forked.locator("input").is_checked()
+        assert forked.locator("select").input_value() == branch
     finally:
         desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})
         gen_diff_data.run(desk.repo, "worktree", "remove", "--force", str(tmp_path / "upper"))
         gen_diff_data.run(desk.repo, "branch", "-D", "upper")
+        gen_diff_data.run(desk.repo, "update-ref", "-d", "refs/remotes/fork/upper")
 
 
 def test_the_source_panel_stands_clear_of_the_diff(page):

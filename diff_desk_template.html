@@ -1080,6 +1080,7 @@
   #srcrefs .ahead { flex: none; }
   #srcrefs select { flex: none; width: 15ch; font-size: 11px; padding: 1px 4px; }
   .source .pulls { border-top: 1px solid var(--rule); padding-top: 6px; }
+  #srcrefs > .label { display: flex; justify-content: space-between; color: var(--faint); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
   .source .pulls > .label { color: var(--faint); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
   .source .row { display: flex; align-items: center; gap: 8px; }
 
@@ -1162,7 +1163,7 @@
 <div class="source" id="source" data-open="false">
     <div class="body">
       <label>Repository<input id="srcdir" type="text" spellcheck="false" placeholder="/path/to/checkout" /></label>
-      <label>Base<input id="srcbase" type="text" spellcheck="false" placeholder="upstream/main" /></label>
+      <label>Default base<input id="srcbase" type="text" spellcheck="false" placeholder="upstream/main" /></label>
       <input id="srcfilter" type="text" spellcheck="false" placeholder="Filter branches and pull requests" />
       <div class="refs" id="srcrefs"></div>
       <div class="refs pulls" id="srcpulls"></div>
@@ -3958,7 +3959,13 @@
     const where = `refs?dir=${encodeURIComponent(els.srcdir.value)}&base=${encodeURIComponent(els.srcbase.value)}`;
     try {
       const info = await (await fetch(where, { cache: "no-store" })).json();
-      source.refs = info.refs;
+      // A branch being served is listed whether or not it is a local one, such as a fork's `origin/<branch>`, so its
+      // base can be read and changed here. A pull request has its own row below.
+      const listed = new Set(info.refs.map((row) => row.ref));
+      const served = data.branches
+        .filter((entry) => !listed.has(entry.ref) && !entry.ref.startsWith("refs/diffdesk/pull/"))
+        .map((entry) => ({ ref: entry.ref, ahead: entry.commits.length }));
+      source.refs = [...served, ...info.refs];
       source.pulls = info.pulls || [];
       source.current = info.current;
       source.picked = new Set(data.branches.map((entry) => entry.ref));
@@ -4005,6 +4012,12 @@
       // A branch already picked stays listed whatever the filter says, so a selection cannot be lost out of view.
       const rows = source.refs.filter((row) => !query || row.ref.toLowerCase().includes(query) || source.picked.has(row.ref));
       els.srcrefs.innerHTML = "";
+      if (rows.length) {
+        const title = document.createElement("div");
+        title.className = "label";
+        title.append(new Text("Branches"), Object.assign(document.createElement("span"), { textContent: "Read against" }));
+        els.srcrefs.append(title);
+      }
       for (const row of rows) {
         const label = document.createElement("label");
         const box = document.createElement("input");
