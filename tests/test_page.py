@@ -2469,6 +2469,8 @@ def test_a_branch_is_read_against_a_base_of_its_own_chosen_in_the_source_panel(p
         page.wait_for_selector(".tab")
         assert "against" not in (page.locator(".tab").nth(0).get_attribute("title") or "")
         assert f"against {branch}" in page.locator(".tab").nth(1).get_attribute("title")
+        # A branch read against the tab before it continues a stack, drawn as one chain.
+        assert page.locator("#tabs .tabsep").count() == 1
         page.locator("#sourceopen").click()
         page.wait_for_selector("#srcrefs label")
         assert upper.locator("select").input_value() == branch
@@ -2488,6 +2490,12 @@ def test_a_branch_is_read_against_a_base_of_its_own_chosen_in_the_source_panel(p
         forked = page.locator("#srcrefs label").filter(has=page.locator("input[value='fork/upper']"))
         assert forked.locator("input").is_checked()
         assert forked.locator("select").input_value() == branch
+
+        # A branch read against one it does not build on is marked, and says what it shows instead.
+        assert desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [f"upper..{branch}"]})["ok"]
+        page.reload(wait_until="load")
+        page.wait_for_selector(".tab .aside")
+        assert "not on upper" in page.locator(".tab").first.get_attribute("title")
     finally:
         desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})
         gen_diff_data.run(desk.repo, "worktree", "remove", "--force", str(tmp_path / "upper"))

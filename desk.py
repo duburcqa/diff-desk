@@ -1,6 +1,7 @@
 """One entry point for the diff desk: serve a branch for review, then pick up the comments it collects.
 
 desk.py serve --dir <repo> --base <ref> [refs ...]   collect the diffs and serve them (blocks)
+desk.py serve --stack <tip> [--local]                serve a stack, each branch against the one below it
 desk.py serve ... --take                             serve it even where a desk holds another review
 desk.py watch [--since N] [--once]                   print whatever the reviewer says, as they say it
 desk.py comments [--all]                             what has been submitted, unresolved unless --all
@@ -230,6 +231,9 @@ def _said(payload):
 
 def serve(args):
     refresh()
+    if args.stack:
+        args.refs = [*gen_diff_data.stack_refs(args.dir, args.stack, args.base, local=args.local), *args.refs]
+        print(f"stack: {' '.join(args.refs)}")
     held = held_elsewhere(args.dir, args.base, args.refs)
     if held is not None and not args.take:
         shown = ", ".join(held["refs"]) or "every branch ahead"
@@ -259,7 +263,8 @@ def serve(args):
     # be replaced by the next load: what was asked for is what it must be told to serve. Collecting server-side is
     # also what makes the branch stamp move, which is how the page in front of a reader offers them the refresh.
     if ask("/data") is not None:
-        answer = ask("/scan", {"dir": args.dir, "base": args.base, "refs": args.refs})
+        order = {"dir": args.dir, "base": args.base, "refs": args.refs, "stacked": gen_diff_data.STACKED}
+        answer = ask("/scan", order)
         if answer is None:
             sys.exit("the desk stopped answering while it was asked to serve this")
         if not answer.get("ok"):
@@ -498,6 +503,14 @@ job.add_argument(
 )
 job.add_argument("--dir", default=".", help="the repository to read")
 job.add_argument("--base", default="upstream/main", help="the ref to diff against")
+job.add_argument(
+    "--stack",
+    metavar="TIP",
+    help="serve the stack of pull requests ending at the branch TIP, each branch against the one below it",
+)
+job.add_argument(
+    "--local", action="store_true", help="read the branches of --stack locally rather than as their pushed heads"
+)
 job.add_argument(
     "--take",
     action="store_true",

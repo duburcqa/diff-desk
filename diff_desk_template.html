@@ -146,6 +146,8 @@
     cursor: pointer;
   }
   .tab[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+  .tabsep { align-self: center; color: var(--faint); font-size: 12px; }
+  .tab .aside { margin-left: 5px; color: var(--del-ink); }
   /* Shown only on the tab already chosen, where a click opens the pull request rather than selecting it again. */
   .tab .away { margin-left: 5px; font-size: 10px; color: var(--faint); opacity: 0; }
   .tab[aria-selected="true"] .away { opacity: 1; }
@@ -3923,6 +3925,20 @@
       tab.setAttribute("aria-selected", String(index === state.branch));
       // A ref read against a base of its own, such as the branch below it in a stack, names that base when hovered.
       if (entry.baseRef && entry.baseRef !== data.baseRef) tab.title = `against ${entry.baseRef}`;
+      if (entry.aside) {
+        const aside = document.createElement("span");
+        aside.className = "aside";
+        aside.textContent = "!";
+        tab.append(aside);
+        tab.title = `not on ${entry.baseRef}: read from where they forked, so it needs restacking`;
+      }
+      // A branch read against the tab before it continues a stack, which the bar draws as one chain.
+      if (index && entry.baseRef === data.branches[index - 1].ref) {
+        const sep = document.createElement("span");
+        sep.className = "tabsep";
+        sep.textContent = "\u203a";
+        els.tabs.append(sep);
+      }
       if (request) {
         tab.title = [request.title, request.url, tab.title].filter(Boolean).join("\n");
         const away = document.createElement("span");
@@ -3938,7 +3954,7 @@
         }
         state.branch = index;
         state.scope = "all";
-        [...els.tabs.children].forEach((node, i) => node.setAttribute("aria-selected", String(i === index)));
+        els.tabs.querySelectorAll(".tab").forEach((node, i) => node.setAttribute("aria-selected", String(i === index)));
         renderScopes();
         render();
         // The comments panel reads the review being shown, so it follows the tab rather than the next round.

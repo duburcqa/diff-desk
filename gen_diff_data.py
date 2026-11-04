@@ -2,6 +2,7 @@
 
 import hashlib
 import io
+import itertools
 import json
 import os
 import pathlib
@@ -413,6 +414,61 @@ def pull_requests(root, upstream):
     return recalled(f"pulls:{upstream}", open_pulls, root, upstream) or {}
 
 
+def builds_on(root, lower, upper):
+    """Whether `upper` holds every commit of `lower`."""
+    return subprocess.run(["git", "merge-base", "--is-ancestor", lower, upper], cwd=root, check=False).returncode == 0
+
+
+# The pull request each branch of a stack is opened as, filed by the ref it is served as, since a stack read from a fork
+# has pull requests the upstream listing does not hold (see `decorate`).
+STACKED = {}
+
+
+def stack_pulls(root, remote):
+    """Every open pull request of the repository a remote names, keyed by its head branch, or None without an answer."""
+    url = run(root, "remote", "get-url", remote).strip()
+    match = re.search(r"github\.com[:/](.+?)(?:\.git)?$", url)
+    if not match:
+        return None
+    listing = ("pr", "list", "--repo", match.group(1), "--state", "open", "--limit", "200")
+    told = gh(*listing, "--json", "number,url,title,headRefName,baseRefName", repeatable=True, cwd=root, budget=30)
+    if told.returncode != 0:
+        return None
+    try:
+        return {row["headRefName"]: row for row in json.loads(told.stdout or "[]")}
+    except json.JSONDecodeError:
+        return None
+
+
+def stack_refs(root, tip, base, *, local=False):
+    """The refs of the stack ending at `tip`, bottom first, each but the bottom one written against the branch below.
+
+    The stack is read from the pull requests, following each one's base down from the one opened from `tip`, on the
+    first of `origin` and `upstream` that has one. Each branch is read as that remote's pushed head, fetched first, or
+    as the local branch with `local`. Without a pull request the stack is the local branches the tip builds on.
+    """
+    root = str(pathlib.Path(root).expanduser())
+    for remote in ("origin", "upstream"):
+        pulls = stack_pulls(root, remote) or {}
+        if tip not in pulls:
+            continue
+        chain = [tip]
+        while pulls[chain[-1]]["baseRefName"] in pulls and pulls[chain[-1]]["baseRefName"] not in chain:
+            chain.append(pulls[chain[-1]]["baseRefName"])
+        chain.reverse()
+        if not local:
+            run(root, "fetch", "--quiet", remote, *chain)
+        names = chain if local else [f"{remote}/{name}" for name in chain]
+        for name, branch in zip(names, chain, strict=True):
+            STACKED[name] = {key: pulls[branch][key] for key in ("number", "url", "title", "headRefName")}
+        break
+    else:
+        # The branches between the base and the tip, which the tip builds on, ordered by how far each is from the base.
+        below = [row for row in ahead_refs(root, base) if row["ref"] != tip and builds_on(root, row["ref"], tip)]
+        names = [row["ref"] for row in sorted(below, key=lambda row: row["ahead"])] + [tip]
+    return [names[0], *(f"{lower}..{upper}" for lower, upper in itertools.pairwise(names))]
+
+
 def ahead_refs(root, base):
     """Every local branch holding at least one commit the base does not, newest tip first."""
     rows = []
@@ -472,7 +528,7 @@ def decorate(payload):
     payload["viewer"] = viewer()
     for branch in payload["branches"]:
         if not branch["ref"].startswith("refs/diffdesk/pull/"):
-            branch["pr"] = requests.get(branch["ref"])
+            branch["pr"] = requests.get(branch["ref"]) or STACKED.get(branch["ref"])
     before = payload.get("decor")
     said = [upstream, payload["viewer"], *[(branch["ref"], branch["pr"]) for branch in payload["branches"]]]
     payload["decor"] = hashlib.sha1(json.dumps(said, sort_keys=True).encode()).hexdigest()[:16]
@@ -537,6 +593,9 @@ def collect(root, base, refs):
             revs = (start, "" if head == current else head)
         files = parse(whole)
         mark_strings(root, files, *revs)
+        # A ref read against a base of its own that it does not build on, such as a stack not restacked since the branch
+        # below it moved, shows everything since they forked.
+        aside = against != base and not builds_on(root, against, head)
         # A ref that differs from the base nowhere has nothing to review, whatever it carries in commits.
         if not files:
             continue
@@ -544,6 +603,7 @@ def collect(root, base, refs):
             {
                 "ref": ref,
                 "baseRef": against,
+                "aside": aside,
                 "blurb": f"#{number}" if number else ref.split("/")[-1].replace("_", " "),
                 "pr": request,
                 "tip": run(root, "rev-parse", "--short", head).strip(),

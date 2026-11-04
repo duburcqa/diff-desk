@@ -1328,6 +1328,7 @@ class Handler(BaseHTTPRequestHandler):
             root = order.get("dir") or "."
             base = order.get("base") or "upstream/main"
             refs = [ref for ref in (order.get("refs") or []) if ref]
+            gen_diff_data.STACKED.update(order.get("stacked") or {})
         else:
             root, base, refs = serving.root, serving.base, list(serving.refs)
         print(f"SCAN {root} {base} {refs or '(every branch ahead)'}", flush=True)
