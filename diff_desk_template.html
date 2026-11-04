@@ -146,7 +146,6 @@
     cursor: pointer;
   }
   .tab[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
-  .tab .over { margin-left: 5px; font-size: 11px; color: var(--faint); }
   /* Shown only on the tab already chosen, where a click opens the pull request rather than selecting it again. */
   .tab .away { margin-left: 5px; font-size: 10px; color: var(--faint); opacity: 0; }
   .tab[aria-selected="true"] .away { opacity: 1; }
@@ -1055,7 +1054,7 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
-    width: 340px;
+    width: min(460px, calc(100vw - 40px));
     padding: 12px;
     background: var(--surface);
     border: 1px solid var(--rule-strong);
@@ -1077,6 +1076,9 @@
   .source .refs { display: flex; flex-direction: column; gap: 2px; max-height: 190px; overflow-y: auto; }
   .source .refs label { flex-direction: row; align-items: center; gap: 6px; font-family: var(--mono); font-size: 12px; color: var(--ink); }
   .source .refs .ahead { margin-left: auto; color: var(--faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #srcrefs label > span:not(.ahead) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #srcrefs .ahead { flex: none; }
+  #srcrefs select { flex: none; width: 15ch; font-size: 11px; padding: 1px 4px; }
   .source .pulls { border-top: 1px solid var(--rule); padding-top: 6px; }
   .source .pulls > .label { color: var(--faint); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
   .source .row { display: flex; align-items: center; gap: 8px; }
@@ -3918,14 +3920,8 @@
       tab.setAttribute("role", "tab");
       tab.textContent = entry.blurb;
       tab.setAttribute("aria-selected", String(index === state.branch));
-      // A ref read against a base of its own, such as the branch below it in a stack, names that base on its tab.
-      if (entry.baseRef && entry.baseRef !== data.baseRef) {
-        const over = document.createElement("span");
-        over.className = "over";
-        over.textContent = `on ${entry.baseRef.split("/").pop()}`;
-        tab.append(over);
-        tab.title = `against ${entry.baseRef}`;
-      }
+      // A ref read against a base of its own, such as the branch below it in a stack, names that base when hovered.
+      if (entry.baseRef && entry.baseRef !== data.baseRef) tab.title = `against ${entry.baseRef}`;
       if (request) {
         tab.title = [request.title, request.url, tab.title].filter(Boolean).join("\n");
         const away = document.createElement("span");
@@ -3953,7 +3949,9 @@
 
   /* ---------- picking what to review ---------- */
 
-  const source = { refs: [], pulls: [], current: "", picked: new Set() };
+  // `bases` holds the base each branch is read against where it is not the panel's own, such as the branch below it in
+  // a stack.
+  const source = { refs: [], pulls: [], current: "", picked: new Set(), bases: new Map() };
 
   async function loadRefs() {
     els.srcstatus.textContent = "reading branches...";
@@ -3964,6 +3962,9 @@
       source.pulls = info.pulls || [];
       source.current = info.current;
       source.picked = new Set(data.branches.map((entry) => entry.ref));
+      const stacked =
+        els.srcdir.value === data.root ? data.branches.filter((entry) => entry.baseRef && entry.baseRef !== data.baseRef) : [];
+      source.bases = new Map(stacked.map((entry) => [entry.ref, entry.baseRef]));
       drawRefs();
       const counted = [`${info.refs.length} ahead of ${els.srcbase.value}`];
       if (source.pulls.length) counted.push(`${source.pulls.length} open PR${source.pulls.length === 1 ? "" : "s"}`);
@@ -3976,6 +3977,27 @@
       els.srcpulls.innerHTML = "";
       els.srcstatus.textContent = "needs the local server";
     }
+  }
+
+  // What one branch is read against: the panel's base, or another branch, which is how a stack is reviewed one branch
+  // at a time. Choosing a base picks the branch too, since a base is only chosen for a branch to be reviewed.
+  function baseChoice(ref, box) {
+    const choice = document.createElement("select");
+    const say = () => (choice.title = `Read against ${choice.value || els.srcbase.value || "the base"}`);
+    const own = source.bases.get(ref);
+    const offered = source.refs.map((row) => row.ref).filter((other) => other !== ref);
+    if (own && !offered.includes(own)) offered.unshift(own);
+    choice.append(new Option(els.srcbase.value || "base", ""));
+    for (const other of offered) choice.append(new Option(other, other, false, other === own));
+    say();
+    choice.addEventListener("change", () => {
+      if (choice.value) source.bases.set(ref, choice.value);
+      else source.bases.delete(ref);
+      say();
+      box.checked = true;
+      source.picked.add(ref);
+    });
+    return choice;
   }
 
   function drawRefs() {
@@ -3995,10 +4017,11 @@
         });
         const name = document.createElement("span");
         name.textContent = row.ref === source.current ? `${row.ref} *` : row.ref;
+        name.title = row.ref;
         const ahead = document.createElement("span");
         ahead.className = "ahead";
         ahead.textContent = `${row.ahead} commit${row.ahead === 1 ? "" : "s"}`;
-        label.append(box, name, ahead);
+        label.append(box, name, ahead, baseChoice(row.ref, box));
         els.srcrefs.append(label);
       }
       els.srcpulls.innerHTML = "";
@@ -4041,11 +4064,7 @@
     }
     // A refresh names no source: it asks the desk for what it is serving, so a page whose source has been replaced
     // since it was built loads the one in place rather than putting its own back.
-    // The panel picks branches by name, so a branch read against a base of its own is sent with that base again.
-    const stacked =
-      els.srcdir.value === data.root ? data.branches.filter((entry) => entry.baseRef && entry.baseRef !== data.baseRef) : [];
-    const own = new Map(stacked.map((entry) => [entry.ref, entry.baseRef]));
-    const refs = [...source.picked].map((ref) => (own.has(ref) ? `${own.get(ref)}..${ref}` : ref));
+    const refs = [...source.picked].map((ref) => (source.bases.has(ref) ? `${source.bases.get(ref)}..${ref}` : ref));
     const order = keep ? {} : { dir: els.srcdir.value, base: els.srcbase.value, refs };
     const reading = keep ? { ...state } : { branch: 0, scope: "all", current: 0 };
     els.srcstatus.textContent = "collecting diffs...";
