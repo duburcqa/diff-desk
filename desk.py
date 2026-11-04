@@ -194,9 +194,10 @@ def one_ref(ref):
     back as 'refs/diffdesk/pull/3243' in the payload, and is sent as either by the page. Compared verbatim, a desk would
     read as holding somebody else's review every time it was asked for its own.
     """
-    named = PULL_REF.match(str(ref).strip())
+    own, dots, ref = str(ref).strip().rpartition("..")
+    named = PULL_REF.match(ref)
     number = int(named.group(1)) if named else gen_diff_data.pull_number(ref)
-    return f"#{number}" if number is not None else str(ref).strip()
+    return f"{own}{dots}" + (f"#{number}" if number is not None else ref)
 
 
 def held_elsewhere(root, base, refs):
@@ -493,7 +494,7 @@ job.add_argument(
     "refs",
     nargs="*",
     help="branches to review, or pull requests as numbers (3243, #3243, pr/3243); every branch ahead of the base "
-    "when omitted",
+    "when omitted. Write one as base..ref to read it against a base of its own, such as the branch below it in a stack",
 )
 job.add_argument("--dir", default=".", help="the repository to read")
 job.add_argument("--base", default="upstream/main", help="the ref to diff against")

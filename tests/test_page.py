@@ -2444,6 +2444,35 @@ def test_a_branch_with_a_pull_request_says_which_and_opens_it(page, desk):
         desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})
 
 
+def test_a_ref_read_against_a_base_of_its_own_names_it_and_keeps_it_through_a_rescan(page, desk, tmp_path):
+    branch = desk.get("/data")["branches"][0]["ref"]
+    gen_diff_data.run(desk.repo, "branch", "upper", branch)
+    gen_diff_data.run(desk.repo, "worktree", "add", "-q", str(tmp_path / "upper"), "upper")
+    try:
+        (tmp_path / "upper" / "stacked.py").write_text("on top\n")
+        gen_diff_data.run(tmp_path / "upper", "add", "-A")
+        gen_diff_data.run(tmp_path / "upper", "commit", "-q", "-m", "stack a file")
+        assert desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch, f"{branch}..upper"]})["ok"]
+        page.reload(wait_until="load")
+        page.wait_for_selector(".tab")
+        lower, upper = page.locator(".tab").nth(0), page.locator(".tab").nth(1)
+        assert lower.locator(".over").count() == 0
+        assert upper.locator(".over").inner_text() == f"on {branch}"
+        assert f"against {branch}" in upper.get_attribute("title")
+
+        # The Source panel picks branches by name, and sends the one read against its own base with that base again.
+        page.locator("#sourceopen").click()
+        page.wait_for_selector("#srcrefs label")
+        with page.expect_request(lambda asked: asked.url.endswith("/scan")) as asked:
+            page.locator("#srcscan").click()
+        assert sorted(asked.value.post_data_json["refs"]) == sorted([branch, f"{branch}..upper"])
+        until(lambda: [entry.get("baseRef") for entry in desk.get("/data")["branches"]] == ["main", branch])
+    finally:
+        desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})
+        gen_diff_data.run(desk.repo, "worktree", "remove", "--force", str(tmp_path / "upper"))
+        gen_diff_data.run(desk.repo, "branch", "-D", "upper")
+
+
 def test_the_source_panel_stands_clear_of_the_diff(page):
     page.locator("#sourceopen").click()
     page.wait_for_selector("#srcrefs label")

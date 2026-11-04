@@ -146,6 +146,7 @@
     cursor: pointer;
   }
   .tab[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+  .tab .over { margin-left: 5px; font-size: 11px; color: var(--faint); }
   /* Shown only on the tab already chosen, where a click opens the pull request rather than selecting it again. */
   .tab .away { margin-left: 5px; font-size: 10px; color: var(--faint); opacity: 0; }
   .tab[aria-selected="true"] .away { opacity: 1; }
@@ -3746,7 +3747,7 @@
   // and the branch under review for the new one. A deleted file only exists on the old side, so both read from there.
   function fileRevs(file) {
     const { commit } = view();
-    const old = commit ? `${commit.sha}^` : data.baseRef;
+    const old = commit ? `${commit.sha}^` : branch().start || data.baseRef;
     return [old, file.state === "deleted" ? old : commit ? commit.sha : branch().rev];
   }
 
@@ -3917,8 +3918,16 @@
       tab.setAttribute("role", "tab");
       tab.textContent = entry.blurb;
       tab.setAttribute("aria-selected", String(index === state.branch));
+      // A ref read against a base of its own, such as the branch below it in a stack, names that base on its tab.
+      if (entry.baseRef && entry.baseRef !== data.baseRef) {
+        const over = document.createElement("span");
+        over.className = "over";
+        over.textContent = `on ${entry.baseRef.split("/").pop()}`;
+        tab.append(over);
+        tab.title = `against ${entry.baseRef}`;
+      }
       if (request) {
-        tab.title = `${request.title}\n${request.url}`;
+        tab.title = [request.title, request.url, tab.title].filter(Boolean).join("\n");
         const away = document.createElement("span");
         away.className = "away";
         away.textContent = "\u2197";
@@ -4032,7 +4041,12 @@
     }
     // A refresh names no source: it asks the desk for what it is serving, so a page whose source has been replaced
     // since it was built loads the one in place rather than putting its own back.
-    const order = keep ? {} : { dir: els.srcdir.value, base: els.srcbase.value, refs: [...source.picked] };
+    // The panel picks branches by name, so a branch read against a base of its own is sent with that base again.
+    const stacked =
+      els.srcdir.value === data.root ? data.branches.filter((entry) => entry.baseRef && entry.baseRef !== data.baseRef) : [];
+    const own = new Map(stacked.map((entry) => [entry.ref, entry.baseRef]));
+    const refs = [...source.picked].map((ref) => (own.has(ref) ? `${own.get(ref)}..${ref}` : ref));
+    const order = keep ? {} : { dir: els.srcdir.value, base: els.srcbase.value, refs };
     const reading = keep ? { ...state } : { branch: 0, scope: "all", current: 0 };
     els.srcstatus.textContent = "collecting diffs...";
     // Collecting the diffs takes a moment, so the button says it heard: it reports what it is doing and refuses a

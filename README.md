@@ -23,6 +23,7 @@ The page comes up on `127.0.0.1:8787`, each ref a tab, scoped to the whole range
 
 - **Local branches.** Omit the refs to be offered every branch ahead of the base. The checked-out branch carries its uncommitted work, so a review can start before a commit exists.
 - **Pull requests, by number** - `3243`, `#3243` or `pr/3243`. The head is fetched by number into `refs/diffdesk/pull/<number>`, so neither the fork it lives on nor its branch name has to be known, and a force-push since the last look is picked up. One fetched earlier stays reviewable while GitHub is unreachable.
+- **Stacks** - a ref written `base..ref` is read against a base of its own, so each branch of a stack is reviewed against the branch below it: `main..first first..second second..third`. Its tab names that base.
 - Both are reviewed side by side as tabs, and the page's **Source** panel switches repository, base, branch and pull request without a restart.
 - **Stopping one** is `desk.py stop`, which says whose review it is holding rather than going quiet under whoever is reading it (`--take` stops it anyway). Prefer it to a signal: one desk holds every review it was given. Pass `serve --owner <label>` to name whoever opened it, and `stop --owner <label>` then puts down that desk and leaves anyone else's running - which is how a shell, a job or an editor session can clean up the desk it opened on its way out.
 

@@ -208,6 +208,31 @@ def test_a_branch_the_base_moved_past_shows_only_its_own_work(repo):
         gen_diff_data.run(repo, "reset", "-q", "--hard", "HEAD~1")
 
 
+def test_a_ref_asked_for_with_a_base_of_its_own_shows_only_what_it_adds_to_that_base(repo, tmp_path):
+    # A stack: `upper` builds on `feature`, and is read against it rather than against the desk's base.
+    below = gen_diff_data.run(repo, "rev-parse", "feature").strip()
+    gen_diff_data.run(repo, "branch", "upper", "feature")
+    gen_diff_data.run(repo, "worktree", "add", "-q", str(tmp_path / "upper"), "upper")
+    try:
+        (tmp_path / "upper" / "stacked.py").write_text("on top\n")
+        gen_diff_data.run(tmp_path / "upper", "add", "-A")
+        gen_diff_data.run(tmp_path / "upper", "commit", "-q", "-m", "stack a file")
+        data = gen_diff_data.collect(str(repo), "main", ["feature", "feature..upper"])
+        lower, upper = data["branches"]
+        assert (lower["ref"], lower["baseRef"]) == ("feature", "main")
+        assert (upper["ref"], upper["baseRef"]) == ("upper", "feature")
+        assert [entry["path"] for entry in upper["files"]] == ["stacked.py"]
+        assert [commit["subject"] for commit in upper["commits"]] == ["stack a file"]
+        # The branch below moving changes what the one above is read against, so a page polling the stamp refreshes.
+        before = gen_diff_data.stamp(str(repo), "main", ["feature..upper"])
+        gen_diff_data.run(repo, "branch", "-f", "feature", "main")
+        assert gen_diff_data.stamp(str(repo), "main", ["feature..upper"]) != before
+    finally:
+        gen_diff_data.run(repo, "branch", "-f", "feature", below)
+        gen_diff_data.run(repo, "worktree", "remove", "--force", str(tmp_path / "upper"))
+        gen_diff_data.run(repo, "branch", "-D", "upper")
+
+
 def test_a_branch_the_base_has_taken_in_is_not_offered_again(repo):
     gen_diff_data.run(repo, "checkout", "-q", "main")
     # The base takes the work in as one commit of its own, which is what a squashed merge leaves behind: the same
