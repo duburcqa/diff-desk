@@ -208,6 +208,61 @@ def test_a_branch_the_base_moved_past_shows_only_its_own_work(repo):
         gen_diff_data.run(repo, "reset", "-q", "--hard", "HEAD~1")
 
 
+def test_a_ref_asked_for_with_a_base_of_its_own_shows_only_what_it_adds_to_that_base(repo, tmp_path):
+    # A stack: `upper` builds on `feature`, and is read against it rather than against the desk's base.
+    below = gen_diff_data.run(repo, "rev-parse", "feature").strip()
+    gen_diff_data.run(repo, "branch", "upper", "feature")
+    gen_diff_data.run(repo, "worktree", "add", "-q", str(tmp_path / "upper"), "upper")
+    try:
+        (tmp_path / "upper" / "stacked.py").write_text("on top\n")
+        gen_diff_data.run(tmp_path / "upper", "add", "-A")
+        gen_diff_data.run(tmp_path / "upper", "commit", "-q", "-m", "stack a file")
+        data = gen_diff_data.collect(str(repo), "main", ["feature", "feature..upper"])
+        lower, upper = data["branches"]
+        assert (lower["ref"], lower["baseRef"]) == ("feature", "main")
+        assert (upper["ref"], upper["baseRef"]) == ("upper", "feature")
+        assert [entry["path"] for entry in upper["files"]] == ["stacked.py"]
+        assert [commit["subject"] for commit in upper["commits"]] == ["stack a file"]
+        # The branch below moving changes what the one above is read against, so a page polling the stamp refreshes.
+        before = gen_diff_data.stamp(str(repo), "main", ["feature..upper"])
+        gen_diff_data.run(repo, "branch", "-f", "feature", "main")
+        assert gen_diff_data.stamp(str(repo), "main", ["feature..upper"]) != before
+    finally:
+        gen_diff_data.run(repo, "branch", "-f", "feature", below)
+        gen_diff_data.run(repo, "worktree", "remove", "--force", str(tmp_path / "upper"))
+        gen_diff_data.run(repo, "branch", "-D", "upper")
+
+
+def test_a_stack_is_read_from_its_pull_requests_and_else_from_the_branches_the_tip_builds_on(
+    repo, tmp_path, monkeypatch
+):
+    gen_diff_data.run(repo, "branch", "upper", "feature")
+    gen_diff_data.run(repo, "worktree", "add", "-q", str(tmp_path / "upper"), "upper")
+    try:
+        (tmp_path / "upper" / "stacked.py").write_text("on top\n")
+        gen_diff_data.run(tmp_path / "upper", "add", "-A")
+        gen_diff_data.run(tmp_path / "upper", "commit", "-q", "-m", "stack a file")
+        # No remote answers, so the stack is the local branches the tip builds on, nearest the base first.
+        assert gen_diff_data.stack_refs(str(repo), "upper", "main") == ["feature", "feature..upper"]
+
+        # A pull request chain is followed down from the tip, and each pull request is filed for the tab to link to.
+        pulls = {
+            "upper": {"number": 2, "url": "u/2", "title": "Upper", "headRefName": "upper", "baseRefName": "feature"},
+            "feature": {"number": 1, "url": "u/1", "title": "Lower", "headRefName": "feature", "baseRefName": "main"},
+        }
+        monkeypatch.setattr(gen_diff_data, "STACKED", {})
+        monkeypatch.setattr(gen_diff_data, "stack_pulls", lambda root, remote: pulls if remote == "origin" else None)
+        assert gen_diff_data.stack_refs(str(repo), "upper", "main", local=True) == ["feature", "feature..upper"]
+        assert gen_diff_data.STACKED["upper"]["number"] == 2
+
+        # A branch read against one it does not build on is marked, since it shows everything since they forked.
+        data = gen_diff_data.collect(str(repo), "main", ["feature..upper", "upper..feature"])
+        assert [entry["aside"] for entry in data["branches"]] == [False, True]
+    finally:
+        gen_diff_data.run(repo, "worktree", "remove", "--force", str(tmp_path / "upper"))
+        gen_diff_data.run(repo, "branch", "-D", "upper")
+
+
 def test_a_branch_the_base_has_taken_in_is_not_offered_again(repo):
     gen_diff_data.run(repo, "checkout", "-q", "main")
     # The base takes the work in as one commit of its own, which is what a squashed merge leaves behind: the same
