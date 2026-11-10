@@ -2467,6 +2467,65 @@ def test_a_branch_with_a_pull_request_says_which_and_opens_it(page, desk):
         desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})
 
 
+def test_a_branch_is_read_against_a_base_of_its_own_chosen_in_the_source_panel(page, desk, tmp_path):
+    branch = desk.get("/data")["branches"][0]["ref"]
+    gen_diff_data.run(desk.repo, "branch", "upper", branch)
+    gen_diff_data.run(desk.repo, "worktree", "add", "-q", str(tmp_path / "upper"), "upper")
+    try:
+        (tmp_path / "upper" / "stacked.py").write_text("on top\n")
+        gen_diff_data.run(tmp_path / "upper", "add", "-A")
+        gen_diff_data.run(tmp_path / "upper", "commit", "-q", "-m", "stack a file")
+        page.locator("#sourceopen").click()
+        page.wait_for_selector("#srcrefs label")
+        upper = page.locator("#srcrefs label").filter(has=page.locator("input[value='upper']"))
+        # Choosing a base picks the branch as well, and the branch is sent written against it.
+        upper.locator("select").select_option(branch)
+        assert upper.locator("input").is_checked()
+        with page.expect_request(lambda asked: asked.url.endswith("/scan")) as asked:
+            page.locator("#srcscan").click()
+        assert sorted(asked.value.post_data_json["refs"]) == sorted([branch, f"{branch}..upper"])
+        until(lambda: [entry.get("baseRef") for entry in desk.get("/data")["branches"]] == ["main", branch])
+        assert [entry["path"] for entry in desk.get("/data")["branches"][1]["files"]] == ["stacked.py"]
+
+        # The tab says what the branch is read against when hovered, and the panel opens on the base chosen.
+        page.reload(wait_until="load")
+        page.wait_for_selector(".tab")
+        assert "against" not in (page.locator(".tab").nth(0).get_attribute("title") or "")
+        assert f"against {branch}" in page.locator(".tab").nth(1).get_attribute("title")
+        # A branch read against the tab before it continues a stack, drawn as one chain.
+        assert page.locator("#tabs .tabsep").count() == 1
+        page.locator("#sourceopen").click()
+        page.wait_for_selector("#srcrefs label")
+        assert upper.locator("select").input_value() == branch
+        with page.expect_request(lambda asked: asked.url.endswith("/scan")) as asked:
+            page.locator("#srcscan").click()
+        assert sorted(asked.value.post_data_json["refs"]) == sorted([branch, f"{branch}..upper"])
+
+        # A branch served that is not a local one, such as a fork's, is listed all the same, on the base it is read
+        # against.
+        gen_diff_data.run(desk.repo, "update-ref", "refs/remotes/fork/upper", "upper")
+        assert desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch, f"{branch}..fork/upper"]})[
+            "ok"
+        ]
+        page.reload(wait_until="load")
+        page.locator("#sourceopen").click()
+        page.wait_for_selector("#srcrefs label")
+        forked = page.locator("#srcrefs label").filter(has=page.locator("input[value='fork/upper']"))
+        assert forked.locator("input").is_checked()
+        assert forked.locator("select").input_value() == branch
+
+        # A branch read against one it does not build on is marked, and says what it shows instead.
+        assert desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [f"upper..{branch}"]})["ok"]
+        page.reload(wait_until="load")
+        page.wait_for_selector(".tab .aside")
+        assert "not on upper" in page.locator(".tab").first.get_attribute("title")
+    finally:
+        desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})
+        gen_diff_data.run(desk.repo, "worktree", "remove", "--force", str(tmp_path / "upper"))
+        gen_diff_data.run(desk.repo, "branch", "-D", "upper")
+        gen_diff_data.run(desk.repo, "update-ref", "-d", "refs/remotes/fork/upper")
+
+
 def test_the_source_panel_stands_clear_of_the_diff(page):
     page.locator("#sourceopen").click()
     page.wait_for_selector("#srcrefs label")

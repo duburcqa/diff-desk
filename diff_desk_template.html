@@ -146,6 +146,8 @@
     cursor: pointer;
   }
   .tab[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+  .tabsep { align-self: center; color: var(--faint); font-size: 12px; }
+  .tab .aside { margin-left: 5px; color: var(--del-ink); }
   /* Shown only on the tab already chosen, where a click opens the pull request rather than selecting it again. */
   .tab .away { margin-left: 5px; font-size: 10px; color: var(--faint); opacity: 0; }
   .tab[aria-selected="true"] .away { opacity: 1; }
@@ -1077,7 +1079,7 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
-    width: 340px;
+    width: min(460px, calc(100vw - 40px));
     padding: 12px;
     background: var(--surface);
     border: 1px solid var(--rule-strong);
@@ -1099,7 +1101,11 @@
   .source .refs { display: flex; flex-direction: column; gap: 2px; max-height: 190px; overflow-y: auto; }
   .source .refs label { flex-direction: row; align-items: center; gap: 6px; font-family: var(--mono); font-size: 12px; color: var(--ink); }
   .source .refs .ahead { margin-left: auto; color: var(--faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #srcrefs label > span:not(.ahead) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #srcrefs .ahead { flex: none; }
+  #srcrefs select { flex: none; width: 15ch; font-size: 11px; padding: 1px 4px; }
   .source .pulls { border-top: 1px solid var(--rule); padding-top: 6px; }
+  #srcrefs > .label { display: flex; justify-content: space-between; color: var(--faint); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
   .source .pulls > .label { color: var(--faint); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
   .source .row { display: flex; align-items: center; gap: 8px; }
 
@@ -1182,7 +1188,7 @@
 <div class="source" id="source" data-open="false">
     <div class="body">
       <label>Repository<input id="srcdir" type="text" spellcheck="false" placeholder="/path/to/checkout" /></label>
-      <label>Base<input id="srcbase" type="text" spellcheck="false" placeholder="upstream/main" /></label>
+      <label>Default base<input id="srcbase" type="text" spellcheck="false" placeholder="upstream/main" /></label>
       <input id="srcfilter" type="text" spellcheck="false" placeholder="Filter branches and pull requests" />
       <div class="refs" id="srcrefs"></div>
       <div class="refs pulls" id="srcpulls"></div>
@@ -3778,7 +3784,7 @@
   // and the branch under review for the new one. A deleted file only exists on the old side, so both read from there.
   function fileRevs(file) {
     const { commit } = view();
-    const old = commit ? `${commit.sha}^` : data.baseRef;
+    const old = commit ? `${commit.sha}^` : branch().start || data.baseRef;
     return [old, file.state === "deleted" ? old : commit ? commit.sha : branch().rev];
   }
 
@@ -3949,8 +3955,24 @@
       tab.setAttribute("role", "tab");
       tab.textContent = entry.blurb;
       tab.setAttribute("aria-selected", String(index === state.branch));
+      // A ref read against a base of its own, such as the branch below it in a stack, names that base when hovered.
+      if (entry.baseRef && entry.baseRef !== data.baseRef) tab.title = `against ${entry.baseRef}`;
+      if (entry.aside) {
+        const aside = document.createElement("span");
+        aside.className = "aside";
+        aside.textContent = "!";
+        tab.append(aside);
+        tab.title = `not on ${entry.baseRef}: read from where they forked, so it needs restacking`;
+      }
+      // A branch read against the tab before it continues a stack, which the bar draws as one chain.
+      if (index && entry.baseRef === data.branches[index - 1].ref) {
+        const sep = document.createElement("span");
+        sep.className = "tabsep";
+        sep.textContent = "\u203a";
+        els.tabs.append(sep);
+      }
       if (request) {
-        tab.title = `${request.title}\n${request.url}`;
+        tab.title = [request.title, request.url, tab.title].filter(Boolean).join("\n");
         const away = document.createElement("span");
         away.className = "away";
         away.textContent = "\u2197";
@@ -3964,7 +3986,7 @@
         }
         state.branch = index;
         state.scope = "all";
-        [...els.tabs.children].forEach((node, i) => node.setAttribute("aria-selected", String(i === index)));
+        els.tabs.querySelectorAll(".tab").forEach((node, i) => node.setAttribute("aria-selected", String(i === index)));
         renderScopes();
         render();
         // The comments panel reads the review being shown, so it follows the tab rather than the next round.
@@ -3976,17 +3998,28 @@
 
   /* ---------- picking what to review ---------- */
 
-  const source = { refs: [], pulls: [], current: "", picked: new Set() };
+  // `bases` holds the base each branch is read against where it is not the panel's own, such as the branch below it in
+  // a stack.
+  const source = { refs: [], pulls: [], current: "", picked: new Set(), bases: new Map() };
 
   async function loadRefs() {
     els.srcstatus.textContent = "reading branches...";
     const where = `refs?dir=${encodeURIComponent(els.srcdir.value)}&base=${encodeURIComponent(els.srcbase.value)}`;
     try {
       const info = await (await fetch(where, { cache: "no-store" })).json();
-      source.refs = info.refs;
+      // A branch being served is listed whether or not it is a local one, such as a fork's `origin/<branch>`, so its
+      // base can be read and changed here. A pull request has its own row below.
+      const listed = new Set(info.refs.map((row) => row.ref));
+      const served = data.branches
+        .filter((entry) => !listed.has(entry.ref) && !entry.ref.startsWith("refs/diffdesk/pull/"))
+        .map((entry) => ({ ref: entry.ref, ahead: entry.commits.length }));
+      source.refs = [...served, ...info.refs];
       source.pulls = info.pulls || [];
       source.current = info.current;
       source.picked = new Set(data.branches.map((entry) => entry.ref));
+      const stacked =
+        els.srcdir.value === data.root ? data.branches.filter((entry) => entry.baseRef && entry.baseRef !== data.baseRef) : [];
+      source.bases = new Map(stacked.map((entry) => [entry.ref, entry.baseRef]));
       drawRefs();
       const counted = [`${info.refs.length} ahead of ${els.srcbase.value}`];
       if (source.pulls.length) counted.push(`${source.pulls.length} open PR${source.pulls.length === 1 ? "" : "s"}`);
@@ -4001,11 +4034,38 @@
     }
   }
 
+  // What one branch is read against: the panel's base, or another branch, which is how a stack is reviewed one branch
+  // at a time. Choosing a base picks the branch too, since a base is only chosen for a branch to be reviewed.
+  function baseChoice(ref, box) {
+    const choice = document.createElement("select");
+    const say = () => (choice.title = `Read against ${choice.value || els.srcbase.value || "the base"}`);
+    const own = source.bases.get(ref);
+    const offered = source.refs.map((row) => row.ref).filter((other) => other !== ref);
+    if (own && !offered.includes(own)) offered.unshift(own);
+    choice.append(new Option(els.srcbase.value || "base", ""));
+    for (const other of offered) choice.append(new Option(other, other, false, other === own));
+    say();
+    choice.addEventListener("change", () => {
+      if (choice.value) source.bases.set(ref, choice.value);
+      else source.bases.delete(ref);
+      say();
+      box.checked = true;
+      source.picked.add(ref);
+    });
+    return choice;
+  }
+
   function drawRefs() {
       const query = els.srcfilter.value.trim().toLowerCase();
       // A branch already picked stays listed whatever the filter says, so a selection cannot be lost out of view.
       const rows = source.refs.filter((row) => !query || row.ref.toLowerCase().includes(query) || source.picked.has(row.ref));
       els.srcrefs.innerHTML = "";
+      if (rows.length) {
+        const title = document.createElement("div");
+        title.className = "label";
+        title.append(new Text("Branches"), Object.assign(document.createElement("span"), { textContent: "Read against" }));
+        els.srcrefs.append(title);
+      }
       for (const row of rows) {
         const label = document.createElement("label");
         const box = document.createElement("input");
@@ -4018,10 +4078,11 @@
         });
         const name = document.createElement("span");
         name.textContent = row.ref === source.current ? `${row.ref} *` : row.ref;
+        name.title = row.ref;
         const ahead = document.createElement("span");
         ahead.className = "ahead";
         ahead.textContent = `${row.ahead} commit${row.ahead === 1 ? "" : "s"}`;
-        label.append(box, name, ahead);
+        label.append(box, name, ahead, baseChoice(row.ref, box));
         els.srcrefs.append(label);
       }
       els.srcpulls.innerHTML = "";
@@ -4064,7 +4125,8 @@
     }
     // A refresh names no source: it asks the desk for what it is serving, so a page whose source has been replaced
     // since it was built loads the one in place rather than putting its own back.
-    const order = keep ? {} : { dir: els.srcdir.value, base: els.srcbase.value, refs: [...source.picked] };
+    const refs = [...source.picked].map((ref) => (source.bases.has(ref) ? `${source.bases.get(ref)}..${ref}` : ref));
+    const order = keep ? {} : { dir: els.srcdir.value, base: els.srcbase.value, refs };
     const reading = keep ? { ...state } : { branch: 0, scope: "all", current: 0 };
     els.srcstatus.textContent = "collecting diffs...";
     // Collecting the diffs takes a moment, so the button says it heard: it reports what it is doing and refuses a
