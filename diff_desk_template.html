@@ -364,7 +364,30 @@
   .foldername .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .foldername .num { color: var(--faint); font-family: var(--mono); font-size: 10.5px; }
   .foldername .chev { flex: none; transition: transform 0.12s ease; }
-  .folder[data-open="false"] > .foldername .chev { transform: rotate(-90deg); }
+  .folder[data-open="false"] > .folderhead .chev { transform: rotate(-90deg); }
+  /* A folder is ticked from a box shown over its count while hovered, and reads as its files do once all are ticked. */
+  .folderhead { position: relative; }
+  .folderhead:hover .foldername { background: var(--surface-sunk); color: var(--ink); }
+  .foldername .tick { margin-left: -2px; }
+  .folder[data-done="true"] > .folderhead .tick { opacity: 1; }
+  .folder[data-done="true"] > .folderhead .name { color: var(--faint); text-decoration: line-through; }
+  .folder[data-stale="true"] > .folderhead .tick { opacity: 1; color: var(--stale); }
+  .folderseen {
+    position: absolute;
+    top: 50%;
+    right: 6px;
+    transform: translateY(-50%);
+    display: none;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    color: var(--muted);
+    cursor: pointer;
+    user-select: none;
+  }
+  .folderseen input { accent-color: var(--add-ink); width: 13px; height: 13px; margin: 0; }
+  .folderhead:hover .folderseen, .folderseen:focus-within { display: inline-flex; }
+  .folderhead:hover .foldername .num, .folderhead:focus-within .foldername .num { visibility: hidden; }
 
   .fileitem {
     display: grid;
@@ -1444,6 +1467,15 @@
     if (done) seen[key(file.path)] = file.digest;
     saveSeen();
     post("reviewed", { drop: held, marks: done ? { [key(file.path)]: file.digest } : {} });
+  }
+
+  function setSeenAll(files, done) {
+    const held = files.flatMap((file) => marksFor(file.path));
+    for (const name of held) delete seen[name];
+    const marks = done ? Object.fromEntries(files.map((file) => [key(file.path), file.digest])) : {};
+    Object.assign(seen, marks);
+    saveSeen();
+    post("reviewed", { drop: held, marks });
   }
 
   function countStale(files) {
@@ -5383,11 +5415,13 @@
       }
       const shelf = document.createElement("div");
       shelf.className = "folder";
+      const head = document.createElement("div");
+      head.className = "folderhead";
       const label = document.createElement("button");
       label.className = "foldername";
       label.style.paddingLeft = `${6 + depth * 12}px`;
       const inside = [...here.folders.values()].reduce((sum, child) => sum + count(child), 0) + here.files.length;
-      label.innerHTML = chevron + '<span class="name"></span><span class="num"></span>';
+      label.innerHTML = chevron + tickMark + '<span class="name"></span><span class="num"></span>';
       label.querySelector(".name").textContent = held.join("/");
       label.querySelector(".num").textContent = String(inside);
       const kids = document.createElement("div");
@@ -5407,7 +5441,13 @@
         entry.style.paddingLeft = `${8 + (depth + 1) * 12}px`;
         kids.append(entry);
       }
-      shelf.append(label, kids);
+      const within = filesIn(here);
+      const states = within.map(seenState);
+      const done = states.every((state) => state === "done");
+      shelf.dataset.done = String(done);
+      shelf.dataset.stale = String(!done && states.every((state) => state !== "open"));
+      head.append(label, folderSeen(within, done, states.some((state) => state !== "open")));
+      shelf.append(head, kids);
       return shelf;
     };
 
@@ -5415,6 +5455,38 @@
     for (const [name, node] of root.folders) holder.append(draw(node, name, name, 0));
     for (const { file, index } of root.files) holder.append(fileEntry(file, index));
     return holder;
+  }
+
+  function filesIn(node) {
+    return [...[...node.folders.values()].flatMap(filesIn), ...node.files.map(({ file }) => file)];
+  }
+
+  // Ticks or clears every file a folder holds at once, as each file's own box would one by one.
+  function folderSeen(files, done, some) {
+    const seenLabel = document.createElement("label");
+    seenLabel.className = "folderseen";
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = done;
+    box.indeterminate = some && !done;
+    box.addEventListener("change", () => {
+      const shown = visible(view().files);
+      const last = shown.indexOf(files[files.length - 1]);
+      const anchor = box.checked && document.body.classList.contains("hide-done") ? shown[last + 1] : files[0];
+      holdPlace(anchor && anchor.path, () => {
+        setSeenAll(files, box.checked);
+        for (const file of files) {
+          if (box.checked) {
+            markRead(file.path);
+            shownNews.delete(file.path);
+          }
+          folds.set(file.path, { digest: file.digest, open: !box.checked, upTo: latest() });
+        }
+        render();
+      });
+    });
+    seenLabel.append(box, document.createTextNode("Reviewed"));
+    return seenLabel;
   }
 
   function count(node) {

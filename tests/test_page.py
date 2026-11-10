@@ -531,6 +531,29 @@ def test_the_file_list_follows_the_folders(page):
     page.evaluate("() => localStorage.removeItem('diffdesk.folded')")
 
 
+def test_a_folder_is_reviewed_at_once_from_a_box_shown_while_hovered(page, desk):
+    shelf = page.locator("#filelist .folder").filter(has=page.locator(".foldername", has_text="pkg/sub")).first
+    head = shelf.locator(":scope > .folderhead")
+    box = head.locator(".folderseen input")
+    assert not box.is_visible()
+    head.hover()
+    assert box.is_visible()
+    box.check()
+    # Every file the folder holds is ticked as its own box would tick it, and the folder reads as reviewed.
+    page.wait_for_selector("#filelist .folder[data-done='true']")
+    assert shelf.get_attribute("data-done") == "true"
+    assert set(shelf.locator(".fileitem").evaluate_all("(rows) => rows.map((row) => row.dataset.done)")) == {"true"}
+    assert page.locator("section.file[data-path='pkg/sub/deep.py']").get_attribute("data-done") == "true"
+    assert any(mark.endswith("pkg/sub/deep.py") for mark in desk.get("/reviewed")["marks"])
+
+    # Unticked, the folder and its files are open again.
+    head.hover()
+    box.uncheck()
+    page.wait_for_selector("#filelist .folder[data-done='true']", state="detached")
+    assert set(shelf.locator(".fileitem").evaluate_all("(rows) => rows.map((row) => row.dataset.done)")) == {"false"}
+    assert not any(mark.endswith("pkg/sub/deep.py") for mark in desk.get("/reviewed")["marks"])
+
+
 def test_a_comment_keeps_its_code_and_its_line_breaks(page, desk):
     branch = page.evaluate("() => data.branches[0].ref")
     pasted = "Try this instead:\n\n```python\nif x:\n    return math.pi * r**2\n```\n\nand call `area()` after."
