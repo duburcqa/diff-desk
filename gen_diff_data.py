@@ -2,6 +2,7 @@
 
 import hashlib
 import io
+import itertools
 import json
 import os
 import pathlib
@@ -173,6 +174,16 @@ def canonical_repo(root):
 
 
 PULL = re.compile(r"^(?:#|pr[/-])?(\d+)$", re.IGNORECASE)
+
+
+def own_base(wanted, base):
+    """The base a ref is read against, and the ref: a ref written `base..ref` names its own, any other takes the desk's.
+
+    A stack of branches is reviewed one branch at a time, each against the branch below it, so what each one adds is
+    all its page shows. Git refuses `..` in a branch name, so the spelling cannot be mistaken for one.
+    """
+    own, dots, ref = str(wanted).strip().partition("..")
+    return (own or base, ref) if dots and ref else (base, str(wanted).strip())
 
 
 def pull_number(ref):
@@ -403,6 +414,61 @@ def pull_requests(root, upstream):
     return recalled(f"pulls:{upstream}", open_pulls, root, upstream) or {}
 
 
+def builds_on(root, lower, upper):
+    """Whether `upper` holds every commit of `lower`."""
+    return subprocess.run(["git", "merge-base", "--is-ancestor", lower, upper], cwd=root, check=False).returncode == 0
+
+
+# The pull request each branch of a stack is opened as, filed by the ref it is served as, since a stack read from a fork
+# has pull requests the upstream listing does not hold (see `decorate`).
+STACKED = {}
+
+
+def stack_pulls(root, remote):
+    """Every open pull request of the repository a remote names, keyed by its head branch, or None without an answer."""
+    url = run(root, "remote", "get-url", remote).strip()
+    match = re.search(r"github\.com[:/](.+?)(?:\.git)?$", url)
+    if not match:
+        return None
+    listing = ("pr", "list", "--repo", match.group(1), "--state", "open", "--limit", "200")
+    told = gh(*listing, "--json", "number,url,title,headRefName,baseRefName", repeatable=True, cwd=root, budget=30)
+    if told.returncode != 0:
+        return None
+    try:
+        return {row["headRefName"]: row for row in json.loads(told.stdout or "[]")}
+    except json.JSONDecodeError:
+        return None
+
+
+def stack_refs(root, tip, base, *, local=False):
+    """The refs of the stack ending at `tip`, bottom first, each but the bottom one written against the branch below.
+
+    The stack is read from the pull requests, following each one's base down from the one opened from `tip`, on the
+    first of `origin` and `upstream` that has one. Each branch is read as that remote's pushed head, fetched first, or
+    as the local branch with `local`. Without a pull request the stack is the local branches the tip builds on.
+    """
+    root = str(pathlib.Path(root).expanduser())
+    for remote in ("origin", "upstream"):
+        pulls = stack_pulls(root, remote) or {}
+        if tip not in pulls:
+            continue
+        chain = [tip]
+        while pulls[chain[-1]]["baseRefName"] in pulls and pulls[chain[-1]]["baseRefName"] not in chain:
+            chain.append(pulls[chain[-1]]["baseRefName"])
+        chain.reverse()
+        if not local:
+            run(root, "fetch", "--quiet", remote, *chain)
+        names = chain if local else [f"{remote}/{name}" for name in chain]
+        for name, branch in zip(names, chain, strict=True):
+            STACKED[name] = {key: pulls[branch][key] for key in ("number", "url", "title", "headRefName")}
+        break
+    else:
+        # The branches between the base and the tip, which the tip builds on, ordered by how far each is from the base.
+        below = [row for row in ahead_refs(root, base) if row["ref"] != tip and builds_on(root, row["ref"], tip)]
+        names = [row["ref"] for row in sorted(below, key=lambda row: row["ahead"])] + [tip]
+    return [names[0], *(f"{lower}..{upper}" for lower, upper in itertools.pairwise(names))]
+
+
 def ahead_refs(root, base):
     """Every local branch holding at least one commit the base does not, newest tip first."""
     rows = []
@@ -424,8 +490,10 @@ def stamp(root, base, refs):
     collecting the diffs and rebuilding itself around them.
     """
     root = str(pathlib.Path(root).expanduser())
-    heads = [LOCAL_HEADS.get(pull_number(ref), ref) for ref in refs]
-    marks = [run(root, "rev-parse", ref).strip() for ref in (base, *refs, *heads)]
+    pairs = [own_base(wanted, base) for wanted in refs]
+    heads = [LOCAL_HEADS.get(pull_number(ref), ref) for _, ref in pairs]
+    bases = [own for own, _ in pairs]
+    marks = [run(root, "rev-parse", ref).strip() for ref in (base, *bases, *(ref for _, ref in pairs), *heads)]
     marks.append(run(root, "status", "--porcelain").strip())
     marks.append(run(root, "diff", "HEAD").strip())
     return hashlib.sha1("\x1f".join(marks).encode()).hexdigest()[:16]
@@ -460,7 +528,7 @@ def decorate(payload):
     payload["viewer"] = viewer()
     for branch in payload["branches"]:
         if not branch["ref"].startswith("refs/diffdesk/pull/"):
-            branch["pr"] = requests.get(branch["ref"])
+            branch["pr"] = requests.get(branch["ref"]) or STACKED.get(branch["ref"])
     before = payload.get("decor")
     said = [upstream, payload["viewer"], *[(branch["ref"], branch["pr"]) for branch in payload["branches"]]]
     payload["decor"] = hashlib.sha1(json.dumps(said, sort_keys=True).encode()).hexdigest()[:16]
@@ -488,24 +556,25 @@ def collect(root, base, refs):
     # it, and a page carrying that would read as behind the very desk that served it, reloading at every refresh.
     data["desk"] = RUNNING
     for wanted in refs:
-        number = pull_number(wanted)
+        against, asked = own_base(wanted, base)
+        number = pull_number(asked)
         request = None
-        ref = head = wanted
+        ref = head = asked
         if number is not None:
             ref, request = fetch_pull(root, upstream, number)
             head = LOCAL_HEADS[number] = local_head(root, ref, request)
         commits = []
-        log = run(root, "log", "--format=%h%x1f%s", f"{base}..{head}").strip().split("\n")
+        log = run(root, "log", "--format=%h%x1f%s", f"{against}..{head}").strip().split("\n")
         for row in reversed([line for line in log if line]):
             sha, subject = row.split("\x1f")
             files = parse(run(root, "show", "--format=", "--unified=3", sha))
             mark_strings(root, files, f"{sha}^", sha)
             commits.append({"sha": sha, "subject": subject, "files": files})
-        fork = run(root, "merge-base", base, head).strip()
+        fork = run(root, "merge-base", against, head).strip()
         # What the ref has committed, read from the ref rather than from disk, so work saved there says nothing about
         # where the base stands.
         touched = [row for row in run(root, "diff", "--name-only", fork, head).split("\n") if row]
-        carried = bool(touched) and not run(root, "diff", "--name-only", base, head, "--", *touched).strip()
+        carried = bool(touched) and not run(root, "diff", "--name-only", against, head, "--", *touched).strip()
         if carried:
             # The base stands where this ref stands everywhere it touched, so it has taken the work in, squashed or
             # rebased or not. What is left to review is what no commit carries, and reading from the fork point would
@@ -515,7 +584,7 @@ def collect(root, base, refs):
         else:
             # A ref is read from where it forked, so a base that moved on since does not appear in it backwards. One
             # carrying no commit of its own has only the base to be read against, which is the difference it has.
-            start = fork if commits else base
+            start = fork if commits else against
             whole = (
                 run(root, "diff", "--unified=3", start)
                 if head == current
@@ -524,12 +593,17 @@ def collect(root, base, refs):
             revs = (start, "" if head == current else head)
         files = parse(whole)
         mark_strings(root, files, *revs)
+        # A ref read against a base of its own that it does not build on, such as a stack not restacked since the branch
+        # below it moved, shows everything since they forked.
+        aside = against != base and not builds_on(root, against, head)
         # A ref that differs from the base nowhere has nothing to review, whatever it carries in commits.
         if not files:
             continue
         data["branches"].append(
             {
                 "ref": ref,
+                "baseRef": against,
+                "aside": aside,
                 "blurb": f"#{number}" if number else ref.split("/")[-1].replace("_", " "),
                 "pr": request,
                 "tip": run(root, "rev-parse", "--short", head).strip(),
