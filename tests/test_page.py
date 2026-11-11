@@ -1175,6 +1175,19 @@ def test_a_file_opened_by_hand_stays_open_when_the_page_redraws(page):
     card.locator(".filehead").first.click()
 
 
+def test_the_review_key_folds_a_file_opened_by_hand_as_the_box_does(page):
+    card = page.locator("section.file").first
+    # Folded and opened again by hand, which leaves a decision on record for the key to override.
+    card.locator(".filehead").first.click()
+    card.locator(".filehead").first.click()
+    assert card.get_attribute("data-open") == "true"
+
+    page.locator("body").press("r")
+    page.wait_for_selector("section.file[data-done='true'][data-open='false']")
+    page.locator("body").press("r")
+    page.wait_for_selector("section.file[data-done='false'][data-open='true']")
+
+
 def test_the_path_filter_lists_what_it_matches_for_picking_by_name(page):
     page.set_viewport_size({"width": 1200, "height": 600})
     page.locator("#q").click()
