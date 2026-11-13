@@ -1547,6 +1547,34 @@ def test_marking_a_file_reviewed_from_above_it_leaves_the_view_alone(page):
     card.locator("input[type=checkbox]").uncheck()
 
 
+def test_a_redraw_leaves_the_reader_where_they_were(page, desk):
+    line = sample(page).locator("tr.a[data-line]").first
+    line.locator("td.code").first.hover()
+    line.locator("button.pin").first.click()
+    submit(page, f"answered at length before a redraw, number {len(desk.get('/comments')) + 1}")
+    made = desk.get("/comments")[-1]["seq"]
+    # Four screens of answer, read from well inside it.
+    rows = page.evaluate("() => Math.ceil(window.innerHeight / 18) * 4")
+    answer = "\n\n".join(f"paragraph {index} of the answer" for index in range(rows))
+    desk.post("/reply", {"seq": made, "text": answer, "who": "session"})
+    page.evaluate("() => loadNotes().then(() => drawNews())")
+    page.wait_for_function(
+        "(seq) => document.querySelector(`#note-${seq} .thread`).getBoundingClientRect().height"
+        " > 2.5 * window.innerHeight",
+        arg=made,
+    )
+    page.evaluate("(seq) => document.getElementById(`note-${seq}`).scrollIntoView({block: 'start'})", made)
+    page.evaluate("() => window.scrollBy(0, 2.5 * window.innerHeight)")
+    at_rest(page)
+    # What the file stood at when it was last let go of, before the thread grew: a redraw reserves a card at that.
+    page.evaluate("() => heights.set('sample.py', 40)")
+    where = "(seq) => Math.round(document.getElementById(`note-${seq}`).getBoundingClientRect().top)"
+    before = page.evaluate(where, made)
+    page.evaluate("() => render()")
+    at_rest(page)
+    assert abs(page.evaluate(where, made) - before) <= 1
+
+
 def test_copying_a_selection_of_lines_yields_the_code_alone(page):
     page.evaluate("""() => {
       window.__copied = null;

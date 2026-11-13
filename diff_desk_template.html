@@ -4505,6 +4505,17 @@
     els.filelist.append(fileTree(shown));
 
     const lifted = liftWriting(els.main);
+    // Every card is rebuilt at what it stands at now, so the page keeps its shape until what a card holds says
+    // otherwise, and the reader is put back at the same scroll once it is whole again. Reserved at what it took when
+    // last let go of, a card a thread has grown in since is far too short and the page collapses under the reader by
+    // the difference, landing them files further on. The scroll is put back by hand because every node a browser could
+    // hold the reader's place on goes with the redraw, and a layout read while the page is half built cuts the scroll
+    // down to fit it.
+    for (const wrap of els.main.querySelectorAll("section.file[data-open='true']")) {
+      const body = wrap.querySelector(":scope > .body");
+      if (body) heights.set(wrap.dataset.path, body.getBoundingClientRect().height);
+    }
+    const scrolled = window.scrollY;
     els.main.innerHTML = "";
     if (commit) {
       const note = document.createElement("div");
@@ -4529,6 +4540,7 @@
     fitNotes();
     markCurrent();
     paintSel();
+    if (!reaching) window.scrollTo(0, scrolled);
   }
 
   // Written before the page is painted: the observer below only hears about a body a frame later, and a comment left
