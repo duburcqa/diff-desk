@@ -3678,7 +3678,7 @@ def test_a_thread_says_what_it_owes_the_pull_request_and_sends_it_when_asked(pag
         page.locator(f"#note-{made} .filehead, #note-{made} .line").first.hover()
         page.locator(f"#note-{made} .line:not(.reply) button.tiny").filter(has_text="Whisper").click()
         page.locator(f"#note-{made} .line.actions.aside textarea").fill("come back to this after the rebase")
-        page.locator(f"#note-{made} .line.actions.aside button").filter(has_text="Keep").click()
+        page.locator(f"#note-{made} .line.actions.aside button").filter(has_text="Reply").click()
         page.wait_for_selector(f"#note-{made} .line.reply.aside:not(.actions)")
         aside = page.locator(f"#note-{made} .line.reply.aside:not(.actions)")
         assert aside.locator(".mark.aside").inner_text() == "whisper"
@@ -3690,7 +3690,7 @@ def test_a_thread_says_what_it_owes_the_pull_request_and_sends_it_when_asked(pag
         assert aside.locator("button.tiny").filter(has_text="whisper").count() == 1
         aside.locator("button.tiny").filter(has_text="Whisper").click()
         page.locator(f"#note-{made} .line.actions.aside textarea").fill("done.")
-        page.locator(f"#note-{made} .line.actions.aside button").filter(has_text="Keep").click()
+        page.locator(f"#note-{made} .line.actions.aside button").filter(has_text="Reply").click()
         page.wait_for_function(
             "(seq) => document.querySelectorAll(`#note-${seq} .line.reply.aside:not(.actions)`).length === 2", arg=made
         )
@@ -3939,7 +3939,7 @@ def test_a_note_being_written_survives_the_poll_redrawing_its_thread(page, desk)
     assert box.count() == 1
     assert box.locator("textarea").input_value() == "half a note, and worth keeping"
     assert box.evaluate("(line) => line.previousElementSibling.matches('.line:not(.reply)')")
-    box.locator("button").filter(has_text="Keep").click()
+    box.locator("button").filter(has_text="Reply").click()
     page.wait_for_selector(f"#note-{made} .line.reply.aside:not(.actions)")
     assert page.locator(f"#note-{made} .line.actions.aside").count() == 0
     assert "half a note, and worth keeping" in page.locator(f"#note-{made} .line.reply.aside .said").inner_text()
