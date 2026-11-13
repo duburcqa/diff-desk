@@ -747,6 +747,24 @@
   .thread .who .by.you { color: var(--add-ink); }
   .thread .who .by.them { color: var(--stale); }
   .thread .said { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: normal; color: var(--ink); }
+  .thread .reacts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .thread .react {
+    font: inherit;
+    font-size: 11.5px;
+    line-height: 18px;
+    padding: 0 7px;
+    border: 1px solid var(--rule-strong);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .thread .react:hover:not(:disabled) { border-color: var(--accent); }
+  .thread .react.mine { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); }
+  .thread .react:disabled { cursor: default; }
+  /* Offered under the pointer only, since a smiley on every line says nothing until somebody wants it. */
+  .thread .line > .reactadd { opacity: 0; }
+  .thread .line:hover > .reactadd, .thread .line > .reactadd:focus-visible { opacity: 1; }
   /* What is said reads as text set in blocks: the first paragraph runs on from the name that opens it, and every block
      after it starts on a line of its own, a little apart from the one above. */
   .thread .said p { margin: 6px 0 0; }
@@ -1681,6 +1699,75 @@
       notes.live = false;
       return { ok: false, error: error.message };
     }
+  }
+
+  // The reactions GitHub lets anyone give, in the order its own page lists them.
+  const REACTIONS = [
+    ["THUMBS_UP", "\u{1F44D}"],
+    ["THUMBS_DOWN", "\u{1F44E}"],
+    ["LAUGH", "\u{1F604}"],
+    ["HOORAY", "\u{1F389}"],
+    ["CONFUSED", "\u{1F615}"],
+    ["HEART", "\u{2764}\u{FE0F}"],
+    ["ROCKET", "\u{1F680}"],
+    ["EYES", "\u{1F440}"],
+  ];
+
+  // The reactions on one remark or reply, put under its words, and the button that adds one, for the line to carry.
+  // A press on a comment the pull request holds reacts there at once, as GitHub's own page does.
+  function reacting(note, index, item, host) {
+    const live = !note.pending && notes.live;
+    const react = async (content, on) => {
+      const outcome = await post("react", { seq: note.seq, reply: index, content, on, who: "you", ...where() });
+      if (!outcome.ok) announce("reaction", `[${note.seq}]`, outcome.error || "GitHub unreachable");
+      await loadNotes();
+      render();
+    };
+    const row = document.createElement("div");
+    row.className = "reacts";
+    for (const [content, emoji] of REACTIONS) {
+      const group = (item.reactions || {})[content];
+      if (!group || !group.count) continue;
+      const mine = group.by.some(isReader);
+      const chip = document.createElement("button");
+      chip.className = mine ? "react mine" : "react";
+      chip.dataset.content = content;
+      chip.textContent = `${emoji} ${group.count}`;
+      const names = group.by.map(spokenBy);
+      if (group.count > names.length) names.push(`${group.count - names.length} more`);
+      chip.title = `${names.join(", ")} reacted with ${emoji}`;
+      chip.disabled = !live;
+      chip.addEventListener("click", () => react(content, !mine));
+      row.append(chip);
+    }
+    if (row.childElementCount) host.append(row);
+    if (!live) return null;
+    const add = document.createElement("button");
+    add.className = "tiny reactadd";
+    add.textContent = "\u{263A}+";
+    add.title = "React";
+    add.addEventListener("click", () => {
+      const picker = document.createElement("div");
+      picker.className = "reacts picking";
+      for (const [content, emoji] of REACTIONS) {
+        const held = (item.reactions || {})[content];
+        const choice = document.createElement("button");
+        choice.className = held && held.by.some(isReader) ? "react mine" : "react";
+        choice.dataset.content = content;
+        choice.textContent = emoji;
+        choice.addEventListener("click", () => react(content, !(held && held.by.some(isReader))));
+        picker.append(choice);
+      }
+      const shut = document.createElement("button");
+      shut.className = "react";
+      shut.textContent = "\u00d7";
+      shut.title = "Close";
+      shut.addEventListener("click", () => picker.remove());
+      picker.append(shut);
+      host.querySelector(":scope > .reacts.picking")?.remove();
+      host.append(picker);
+    });
+    return add;
   }
 
   function shown(host, images) {
@@ -3105,6 +3192,7 @@
     text.append(who);
     written(text.appendChild(spoke()), note.text);
     shown(text, note.images);
+    const reactTo = reacting(note, null, note, text);
     head.append(text);
     if (note.state === "resolved") {
       const turn = document.createElement("button");
@@ -3136,6 +3224,7 @@
       row.append(cell);
       return row;
     }
+    if (reactTo) head.append(reactTo);
     if ((note.pending || notes.live) && !note.who) {
       const change = document.createElement("button");
       change.className = "tiny";
@@ -3304,6 +3393,8 @@
       written(body.appendChild(spoke()), answer.text);
       shown(body, answer.images);
       said.append(body);
+      const reactTo = reacting(note, index, answer, body);
+      if (reactTo) said.append(reactTo);
       // Whether the pull request holds this reply, shown on the reply itself: what a thread still owes is what its own
       // Sync would carry, and a reader deciding whether to press it reads that off the replies.
       if (!note.pending && !answer.whisper && answer.github !== "none") {

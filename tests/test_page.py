@@ -4188,3 +4188,38 @@ def test_the_semantic_view_faces_both_versions_and_comments_on_the_line_shown(pa
     assert page.locator("#semantic").get_attribute("aria-pressed") == "true"
     # Left behind, the comment would reopen a file other tests fold away.
     desk.post("/drop", {"seq": note["seq"]})
+
+
+def test_a_remark_and_a_reply_are_reacted_to_from_the_page(page, desk):
+    branch = page.evaluate("() => data.branches[0].ref")
+    saying = f"worth an emoji, number {len(desk.get('/comments')) + 1}"
+    made = desk.post(
+        "/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": saying}]
+    )["seq"]
+    desk.post("/reply", {"seq": made, "text": "said by the session", "who": "session"})
+    desk.post("/react", {"seq": made, "reply": 0, "content": "EYES", "who": "session"})
+    page.reload(wait_until="load")
+    page.wait_for_selector(f"#note-{made} .line.reply")
+    thread = page.locator(f"#note-{made}")
+
+    # Somebody else's reaction is shown with its count, and pressing it adds the reader's own beside it.
+    seen = thread.locator(".line.reply .react[data-content='EYES']")
+    assert seen.inner_text() == "\U0001f440 1"
+    assert "claude" in seen.get_attribute("title")
+    seen.click()
+    page.wait_for_selector(f"#note-{made} .line.reply .react.mine[data-content='EYES']")
+    assert thread.locator(".line.reply .react[data-content='EYES']").inner_text() == "\U0001f440 2"
+
+    # The remark carries none until one is picked, and picking it again takes it back.
+    head = thread.locator(".thread > .line").first
+    assert head.locator(".reacts").count() == 0
+    head.hover()
+    head.locator("button.reactadd").click()
+    head.locator(".reacts.picking .react[data-content='HOORAY']").click()
+    page.wait_for_selector(f"#note-{made} .thread > .line .reacts .react.mine[data-content='HOORAY']")
+    row = {row["seq"]: row for row in desk.get("/comments")}[made]
+    assert row["reactions"] == {"HOORAY": {"count": 1, "by": ["you"]}}
+    assert row["replies"][0]["reactions"] == {"EYES": {"count": 2, "by": ["session", "you"]}}
+    thread.locator(".thread > .line .react.mine[data-content='HOORAY']").click()
+    page.wait_for_selector(f"#note-{made} .thread > .line .react[data-content='HOORAY']", state="detached")
+    assert {row["seq"]: row for row in desk.get("/comments")}[made]["reactions"] == {}

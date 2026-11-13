@@ -118,6 +118,14 @@ def carried(item, indent):
         print(f"{indent}{serve_diff.MEDIA / image['file']} ({image['name']}, {where})", flush=True)
 
 
+def reacted(item):
+    """The reactions one remark or reply carries, as one line, or nothing when it carries none."""
+    held = item.get("reactions") or {}
+    return ", ".join(
+        f"{content.lower()} {group['count']} ({', '.join(group['by'])})" for content, group in held.items()
+    )
+
+
 def show(note, since=None):
     text = " ".join(str(note.get("text", "")).split())
     marks = [note.get("state", "open")]
@@ -125,6 +133,8 @@ def show(note, since=None):
         marks.append(f"github {note['github']}")
     if note.get("error"):
         marks.append(f"error {note['error'][:60]}")
+    if reacted(note):
+        marks.append(f"reactions {reacted(note)}")
     # Flushed as it goes: a watch that keeps running holds its output in a buffer otherwise, and a session reading
     # along sees a heading with nothing under it.
     print(
@@ -144,6 +154,8 @@ def show(note, since=None):
         news = "*" if since is not None and answer.get("event", 0) > since else " "
         print(f"     {news}[{index}] {said} {answer['at']}: {' '.join(answer['text'].split())}", flush=True)
         carried(answer, "          ")
+        if reacted(answer):
+            print(f"          reactions {reacted(answer)}", flush=True)
         for earlier in answer.get("edits") or []:
             print(f"          was {earlier['at']}: {' '.join(earlier['text'].split())[:80]}", flush=True)
     for earlier in note.get("edits") or []:
