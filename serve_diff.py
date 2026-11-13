@@ -777,6 +777,18 @@ def reconciled(plan, answers):
     return Reconciled(landed, sent, plan.incoming, plan.settled, given)
 
 
+def same_repo(first, second):
+    """Whether two slugs name one repository: GitHub follows a renamed one to its current name, and so does this.
+
+    A comment keeps the slug its pull request lived under when it was written, and a request names the slug as GitHub
+    now answers for it, so a repository renamed in between would otherwise leave its comments out of every send, sync
+    and resolution. Each name is read as what GitHub last answered for it (see `gen_diff_data.slug_of`), and as it
+    stands where GitHub has never been asked, case aside since GitHub ignores it too.
+    """
+    named = [(gen_diff_data.REMEMBERED.get(f"slug:{slug}") or slug or "").lower() for slug in (first, second)]
+    return named[0] == named[1]
+
+
 def under_review(row, order):
     """Whether a comment belongs to the review this request is about.
 
@@ -786,7 +798,7 @@ def under_review(row, order):
     another - and their threads, being nowhere to be found, would be marked as owing a resolution for ever.
     """
     if row.get("prRepo") or row.get("prNumber"):
-        return row.get("prRepo") == order.get("repo") and row.get("prNumber") == order.get("pr")
+        return same_repo(row.get("prRepo"), order.get("repo")) and row.get("prNumber") == order.get("pr")
     if row.get("review") and order.get("review"):
         return row["review"] == order["review"]
     # A comment written before a review was named this way is placed by the ref it was written on. A request naming no
@@ -1884,6 +1896,10 @@ class Server(ThreadingHTTPServer):
 def main(source=None, started_by=None):
     Serving.source = source
     Serving.started_by = started_by
+    # The comments may have been written under a name the repository has since left, so GitHub is asked once what each
+    # name the log holds stands for now (see `same_repo`).
+    for slug in {row["prRepo"] for row in read_notes() if row.get("prRepo")}:
+        gen_diff_data.recalled(f"slug:{slug}", gen_diff_data.slug_of, slug)
     print(f"diff desk on http://127.0.0.1:{PORT}/  (comments -> {NOTES})", flush=True)
     Serving.server = Server(("127.0.0.1", PORT), Handler)
     Serving.server.serve_forever()

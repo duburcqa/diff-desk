@@ -644,6 +644,31 @@ def test_one_review_never_reaches_another_review_comments(desk):
     assert "prResolveError" not in after[far]
 
 
+def test_a_comment_written_before_its_repository_was_renamed_is_still_sent(desk):
+    written = desk.post(
+        "/comments",
+        {"comments": [{"branch": "feature", "path": "sample.py", "line": 27, "side": "new", "text": "renamed"}]},
+    )
+    seq = written["seqs"][0]
+    desk.github_answers(code=1, err="dial tcp: lookup api.github.com: no such host")
+    desk.post("/publish", {"repo": "someone/formerly", "pr": 15, "branch": "feature", "seq": [seq]})
+    assert {row["seq"]: row for row in desk.get("/comments")}[seq]["prRepo"] == "someone/formerly"
+
+    # GitHub follows the old name to the new one, which is what the page names from then on.
+    desk.github_answers(rules=[{"match": "repos/someone/formerly --jq", "out": "someone/renamed"}])
+    gen_diff_data.run(desk.repo, "remote", "add", "origin", "https://github.com/someone/formerly.git")
+    try:
+        assert desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": ["feature"]})["ok"]
+        until(lambda: desk.get("/data")["upstream"] == "someone/renamed")
+        desk.github_answers(out=json.dumps({"html_url": "https://github.com/someone/renamed/pull/15#review-1"}))
+        sent = desk.post("/publish", {"repo": "someone/renamed", "pr": 15, "branch": "feature", "seq": [seq]})
+    finally:
+        gen_diff_data.run(desk.repo, "remote", "remove", "origin")
+        desk.github_answers(code=1, err="gh: Not Found (HTTP 404)")
+        desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": ["feature"]})
+    assert sent["ok"] and sent["sent"] == 1
+
+
 def test_a_resolution_that_has_not_been_sent_stays_local_across_a_sync(desk):
     made = desk.post(
         "/comments",
