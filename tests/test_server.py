@@ -1183,11 +1183,19 @@ def test_a_comment_github_rejects_is_kept_and_not_retried(desk):
             "github": True,
         },
     )
-    desk.github_answers(code=1, err="gh: Unprocessable Entity (HTTP 422)")
-    assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 1, "seq": made["seqs"]})["ok"] is False
+    # gh says only the status of the refusal, and GitHub's reasons for it come in the body of its answer.
+    reason = "Pull request review thread line must be part of the diff"
+    desk.github_answers(
+        code=1,
+        out=json.dumps({"message": "Validation Failed", "errors": [reason], "status": "422"}),
+        err="gh: Validation Failed (HTTP 422)",
+        rules=[{"match": ".head.sha", "out": "abc123"}],
+    )
+    refused = desk.post("/publish", {"repo": "someone/somewhere", "pr": 1, "seq": made["seqs"]})
+    assert refused["ok"] is False
     kept = {row["seq"]: row for row in desk.get("/comments")}[made["seqs"][0]]
     assert kept["github"] == "refused"
-    assert "422" in kept["error"]
+    assert kept["error"] == refused["error"] == f"gh: Validation Failed (HTTP 422): {reason}"
 
     # Left out of every later sweep, so a rejection GitHub owns is not attempted forever.
     desk.github_answers(out=json.dumps({"html_url": "https://github.com/x/y/pull/1#pullrequestreview-43"}))
