@@ -4657,6 +4657,30 @@
     window.scrollTo(0, Math.round(window.scrollY));
   }
 
+  // Ticks or clears one file, from its box or from the keyboard, and folds or opens it to match.
+  function markReviewed(file, done) {
+    // The card itself stays put unless it is about to be hidden, in which case the one after it takes its place.
+    const shown = visible(view().files);
+    const following = shown[shown.indexOf(file) + 1];
+    const anchor = done && document.body.classList.contains("hide-done") ? following : file;
+    holdPlace(anchor && anchor.path, () => {
+      setSeen(file, done);
+      // Reviewed says the reader is done with the file, news included, so it neither counts as unread nor is held
+      // open for what it held.
+      if (done) {
+        markRead(file.path);
+        shownNews.delete(file.path);
+      }
+      const wrap = document.querySelector(`section.file[data-path="${CSS.escape(file.path)}"]`);
+      if (wrap) {
+        wrap.dataset.done = String(done);
+        wrap.dataset.open = String(!done);
+      }
+      folds.set(file.path, { digest: file.digest, open: !done, upTo: latest() });
+      render();
+    });
+  }
+
   function card(file, index) {
     const status = seenState(file);
     const wrap = document.createElement("section");
@@ -4748,25 +4772,7 @@
     const box = document.createElement("input");
     box.type = "checkbox";
     box.checked = status === "done";
-    box.addEventListener("change", () => {
-      // The card itself stays put unless it is about to be hidden, in which case the one after it takes its place.
-      const shown = visible(view().files);
-      const following = shown[shown.indexOf(file) + 1];
-      const anchor = box.checked && document.body.classList.contains("hide-done") ? following : file;
-      holdPlace(anchor && anchor.path, () => {
-        setSeen(file, box.checked);
-        // Reviewed says the reader is done with the file, news included, so it neither counts as unread nor is held
-        // open for what it held.
-        if (box.checked) {
-          markRead(file.path);
-          shownNews.delete(file.path);
-        }
-        wrap.dataset.done = String(box.checked);
-        wrap.dataset.open = String(!box.checked);
-        folds.set(file.path, { digest: file.digest, open: !box.checked, upTo: latest() });
-        render();
-      });
-    });
+    box.addEventListener("change", () => markReviewed(file, box.checked));
     seenLabel.append(box, document.createTextNode("Reviewed"));
 
     const whole = document.createElement("button");
@@ -5844,10 +5850,7 @@
     }
     if (event.key === "r") {
       const file = visible(view().files)[state.current];
-      if (file) {
-        setSeen(file, seenState(file) !== "done");
-        render();
-      }
+      if (file) markReviewed(file, seenState(file) !== "done");
     }
     if (event.key === "Escape") {
       els.toast.dataset.open = "false";
