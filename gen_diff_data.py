@@ -91,10 +91,31 @@ def gh(*args, repeatable, given=None, cwd=None, budget=120):
             break
         if not worth_asking_again(told.stderr or told.stdout, repeatable=repeatable):
             break
-        blip = " ".join((told.stderr or told.stdout).split())[:120]
+        blip = failure_of(told)[:120]
         print(f"gh stumbled ({blip}); asking again", flush=True)
         time.sleep(pause)
     return told
+
+
+def failure_of(done):
+    """What a failed gh call says went wrong: gh's own line, followed by the reasons GitHub gave.
+
+    gh prints only the status of a refused call, such as `Validation Failed (HTTP 422)`, and leaves the body GitHub
+    answered with on standard output, which is where the reasons are: a line outside the diff, a field it does not take.
+    """
+    try:
+        body = json.loads(done.stdout or "null")
+    except json.JSONDecodeError:
+        body = None
+    errors = body.get("errors") if isinstance(body, dict) else None
+    reasons = [
+        (item.get("message") or " ".join(str(item[key]) for key in ("field", "code") if item.get(key)))
+        if isinstance(item, dict)
+        else str(item)
+        for item in errors or ()
+    ]
+    status = " ".join((done.stderr or ("" if reasons else done.stdout)).split())
+    return ": ".join(part for part in (status, "; ".join(reason for reason in reasons if reason)) if part)
 
 
 # What GitHub last answered, filed by question, for the life of the desk: the slug a remote's name resolves to, the
@@ -223,7 +244,7 @@ def fetch_pull(root, upstream, number):
         print(f"#{number} could not be read from {upstream}; showing the head fetched earlier", flush=True)
         request = fetched
     else:
-        told = " ".join((seen.stderr or seen.stdout or "no answer").split())[:200]
+        told = failure_of(seen)[:200] or "no answer"
         raise RuntimeError(f"#{number} could not be read from {upstream}: {told}")
     brought = subprocess.run(
         ["git", "fetch", "--quiet", f"https://github.com/{upstream}.git", f"+refs/pull/{number}/head:{local}"],

@@ -288,7 +288,7 @@ def review_threads(repo, number):
     query = ["api", "graphql", "--paginate", "--slurp", "-f", f"query={THREADS}", *variables]
     done = gen_diff_data.gh(*query, repeatable=True)
     if done.returncode != 0:
-        return None, " ".join((done.stderr or done.stdout).split())[:300]
+        return None, gen_diff_data.failure_of(done)[:300]
     try:
         pulls = [page["data"]["repository"]["pullRequest"] for page in json.loads(done.stdout)]
         threads = [thread for pull in pulls for thread in pull["reviewThreads"]["nodes"]]
@@ -306,7 +306,7 @@ def resolve_thread(thread):
     # A thread already resolved resolves again to the same thing, so a lost answer costs nothing to ask for twice.
     done = gen_diff_data.gh("api", "graphql", "-f", f"query={RESOLVE}", "-F", f"thread={thread}", repeatable=True)
     if done.returncode != 0:
-        return False, " ".join((done.stderr or done.stdout).split())[:300]
+        return False, gen_diff_data.failure_of(done)[:300]
     try:
         answer = json.loads(done.stdout)
     except json.JSONDecodeError:
@@ -338,7 +338,7 @@ def packed_resolutions(wanted):
         answer = json.loads(done.stdout)
     except json.JSONDecodeError:
         # No answer at all is the only failure the whole document shares: nothing in it can be told apart.
-        told = " ".join((done.stderr or done.stdout).split())[:300] or "GitHub gave no answer"
+        told = gen_diff_data.failure_of(done)[:300] or "GitHub gave no answer"
         return [(False, told)] * len(wanted)
     blamed = {}
     for trouble in answer.get("errors") or []:
@@ -516,7 +516,7 @@ def repository_id(repo):
     if repo not in REPO_IDS:
         done = gen_diff_data.gh("api", f"repos/{repo}", "--jq", ".id", repeatable=True)
         if done.returncode != 0:
-            return 0, " ".join((done.stderr or done.stdout).split())[:300]
+            return 0, gen_diff_data.failure_of(done)[:300]
         try:
             REPO_IDS[repo] = int(done.stdout.strip())
         except ValueError:
@@ -554,7 +554,7 @@ def sent_up(repo, number, item):
             given="",
         )
         if done.returncode != 0:
-            return " ".join((done.stderr or done.stdout).split())[:300]
+            return gen_diff_data.failure_of(done)[:300]
         try:
             given = json.loads(done.stdout or "{}").get("url") or ""
         except json.JSONDecodeError:
@@ -623,7 +623,7 @@ def post_comments(repo, number, sending):
     """
     asked = gen_diff_data.gh("api", f"repos/{repo}/pulls/{number}", "--jq", ".head.sha", repeatable=False)
     if asked.returncode != 0:
-        error = " ".join((asked.stderr or asked.stdout).split())[:400]
+        error = gen_diff_data.failure_of(asked)[:400]
         return [], "", error, is_refusal(error)
     commit = asked.stdout.strip()
     target = f"repos/{repo}/pulls/{number}/comments"
@@ -635,7 +635,7 @@ def post_comments(repo, number, sending):
             "api", "--method", "POST", target, "--input", "-", repeatable=False, given=json.dumps(given)
         )
         if done.returncode != 0:
-            error = " ".join((done.stderr or done.stdout).split())[:400]
+            error = gen_diff_data.failure_of(done)[:400]
             return landed, url, error, is_refusal(error)
         landed.append(note["seq"])
         url = url or json.loads(done.stdout or "{}").get("html_url", "")
@@ -658,7 +658,7 @@ def post_review(repo, number, summary, sending):
     )
     landed = done.returncode == 0
     url = json.loads(done.stdout or "{}").get("html_url", "") if landed else ""
-    error = "" if landed else " ".join((done.stderr or done.stdout).split())[:400]
+    error = "" if landed else gen_diff_data.failure_of(done)[:400]
     return [note["seq"] for note in sending] if landed else [], url, error, not landed and is_refusal(error)
 
 
@@ -715,7 +715,7 @@ def delete_comment(repo, comment):
     """Delete one review comment from a pull request, and say why it did not go when it did not."""
     done = gen_diff_data.gh("api", "-X", "DELETE", f"/repos/{repo}/pulls/comments/{comment}", repeatable=True)
     if done.returncode != 0:
-        return False, " ".join((done.stderr or done.stdout).split())[:300]
+        return False, gen_diff_data.failure_of(done)[:300]
     return True, ""
 
 
@@ -969,7 +969,7 @@ def reply_on_pull(repo, number, comment, text):
     where = f"repos/{repo}/pulls/{number}/comments/{comment}/replies"
     done = gen_diff_data.gh("api", "--method", "POST", where, "-f", f"body={text}", repeatable=False)
     if done.returncode != 0:
-        return False, " ".join((done.stderr or done.stdout).split())[:300]
+        return False, gen_diff_data.failure_of(done)[:300]
     return True, ""
 
 
