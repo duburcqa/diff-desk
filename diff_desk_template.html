@@ -1065,6 +1065,13 @@
   .setting[aria-pressed="true"] .switch { background: var(--accent); }
   .setting[aria-pressed="true"] .switch::after { transform: translateX(11px); }
   .setting:disabled .switch { opacity: 0.5; }
+  .setting.authors { cursor: default; }
+  .setting.authors:hover { background: transparent; }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .chip { padding: 1px 8px; text-transform: none; letter-spacing: normal; border: 1px solid var(--rule-strong); border-radius: 999px; background: var(--surface); color: var(--muted); font: inherit; font-size: 11.5px; cursor: pointer; }
+  .chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .noterow[data-filtered="true"]:not([data-reveal="true"]), .filenote[data-filtered="true"]:not([data-reveal="true"]) { display: none; }
 
   .source {
     position: fixed;
@@ -1171,6 +1178,18 @@
       <span class="minus num" id="tminus"></span>
     </div>
   </div>
+  <span class="steps">
+    <button class="step" id="cback" disabled title="The comment shown above this one">
+      <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+        <path d="M2.5 7.5 6 4l3.5 3.5" />
+      </svg>
+    </button>
+    <button class="step" id="cnext" disabled title="The comment shown below this one">
+      <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+        <path d="M2.5 4.5 6 8l3.5-3.5" />
+      </svg>
+    </button>
+  </span>
   <button class="toggle" id="logopen" title="Every comment recorded, and where each one stands">Comments<i class="dot" id="logdot" aria-hidden="true"></i></button>
   <button class="solid" id="moved" disabled title="Refresh the diffs once the branch has moved on">Refresh</button>
 </header>
@@ -1182,6 +1201,9 @@
     <button class="setting sub" id="hidedeleted" aria-pressed="false" disabled><span class="what">Fold deleted code<small>Every block of deleted code behind a bar, to read what the branch keeps</small></span><i class="switch" aria-hidden="true"></i></button>
     <button class="setting" id="hidedone" aria-pressed="false"><span class="what">Hide reviewed files<small>The files marked reviewed leave the page</small></span><i class="switch" aria-hidden="true"></i></button>
     <button class="setting" id="hideclosed" aria-pressed="false"><span class="what">Hide resolved comments<small>The threads already resolved leave the page</small></span><i class="switch" aria-hidden="true"></i></button>
+    <div class="setting authors" id="authorsrow" hidden><span class="what">Comments by<small>The threads opened by an author left unpicked leave the page and the comment steps</small><span class="chips" id="authors"></span></span></div>
+    <div class="setting authors"><span class="what">Pull request<small>The threads kept by where they stand: sent to the pull request, or still only on this desk</small><span class="chips" id="sentfilter"><button class="chip" type="button" data-sent="all" aria-pressed="true">All</button><button class="chip" type="button" data-sent="sent" aria-pressed="false">Sent</button><button class="chip" type="button" data-sent="local" aria-pressed="false">Local</button></span></span></div>
+    <button class="setting" id="onlyunread" aria-pressed="false"><span class="what">Unread comments only<small>The threads already read leave the page and the comment steps. One read since this was switched on stays until it is switched off</small></span><i class="switch" aria-hidden="true"></i></button>
   </div>
 </div>
 
@@ -1310,6 +1332,13 @@
   const sel = { path: null, from: null, to: null };
   let seen = {};
   let folded = new Set();
+  // Which threads the reader keeps on the page (see filteredOut). The authors are kept as the ones left out, so that an
+  // author appearing later is shown.
+  let mutedAuthors = new Set();
+  let sentFilter = "all";
+  // The threads found unread while only those are kept, which stay once read: reading one must not take it away from
+  // under the reader, and the page redraws every few seconds.
+  const keptUnread = new Set();
   // A reply half written, per comment. The page redraws itself while it is read, which builds the thread anew: without
   // this, words typed into a reply go with the box they were typed into.
   const writing = new Map();
@@ -1331,7 +1360,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "qx", "ctx", "settingsopen", "settings", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "logresolved", "logunread", "logonlynew", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "find", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
+  for (const id of ["tabs", "scope", "q", "qx", "ctx", "settingsopen", "settings", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "logresolved", "logunread", "logonlynew", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "find", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -1382,6 +1411,9 @@
       hideClosed: els.hideclosed.getAttribute("aria-pressed") === "true",
       semantic: els.semantic.getAttribute("aria-pressed") === "true",
       hideDeleted: els.hidedeleted.getAttribute("aria-pressed") === "true",
+      mutedAuthors: [...mutedAuthors],
+      sentFilter,
+      onlyUnread: els.onlyunread.getAttribute("aria-pressed") === "true",
     };
     try {
       localStorage.setItem("diffdesk.choices", JSON.stringify(choices));
@@ -1412,6 +1444,10 @@
     els.hidedeleted.disabled = !choices.semantic;
     els.hidedeleted.setAttribute("aria-pressed", String(Boolean(choices.hideDeleted)));
     document.body.classList.toggle("hide-deleted", Boolean(choices.hideDeleted));
+    mutedAuthors = new Set(Array.isArray(choices.mutedAuthors) ? choices.mutedAuthors : []);
+    sentFilter = ["sent", "local"].includes(choices.sentFilter) ? choices.sentFilter : "all";
+    for (const chip of els.sentfilter.children) chip.setAttribute("aria-pressed", String(chip.dataset.sent === sentFilter));
+    els.onlyunread.setAttribute("aria-pressed", String(Boolean(choices.onlyUnread)));
   }
 
   function loadFolded() {
@@ -1856,6 +1892,8 @@
   const mine_ = () => data.viewer || "";
   const isReader = (who) => who === "you" || (Boolean(mine_()) && who === mine_());
   const spokenBy = (who) => (isReader(who) ? "you" : who === "session" ? "claude" : who);
+  // Who opened a thread: a remark written here names nobody, and is the reader's own.
+  const authorOf = (note) => (note.who && !isReader(note.who) ? note.who : "you");
 
   const saidWhen = (when, who) => {
     const from = who && who !== "you" && who !== "session" ? "submitted on the pull request" : "submitted here";
@@ -2066,6 +2104,8 @@
   }
 
   function reach(note) {
+    // The thread reached before is let go of, or it would stay shown whatever the header hides until it is drawn again.
+    letGo();
     // Going to a thread is going to read it, so a resolved one is shown whole for as long as the reader keeps it.
     // Arriving is what counts as having read it, and a thread left to fold on being read would fold under their eyes.
     if (note.state === "resolved" && !unfolded.has(note.seq)) {
@@ -3035,6 +3075,7 @@
     if (note.outdated) box.classList.add("stale");
     if (settled) box.classList.add("folded");
     if (note.state === "resolved") row.dataset.done = "true";
+    if (!note.pending) row.dataset.filtered = String(filteredOut(note));
 
     const head = document.createElement("div");
     head.className = "line";
@@ -4795,6 +4836,7 @@
       holder.dataset.seq = note.seq;
       const built = noteRow(note);
       if (built.dataset.done) holder.dataset.done = built.dataset.done;
+      if (built.dataset.filtered) holder.dataset.filtered = built.dataset.filtered;
       if (built.dataset.reveal) holder.dataset.reveal = built.dataset.reveal;
       holder.append(built.querySelector(".thread"));
       wrap.append(holder);
@@ -5537,9 +5579,80 @@
     if (card) jump(Number(card.id.slice(1)));
   }
 
+  function commentsAround() {
+    // The threads still shown, each measured by how far it stands from where reaching it would leave it, so the one
+    // the reader was just taken to is neither ahead nor behind. A thread whose file is not built yet is measured by the
+    // file, and those sharing it keep the order of their lines.
+    const hidingClosed = document.body.classList.contains("hide-closed");
+    const placed = [];
+    for (const note of mine()) {
+      if (filteredOut(note) || (hidingClosed && note.state === "resolved")) continue;
+      const card = document.querySelector(`section.file[data-path="${CSS.escape(note.path)}"]`);
+      if (!card || !card.getClientRects().length) continue;
+      const thread =
+        document.getElementById(`note-${note.seq}`) || document.querySelector(`.filenote[data-seq="${note.seq}"]`);
+      const shown = thread && thread.getClientRects().length ? thread : card;
+      placed.push({ note, off: missedBy(shown, note.seq), line: note.line || 0 });
+    }
+    placed.sort((first, second) => first.off - second.off || first.line - second.line);
+    const ahead = placed.find((place) => place.off >= LANDED);
+    const behind = placed.filter((place) => place.off <= -LANDED).pop();
+    return { back: behind && behind.note, next: ahead && ahead.note };
+  }
+
   function sayWhereToStep() {
     els.pback.disabled = !leftToReview(false);
     els.pnext.disabled = !leftToReview(true);
+    const around = commentsAround();
+    els.cback.disabled = !around.back;
+    els.cnext.disabled = !around.next;
+  }
+
+  function filteredOut(note) {
+    if (mutedAuthors.has(authorOf(note))) return true;
+    if (sentFilter !== "all" && (note.github === "posted") !== (sentFilter === "sent")) return true;
+    if (els.onlyunread.getAttribute("aria-pressed") !== "true") return false;
+    if (unread(note)) keptUnread.add(note.seq);
+    return !keptUnread.has(note.seq);
+  }
+
+  function refilter(change) {
+    // Marked on the threads already built rather than drawn again, and the reader's place held as it changes.
+    const staying = visible(view().files)[0];
+    holdPlace(staying && staying.path, () => {
+      letGo();
+      change();
+      keepChoices();
+      for (const note of mine()) {
+        const filtered = String(filteredOut(note));
+        for (const node of els.main.querySelectorAll(`#note-${note.seq}, .filenote[data-seq="${note.seq}"]`)) {
+          node.dataset.filtered = filtered;
+        }
+      }
+    });
+    sayWhereToStep();
+  }
+
+  function drawAuthors() {
+    // Offered once there is a choice to make, or one already made to take back.
+    const authors = [...new Set(mine().map(authorOf)), ...mutedAuthors]
+      .filter((who, index, all) => all.indexOf(who) === index)
+      .sort((first, second) => (first === "you" ? -1 : second === "you" ? 1 : first.localeCompare(second)));
+    els.authorsrow.hidden = authors.length < 2 && !mutedAuthors.size;
+    els.authors.replaceChildren(
+      ...authors.map((who) => {
+        const chip = document.createElement("button");
+        chip.className = "chip";
+        chip.type = "button";
+        chip.textContent = spokenBy(who);
+        chip.setAttribute("aria-pressed", String(!mutedAuthors.has(who)));
+        chip.addEventListener("click", () => {
+          refilter(() => (mutedAuthors.has(who) ? mutedAuthors.delete(who) : mutedAuthors.add(who)));
+          drawAuthors();
+        });
+        return chip;
+      })
+    );
   }
 
   function jump(index) {
@@ -5579,6 +5692,28 @@
 
   els.pback.addEventListener("click", () => stepThroughWhatIsLeft(false));
   els.pnext.addEventListener("click", () => stepThroughWhatIsLeft(true));
+  for (const chip of els.sentfilter.children) {
+    chip.addEventListener("click", () => {
+      refilter(() => {
+        sentFilter = chip.dataset.sent;
+        for (const other of els.sentfilter.children) other.setAttribute("aria-pressed", String(other === chip));
+      });
+    });
+  }
+  els.onlyunread.addEventListener("click", () => {
+    refilter(() => {
+      keptUnread.clear();
+      els.onlyunread.setAttribute("aria-pressed", String(els.onlyunread.getAttribute("aria-pressed") !== "true"));
+    });
+  });
+  els.cback.addEventListener("click", () => {
+    const { back } = commentsAround();
+    if (back) reach(back);
+  });
+  els.cnext.addEventListener("click", () => {
+    const { next } = commentsAround();
+    if (next) reach(next);
+  });
   // What lies either side of the reader changes as they move, and a smooth scroll keeps moving after the press.
   let stepping = null;
   window.addEventListener("scroll", () => {
@@ -5720,6 +5855,7 @@
       document.body.classList.toggle("hide-closed", on);
       keepChoices();
     });
+    sayWhereToStep();
   });
   els.hidefiles.addEventListener("click", () => {
     const on = els.hidefiles.getAttribute("aria-pressed") !== "true";
@@ -5733,6 +5869,7 @@
     els.settings.dataset.open = String(open);
     els.settingsopen.setAttribute("aria-pressed", String(open));
     if (!open) return;
+    drawAuthors();
     const box = els.settingsopen.getBoundingClientRect();
     els.settings.style.left = `${Math.max(8, Math.min(box.left, window.innerWidth - els.settings.firstElementChild.offsetWidth - 8))}px`;
   }

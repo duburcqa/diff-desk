@@ -1273,6 +1273,93 @@ def test_a_file_pressed_in_the_list_is_taken_through_a_redraw_of_it(page):
     assert page.evaluate(NEAREST) == wanted
 
 
+def test_comments_are_filtered_by_their_author_and_stepped_through(page, desk):
+    ours = desk.post(
+        "/comments",
+        {"comments": [{"branch": "feature", "path": "sample.py", "line": 30, "side": "new", "text": "kept in view"}]},
+    )["seqs"][0]
+    thread = {
+        "id": "T_by_author",
+        "isResolved": False,
+        "path": "sample.py",
+        "line": 160,
+        "startLine": None,
+        "originalLine": 160,
+        "originalStartLine": None,
+        "diffSide": "RIGHT",
+        "comments": {
+            "nodes": [
+                {
+                    "databaseId": 951,
+                    "body": "left out by author",
+                    "path": "sample.py",
+                    "createdAt": "2026-08-22T09:00:00Z",
+                    "author": {"login": "elsewho"},
+                }
+            ]
+        },
+    }
+    pulled = {"data": {"repository": {"pullRequest": {"headRefName": "feature", "reviewThreads": {"nodes": [thread]}}}}}
+    desk.github_answers(rules=[{"match": "reviewThreads", "out": json.dumps(pulled)}])
+    desk.post("/sync", {"repo": "someone/byauthor", "pr": 41})
+    desk.github_answers(code=1, err="gh: Not Found (HTTP 404)")
+    theirs = next(row["seq"] for row in desk.get("/comments") if row["text"] == "left out by author")
+    page.reload(wait_until="load")
+    comments_reach(page)
+
+    # Only unread: one read before it is switched on leaves, and one read while it is on stays under the reader.
+    read(page, ours)
+    flip(page, "onlyunread")
+    assert not page.locator(f"#note-{ours}").is_visible()
+    page.evaluate(f"() => goTo('{theirs}')")
+    page.wait_for_function(f"() => reaching === null && {theirs} in heard")
+    page.evaluate("() => render()")
+    assert page.locator(f"#note-{theirs}").is_visible()
+    flip(page, "onlyunread")
+    assert page.locator(f"#note-{ours}").is_visible()
+
+    # By where each stands: ours is still only on this desk, theirs came from the pull request.
+    page.locator("#settingsopen").click()
+    for kept, shown, hidden in (("Sent", theirs, ours), ("Local", ours, theirs)):
+        page.locator("#sentfilter .chip", has_text=kept).click()
+        assert page.locator(f"#note-{shown}").is_visible()
+        assert not page.locator(f"#note-{hidden}").is_visible()
+    page.locator("#sentfilter .chip", has_text="All").click()
+    page.locator("#settingsopen").click()
+
+    def stepped():
+        """Every thread the down step reaches from the top of the page, in the order it reaches them."""
+        page.evaluate("() => window.scrollTo(0, 0)")
+        settle(page)
+        reached_seqs = []
+        while page.locator("#cnext").is_enabled():
+            page.locator("#cnext").click()
+            page.wait_for_function("() => reaching === null && state.reached !== null")
+            reached_seqs.append(page.evaluate("() => state.reached.seq"))
+            at_rest(page)
+        return reached_seqs
+
+    both = stepped()
+    assert both.index(ours) < both.index(theirs) and page.locator("#cback").is_enabled()
+
+    page.locator("#settingsopen").click()
+    page.locator("#authors .chip", has_text="elsewho").click()
+    page.locator("#settingsopen").click()
+    assert page.locator(f"#note-{ours}").is_visible()
+    assert not page.locator(f"#note-{theirs}").is_visible()
+    alone = stepped()
+    assert ours in alone and theirs not in alone
+
+    # Kept across a reload, as every other choice of how the page is read.
+    page.reload(wait_until="load")
+    comments_reach(page)
+    page.locator("#settingsopen").click()
+    assert page.locator("#authors .chip", has_text="elsewho").get_attribute("aria-pressed") == "false"
+    page.locator("#authors .chip", has_text="elsewho").click()
+    page.locator("#settingsopen").click()
+    page.locator(f"#note-{theirs}").wait_for(state="attached")
+
+
 def test_stepping_lands_on_the_file_left_to_review_nearest_the_reader(page):
     page.set_viewport_size({"width": 1200, "height": 500})
     paths = page.evaluate("() => [...document.querySelectorAll('section.file')].map((card) => card.dataset.path)")
