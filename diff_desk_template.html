@@ -5697,13 +5697,14 @@
   }
 
   function readingAt(cards) {
-    // The file the reader is on, by its place among the cards: the last one whose head has passed the line a
-    // stepped-to file comes to rest at - the header plus the breathing space the card's own scroll margin asks for,
-    // read off the style so the two cannot drift apart. Measuring against the header alone would name the next file.
+    // The file the reader is on, by its place among the cards, or -1 above the first: the last one whose head has passed
+    // the line a stepped-to file comes to rest at - the header plus the breathing space the card's own scroll margin
+    // asks for, read off the style so the two cannot drift apart. Measuring against the header alone would name the
+    // next file.
     const covered = document.querySelector("header").getBoundingClientRect().bottom;
     const resting = Math.max(covered, parseFloat(getComputedStyle(cards[0]).scrollMarginTop) || covered) + LANDED;
     const below = cards.findIndex((card) => card.getBoundingClientRect().top > resting);
-    return below === -1 ? cards.length - 1 : Math.max(0, below - 1);
+    return below === -1 ? cards.length - 1 : below - 1;
   }
 
   // The cards on the page, less those a setting hides: a hidden card measures as standing at the very top, which would
@@ -5851,7 +5852,7 @@
       pickedAt = null;
       const cards = shownCards();
       if (!cards.length) return;
-      const index = Number(cards[readingAt(cards)].id.slice(1));
+      const index = Number(cards[Math.max(0, readingAt(cards))].id.slice(1));
       if (index === state.current) return;
       state.current = index;
       markCurrent();
