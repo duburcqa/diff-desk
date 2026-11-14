@@ -4223,3 +4223,28 @@ def test_a_remark_and_a_reply_are_reacted_to_from_the_page(page, desk):
     row = {row["seq"]: row for row in desk.get("/comments")}[made]
     assert row["reactions"] == {"HOORAY": {"count": 1, "by": ["you"]}}
     assert row["replies"][0]["reactions"] == {}
+
+
+def test_the_file_list_follows_the_file_scrolled_onto(page):
+    current = "() => document.querySelector('.fileitem[data-current=\"true\"] .name')?.title"
+    first, second = page.evaluate(
+        "() => [...document.querySelectorAll('section.file')].map((card) => card.dataset.path)"
+    )[:2]
+    page.locator(".fileitem .name", has_text=first.split("/")[-1]).first.click()
+    page.wait_for_function("() => reaching === null")
+    assert page.evaluate(current) == first
+
+    # Scrolled by hand until the second file's head reaches the bar, the list moves its pick there.
+    page.wait_for_function(
+        """(path) => {
+          const card = document.querySelector(`section.file[data-path="${path}"]`);
+          const covered = document.querySelector('header').getBoundingClientRect().bottom;
+          window.scrollBy(0, card.getBoundingClientRect().top - covered);
+          return document.querySelector('.fileitem[data-current="true"] .name')?.title === path;
+        }""",
+        arg=second,
+        polling=100,
+    )
+    # And back, past the first file's head.
+    page.evaluate("() => window.scrollTo(0, 0)")
+    page.wait_for_function(f"(path) => ({current})() === path", arg=first)
