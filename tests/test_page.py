@@ -4255,3 +4255,25 @@ def test_the_file_list_follows_the_file_scrolled_onto(page):
     # And back, past the first file's head.
     page.evaluate("() => window.scrollTo(0, 0)")
     page.wait_for_function(f"(path) => ({current})() === path", arg=first)
+
+    # A reviewed file hidden by the setting is passed over, as if it were not there.
+    page.evaluate(
+        "(path) => { document.querySelector(`section.file[data-path='${path}']`).dataset.done = 'true'; }", second
+    )
+    page.evaluate("() => document.body.classList.add('hide-done')")
+    third = page.evaluate("() => [...document.querySelectorAll('section.file')].map((card) => card.dataset.path)")[2]
+    try:
+        page.wait_for_function(
+            """(path) => {
+              const card = document.querySelector(`section.file[data-path="${path}"]`);
+              const covered = document.querySelector('header').getBoundingClientRect().bottom;
+              window.scrollBy(0, card.getBoundingClientRect().top - covered);
+              return document.querySelector('.fileitem[data-current="true"] .name')?.title === path;
+            }""",
+            arg=third,
+            polling=100,
+        )
+        page.evaluate("() => window.scrollBy(0, -40)")
+        page.wait_for_function(f"(path) => ({current})() === path", arg=first)
+    finally:
+        page.evaluate("() => document.body.classList.remove('hide-done')")

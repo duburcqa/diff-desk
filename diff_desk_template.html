@@ -5706,8 +5706,12 @@
     return below === -1 ? cards.length - 1 : Math.max(0, below - 1);
   }
 
+  // The cards on the page, less those a setting hides: a hidden card measures as standing at the very top, which would
+  // read as the file the reader is on.
+  const shownCards = () => [...document.querySelectorAll("section.file")].filter((card) => card.getClientRects().length);
+
   function leftToReview(down) {
-    const cards = [...document.querySelectorAll("section.file")];
+    const cards = shownCards();
     if (!cards.length) return undefined;
     const here = readingAt(cards);
     const ahead = down ? cards.slice(here + 1) : cards.slice(0, Math.max(0, here)).reverse();
@@ -5845,7 +5849,7 @@
       if (pickedAt === undefined) pickedAt = window.scrollY;
       if (pickedAt !== null && Math.abs(window.scrollY - pickedAt) < 8) return;
       pickedAt = null;
-      const cards = [...document.querySelectorAll("section.file")];
+      const cards = shownCards();
       if (!cards.length) return;
       const index = Number(cards[readingAt(cards)].id.slice(1));
       if (index === state.current) return;
