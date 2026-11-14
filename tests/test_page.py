@@ -4212,7 +4212,9 @@ def test_a_remark_and_a_reply_are_reacted_to_from_the_page(page, desk):
     page.locator("#reactnow").click()
     page.locator("#settingsopen").click()
     head = thread.locator(".thread > .line").first
-    head.hover()
+    head.locator("button.reactadd").click()
+    head.locator("button.reactadd").click()
+    assert head.locator(".reacts.picking").count() == 0
     head.locator("button.reactadd").click()
     with page.expect_request("**/react") as asked:
         head.locator(".reacts.picking .react[data-content='HOORAY']").click()

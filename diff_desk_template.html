@@ -762,10 +762,8 @@
   .thread .react:hover:not(:disabled) { border-color: var(--accent); }
   .thread .react.mine { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); }
   .thread .react.owed { border-style: dashed; }
+  button.tiny.reactadd { font-size: 12px; }
   .thread .react:disabled { cursor: default; }
-  /* Offered under the pointer only, since a smiley on every line says nothing until somebody wants it. */
-  .thread .line > .reactadd { opacity: 0; }
-  .thread .line:hover > .reactadd, .thread .line > .reactadd:focus-visible { opacity: 1; }
   /* What is said reads as text set in blocks: the first paragraph runs on from the name that opens it, and every block
      after it starts on a line of its own, a little apart from the one above. */
   .thread .said p { margin: 6px 0 0; }
@@ -1762,6 +1760,9 @@
     add.textContent = "\u{263A}+";
     add.title = "React";
     add.addEventListener("click", () => {
+      // A second press puts the picker away again.
+      const open = host.querySelector(":scope > .reacts.picking");
+      if (open) return open.remove();
       const picker = document.createElement("div");
       picker.className = "reacts picking";
       for (const [content, emoji] of REACTIONS) {
@@ -1779,7 +1780,6 @@
       shut.title = "Close";
       shut.addEventListener("click", () => picker.remove());
       picker.append(shut);
-      host.querySelector(":scope > .reacts.picking")?.remove();
       host.append(picker);
     });
     return add;
@@ -6144,7 +6144,10 @@
   function drawNews() {
     // Redrawn for news alone. Rebuilding every card each round replaces the node under a press, so a click that
     // straddles the round lands on nothing, and a review of any size is rebuilt for no reason.
-    const said = notes.sent.map((note) => `${note.seq}:${note.event || 0}:${note.state}`).join(",");
+    // Reactions are news too, though they move no event: a sync brings them back without anybody saying anything.
+    const reacted = (note) =>
+      [note, ...(note.replies || [])].map((item) => JSON.stringify([item.reactions, item.reactOwed])).join("");
+    const said = notes.sent.map((note) => `${note.seq}:${note.event || 0}:${note.state}:${reacted(note)}`).join(",");
     if (said === drawnFor) return;
     drawnFor = said;
     drawLog();
