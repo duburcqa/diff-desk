@@ -4223,3 +4223,19 @@ def test_a_remark_and_a_reply_are_reacted_to_from_the_page(page, desk):
     thread.locator(".thread > .line .react.mine[data-content='HOORAY']").click()
     page.wait_for_selector(f"#note-{made} .thread > .line .react[data-content='HOORAY']", state="detached")
     assert {row["seq"]: row for row in desk.get("/comments")}[made]["reactions"] == {}
+
+    # Switched off in the settings, a press asks the desk to hold the reaction for the thread's next send.
+    page.locator("#settingsopen").click()
+    page.locator("#reactnow").click()
+    assert page.locator("#reactnow").get_attribute("aria-pressed") == "false"
+    page.locator("#settingsopen").click()
+    head = page.locator(f"#note-{made} .thread > .line").first
+    head.hover()
+    head.locator("button.reactadd").click()
+    with page.expect_request("**/react") as asked:
+        head.locator(".reacts.picking .react[data-content='ROCKET']").click()
+    assert asked.value.post_data_json["at_once"] is False
+    page.reload(wait_until="load")
+    page.wait_for_selector(f"#note-{made}")
+    assert page.locator("#reactnow").get_attribute("aria-pressed") == "false"
+    page.evaluate("() => { els.reactnow.click(); }")

@@ -761,6 +761,7 @@
   }
   .thread .react:hover:not(:disabled) { border-color: var(--accent); }
   .thread .react.mine { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); }
+  .thread .react.owed { border-style: dashed; }
   .thread .react:disabled { cursor: default; }
   /* Offered under the pointer only, since a smiley on every line says nothing until somebody wants it. */
   .thread .line > .reactadd { opacity: 0; }
@@ -1221,6 +1222,7 @@
     <button class="setting" id="hideclosed" aria-pressed="false"><span class="what">Hide resolved comments<small>The threads already resolved leave the page</small></span><i class="switch" aria-hidden="true"></i></button>
     <div class="setting authors" id="authorsrow" hidden><span class="what">Comments by<small>The threads opened by an author left unpicked leave the page and the comment steps</small><span class="chips" id="authors"></span></span></div>
     <div class="setting authors"><span class="what">Pull request<small>The threads kept by where they stand: sent to the pull request, or still only on this desk</small><span class="chips" id="sentfilter"><button class="chip" type="button" data-sent="all" aria-pressed="true">All</button><button class="chip" type="button" data-sent="sent" aria-pressed="false">Sent</button><button class="chip" type="button" data-sent="local" aria-pressed="false">Local</button></span></span></div>
+    <button class="setting" id="reactnow" aria-pressed="true"><span class="what">Send reactions at once<small>A reaction on a comment already on the pull request goes there at the press. Off, it waits for the thread's next send, as a reply does</small></span><i class="switch" aria-hidden="true"></i></button>
     <button class="setting" id="onlyunread" aria-pressed="false"><span class="what">Unread comments only<small>The threads already read leave the page and the comment steps. One read since this was switched on stays until it is switched off</small></span><i class="switch" aria-hidden="true"></i></button>
   </div>
 </div>
@@ -1378,7 +1380,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "qx", "ctx", "settingsopen", "settings", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "logresolved", "logunread", "logonlynew", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "find", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
+  for (const id of ["tabs", "scope", "q", "qx", "ctx", "settingsopen", "settings", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "logresolved", "logunread", "logonlynew", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "find", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -1432,6 +1434,7 @@
       mutedAuthors: [...mutedAuthors],
       sentFilter,
       onlyUnread: els.onlyunread.getAttribute("aria-pressed") === "true",
+      reactNow: reactNow(),
     };
     try {
       localStorage.setItem("diffdesk.choices", JSON.stringify(choices));
@@ -1453,6 +1456,7 @@
     els.logsort.value = choices.sort === "thread" ? "thread" : "batch";
     els.hidedone.setAttribute("aria-pressed", String(Boolean(choices.hideDone)));
     document.body.classList.toggle("hide-done", Boolean(choices.hideDone));
+    els.reactnow.setAttribute("aria-pressed", String(choices.reactNow !== false));
     els.hidefiles.setAttribute("aria-pressed", String(Boolean(choices.hideFiles)));
     document.body.classList.toggle("hide-files", Boolean(choices.hideFiles));
     els.hideclosed.setAttribute("aria-pressed", String(Boolean(choices.hideClosed)));
@@ -1718,7 +1722,15 @@
   function reacting(note, index, item, host) {
     const live = !note.pending && notes.live;
     const react = async (content, on) => {
-      const outcome = await post("react", { seq: note.seq, reply: index, content, on, who: "you", ...where() });
+      const outcome = await post("react", {
+        seq: note.seq,
+        reply: index,
+        content,
+        on,
+        who: "you",
+        at_once: reactNow(),
+        ...where(),
+      });
       if (!outcome.ok) announce("reaction", `[${note.seq}]`, outcome.error || "GitHub unreachable");
       await loadNotes();
       render();
@@ -1730,14 +1742,16 @@
       if (!group || !group.count) continue;
       const mine = group.by.some(isReader);
       const chip = document.createElement("button");
-      chip.className = mine ? "react mine" : "react";
+      // Given on a comment already on the pull request, and waiting for the thread's next send to reach it.
+      const waiting = item.github === "posted" && content in (item.reactOwed || {});
+      chip.className = `react${mine ? " mine" : ""}${waiting ? " owed" : ""}`;
       chip.dataset.content = content;
       chip.textContent = `${emoji} ${group.count}`;
       // GitHub is asked how many reacted and whether the reader did, not who everybody else is.
       const names = group.by.map(spokenBy);
       const others = group.count - names.length;
       if (others > 0) names.push(names.length ? `${others} more` : `${others} on the pull request`);
-      chip.title = `${names.join(", ")} reacted with ${emoji}`;
+      chip.title = `${names.join(", ")} reacted with ${emoji}${waiting ? ", not on the pull request yet" : ""}`;
       chip.disabled = !live;
       chip.addEventListener("click", () => react(content, !mine));
       row.append(chip);
@@ -2064,6 +2078,11 @@
     if (note.github !== "posted") owes.push("the remark");
     if (said) owes.push(`${said} repl${said === 1 ? "y" : "ies"}`);
     if (note.state === "resolved" && note.prResolve !== "done") owes.push("its resolution");
+    const reacted = [note, ...(note.replies || []).filter((answer) => !answer.whisper)].reduce(
+      (count, item) => count + Object.keys(item.reactOwed || {}).length,
+      0,
+    );
+    if (reacted) owes.push(`${reacted} reaction${reacted === 1 ? "" : "s"}`);
     return owes.join(" and ");
   }
 
@@ -2113,6 +2132,9 @@
   }
 
   const withResolved = () => els.logresolved.checked;
+  function reactNow() {
+    return els.reactnow.getAttribute("aria-pressed") !== "false";
+  }
 
   // The newest comment this page knows of, which is what a fold decision is taken against.
   const latest = () => Math.max(0, ...notes.sent.map((note) => note.seq));
@@ -5949,6 +5971,10 @@
       keepChoices();
     });
     sayWhereToStep();
+  });
+  els.reactnow.addEventListener("click", () => {
+    els.reactnow.setAttribute("aria-pressed", String(!reactNow()));
+    keepChoices();
   });
   els.hidefiles.addEventListener("click", () => {
     const on = els.hidefiles.getAttribute("aria-pressed") !== "true";
