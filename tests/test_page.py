@@ -938,7 +938,7 @@ def test_a_comment_stays_inside_the_view_when_the_diff_is_scrolled(page, desk):
 
 def test_a_card_reaches_as_far_across_once_its_lines_are_let_go_of(page):
     # Narrow enough that the lines overflow, short enough that a card leaves the reach that keeps it built.
-    page.set_viewport_size({"width": 200, "height": 400})
+    page.set_viewport_size({"width": 160, "height": 400})
     page.reload(wait_until="load")
     page.wait_for_selector("tr[data-line]")
     held = page.evaluate(
@@ -3412,10 +3412,10 @@ def test_a_file_holding_an_unread_comment_opens_itself(page, desk):
     # Away while it arrives, since a poll landing on an open page would show it and reading it is what folds the file
     # away again: what is being asked here is what the reader finds on coming back.
     page.goto("about:blank")
-    desk.post(
+    arrived = desk.post(
         "/comments",
         [{"branch": branch, "path": "added.py", "line": 1, "side": "new", "text": "arrived after you read it"}],
-    )
+    )["seqs"][0]
     page.go_back(wait_until="load")
     page.wait_for_selector("section.file")
     comments_reach(page)
@@ -3424,7 +3424,8 @@ def test_a_file_holding_an_unread_comment_opens_itself(page, desk):
     assert again.get_attribute("data-open") == "true"
     assert "arrived after you read it" in again.inner_text()
 
-    # Shown once, it stops asking: the file goes back to being folded away.
+    # Shown once, it stops asking: the file goes back to being folded away. Brought in front of the reader, as below.
+    read(page, arrived)
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
     comments_reach(page)
