@@ -107,7 +107,13 @@ def comments_reach(page):
 
 
 def reached(page, want):
-    """Wait for a pick to have brought the file it names under the bar, which is where it leaves the reader."""
+    """Wait for a pick to have brought the file it names under the bar, which is where it leaves the reader.
+
+    Read once the aim has landed and the page has stopped moving: the files it flew past are built at the landing, and
+    the file passes under the bar on the way to where the page then puts it back.
+    """
+    page.wait_for_function("() => reaching === null")
+    at_rest(page)
     page.wait_for_function(f"(want) => ({NEAREST})() === want", arg=want)
 
 
