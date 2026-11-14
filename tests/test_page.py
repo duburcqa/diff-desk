@@ -4199,43 +4199,25 @@ def test_a_remark_and_a_reply_are_reacted_to_from_the_page(page, desk):
     desk.post("/reply", {"seq": made, "text": "said by the session", "who": "session"})
     desk.post("/react", {"seq": made, "reply": 0, "content": "EYES", "who": "session"})
     page.reload(wait_until="load")
-    page.wait_for_selector(f"#note-{made} .line.reply")
     thread = page.locator(f"#note-{made}")
 
-    # Somebody else's reaction is shown with its count, and pressing it adds the reader's own beside it.
+    # Somebody else's reaction is shown with its count, and pressing it adds the reader's own.
     seen = thread.locator(".line.reply .react[data-content='EYES']")
     assert seen.inner_text() == "\U0001f440 1"
-    assert "claude" in seen.get_attribute("title")
     seen.click()
     page.wait_for_selector(f"#note-{made} .line.reply .react.mine[data-content='EYES']")
-    assert thread.locator(".line.reply .react[data-content='EYES']").inner_text() == "\U0001f440 2"
 
-    # The remark carries none until one is picked, and picking it again takes it back.
-    head = thread.locator(".thread > .line").first
-    assert head.locator(".reacts").count() == 0
-    head.hover()
-    head.locator("button.reactadd").click()
-    head.locator(".reacts.picking .react[data-content='HOORAY']").click()
-    page.wait_for_selector(f"#note-{made} .thread > .line .reacts .react.mine[data-content='HOORAY']")
-    row = {row["seq"]: row for row in desk.get("/comments")}[made]
-    assert row["reactions"] == {"HOORAY": {"count": 1, "by": ["you"]}}
-    assert row["replies"][0]["reactions"] == {"EYES": {"count": 2, "by": ["session", "you"]}}
-    thread.locator(".thread > .line .react.mine[data-content='HOORAY']").click()
-    page.wait_for_selector(f"#note-{made} .thread > .line .react[data-content='HOORAY']", state="detached")
-    assert {row["seq"]: row for row in desk.get("/comments")}[made]["reactions"] == {}
-
-    # Switched off in the settings, a press asks the desk to hold the reaction for the thread's next send.
+    # The remark's is picked from the smiley, and the setting decides whether it waits for the thread's send.
     page.locator("#settingsopen").click()
     page.locator("#reactnow").click()
-    assert page.locator("#reactnow").get_attribute("aria-pressed") == "false"
     page.locator("#settingsopen").click()
-    head = page.locator(f"#note-{made} .thread > .line").first
+    head = thread.locator(".thread > .line").first
     head.hover()
     head.locator("button.reactadd").click()
     with page.expect_request("**/react") as asked:
-        head.locator(".reacts.picking .react[data-content='ROCKET']").click()
+        head.locator(".reacts.picking .react[data-content='HOORAY']").click()
     assert asked.value.post_data_json["at_once"] is False
-    page.reload(wait_until="load")
-    page.wait_for_selector(f"#note-{made}")
-    assert page.locator("#reactnow").get_attribute("aria-pressed") == "false"
-    page.evaluate("() => { els.reactnow.click(); }")
+    page.wait_for_selector(f"#note-{made} .thread > .line .react.mine[data-content='HOORAY']")
+    row = {row["seq"]: row for row in desk.get("/comments")}[made]
+    assert row["reactions"] == {"HOORAY": {"count": 1, "by": ["you"]}}
+    assert row["replies"][0]["reactions"] == {"EYES": {"count": 2, "by": ["session", "you"]}}

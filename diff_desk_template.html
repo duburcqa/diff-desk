@@ -1222,7 +1222,7 @@
     <button class="setting" id="hideclosed" aria-pressed="false"><span class="what">Hide resolved comments<small>The threads already resolved leave the page</small></span><i class="switch" aria-hidden="true"></i></button>
     <div class="setting authors" id="authorsrow" hidden><span class="what">Comments by<small>The threads opened by an author left unpicked leave the page and the comment steps</small><span class="chips" id="authors"></span></span></div>
     <div class="setting authors"><span class="what">Pull request<small>The threads kept by where they stand: sent to the pull request, or still only on this desk</small><span class="chips" id="sentfilter"><button class="chip" type="button" data-sent="all" aria-pressed="true">All</button><button class="chip" type="button" data-sent="sent" aria-pressed="false">Sent</button><button class="chip" type="button" data-sent="local" aria-pressed="false">Local</button></span></span></div>
-    <button class="setting" id="reactnow" aria-pressed="true"><span class="what">Send reactions at once<small>A reaction on a comment already on the pull request goes there at the press. Off, it waits for the thread's next send, as a reply does</small></span><i class="switch" aria-hidden="true"></i></button>
+    <button class="setting" id="reactnow" aria-pressed="true"><span class="what">Sync reactions automatically<small>A reaction given or taken back on a comment already on the pull request goes there at the press. Off, it waits for the thread's next send, as a reply does</small></span><i class="switch" aria-hidden="true"></i></button>
     <button class="setting" id="onlyunread" aria-pressed="false"><span class="what">Unread comments only<small>The threads already read leave the page and the comment steps. One read since this was switched on stays until it is switched off</small></span><i class="switch" aria-hidden="true"></i></button>
   </div>
 </div>
@@ -5972,10 +5972,34 @@
     });
     sayWhereToStep();
   });
-  els.reactnow.addEventListener("click", () => {
+  els.reactnow.addEventListener("click", async () => {
     els.reactnow.setAttribute("aria-pressed", String(!reactNow()));
     keepChoices();
+    if (reactNow()) await flushReactions();
   });
+
+  // Switched back on, the reactions held for the next send on comments already on this pull request go now, and
+  // nothing else of their threads goes with them.
+  async function flushReactions() {
+    const request = branch().pr;
+    if (!request || !notes.live) return;
+    let sent = 0;
+    for (const note of notes.sent) {
+      if (note.state === "deleted" || note.prNumber !== request.number) continue;
+      const items = [[null, note], ...(note.replies || []).map((answer, index) => [index, answer])];
+      for (const [index, item] of items) {
+        if (item.github !== "posted" || item.whisper) continue;
+        for (const [content, on] of Object.entries(item.reactOwed || {})) {
+          const outcome = await post("react", { seq: note.seq, reply: index, content, on, who: "you", ...where() });
+          if (!outcome.ok) announce("reaction", `[${note.seq}]`, outcome.error || "GitHub unreachable");
+          sent += 1;
+        }
+      }
+    }
+    if (!sent) return;
+    await loadNotes();
+    render();
+  }
   els.hidefiles.addEventListener("click", () => {
     const on = els.hidefiles.getAttribute("aria-pressed") !== "true";
     els.hidefiles.setAttribute("aria-pressed", String(on));
