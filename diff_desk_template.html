@@ -1733,8 +1733,10 @@
       chip.className = mine ? "react mine" : "react";
       chip.dataset.content = content;
       chip.textContent = `${emoji} ${group.count}`;
+      // GitHub is asked how many reacted and whether the reader did, not who everybody else is.
       const names = group.by.map(spokenBy);
-      if (group.count > names.length) names.push(`${group.count - names.length} more`);
+      const others = group.count - names.length;
+      if (others > 0) names.push(names.length ? `${others} more` : `${others} on the pull request`);
       chip.title = `${names.join(", ")} reacted with ${emoji}`;
       chip.disabled = !live;
       chip.addEventListener("click", () => react(content, !mine));

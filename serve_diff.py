@@ -259,11 +259,12 @@ query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
 }
 """
 
-# The reactions of one comment, by emoji. Twenty reactors are named per emoji, which is as many as a hover can list;
-# the count is always the whole.
+# The reactions of one comment, by emoji: how many, and whether the reader is among them. The reactors are not named,
+# since a page of them under every comment of a pull request costs fifty times what the rest of the query does, and the
+# page syncs every few seconds.
 REACTED = """
 fragment Reacted on Reactable {
-  reactionGroups { content viewerHasReacted reactors(first: 20) { totalCount nodes { ... on Actor { login } } } }
+  reactionGroups { content viewerHasReacted reactors { totalCount } }
 }
 """
 
@@ -313,19 +314,25 @@ def review_threads(repo, number):
 
 
 def reactions_of(node):
-    """The reactions one comment of the pull request carries, by emoji: how many, and who, the reader among them."""
+    """The reactions one comment of the pull request carries, by emoji: how many, and the reader when they are among
+    them, which is all a sync asks GitHub to name."""
     held = {}
     for group in node.get("reactionGroups") or ():
-        reactors = group.get("reactors") or {}
-        if not reactors.get("totalCount"):
-            continue
-        by = [actor.get("login") or "github" for actor in reactors.get("nodes") or ()]
-        # The reader is named whenever they reacted, even past the reactors GitHub lists, since that is what their
-        # click takes back.
-        listed_all = len(by) >= reactors["totalCount"]
-        if group.get("viewerHasReacted") and not listed_all and not {"you", reader()} & set(by):
-            by.append(reader() or "you")
-        held[group["content"]] = {"count": reactors["totalCount"], "by": by}
+        count = (group.get("reactors") or {}).get("totalCount")
+        if count:
+            held[group["content"]] = {"count": count, "by": ["you"] if group.get("viewerHasReacted") else []}
+    return held
+
+
+def merged_reactions(there, here):
+    """What the pull request says a comment carries, plus the session's reactions held here, which no pull request can
+    hold. The reader's own follow the pull request once the comment is on it."""
+    held = {content: {"count": group["count"], "by": list(group["by"])} for content, group in there.items()}
+    for content, group in here.items():
+        if "session" in (group.get("by") or ()):
+            kept = held.setdefault(content, {"count": 0, "by": []})
+            kept["by"].append("session")
+            kept["count"] += 1
     return held
 
 
@@ -515,7 +522,10 @@ def heard_again(row, thread):
             answer["github"], answer["error"] = "failed", PENDING
         pairs.append((answer, node))
     for item, node in pairs:
-        item.update(known_by(node))
+        known = known_by(node)
+        if "reactions" in known:
+            known["reactions"] = merged_reactions(known["reactions"], item.get("reactions") or {})
+        item.update(known)
         # Only somebody else's word follows the pull request: this desk's own is rewritten here, and one rewritten there
         # is still known by its id.
         if item.get("who") and item["who"] not in ours and node["body"] != item["text"]:
@@ -1711,7 +1721,7 @@ class Handler(BaseHTTPRequestHandler):
         with changing() as rows:
             found, item, refused = reacted_on(rows)
             if not refused and held is not None:
-                item["reactions"] = held
+                item["reactions"] = merged_reactions(held, item.get("reactions") or {})
             elif not refused:
                 group = item.setdefault("reactions", {}).setdefault(content, {"count": 0, "by": []})
                 if on and who not in group["by"]:

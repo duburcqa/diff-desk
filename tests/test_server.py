@@ -2707,14 +2707,10 @@ def test_a_sync_gives_a_date_to_what_was_brought_back_without_one(desk):
 
 
 def reacted_with(*groups):
-    """The reactionGroups GitHub answers with, each `(content, logins, viewer_has_reacted)`."""
+    """The reactionGroups GitHub answers with, each `(content, count, viewer_has_reacted)`."""
     return [
-        {
-            "content": content,
-            "viewerHasReacted": mine,
-            "reactors": {"totalCount": len(logins), "nodes": [{"login": login} for login in logins]},
-        }
-        for content, logins, mine in groups
+        {"content": content, "viewerHasReacted": mine, "reactors": {"totalCount": count}}
+        for content, count, mine in groups
     ]
 
 
@@ -2765,7 +2761,7 @@ def test_a_sync_brings_reactions_back_and_a_reaction_there_goes_out_at_once(desk
                     "path": "sample.py",
                     "createdAt": "2026-11-01T09:00:00Z",
                     "author": {"login": "elsewho"},
-                    "reactionGroups": reacted_with(("THUMBS_UP", ["a", "b"], False), ("HEART", [], False)),
+                    "reactionGroups": reacted_with(("THUMBS_UP", 2, False), ("HEART", 0, False)),
                 },
                 {
                     "id": "PRRC_answer",
@@ -2774,15 +2770,13 @@ def test_a_sync_brings_reactions_back_and_a_reaction_there_goes_out_at_once(desk
                     "path": "sample.py",
                     "createdAt": "2026-11-01T09:05:00Z",
                     "author": {"login": "someone"},
-                    "reactionGroups": reacted_with(("ROCKET", ["elsewho"], False)),
+                    "reactionGroups": reacted_with(("ROCKET", 1, False)),
                 },
             ]
         },
     }
     pulled = {"data": {"repository": {"pullRequest": {"headRefName": "feature", "reviewThreads": {"nodes": [thread]}}}}}
-    reacted = {
-        "data": {"addReaction": {"subject": {"reactionGroups": reacted_with(("THUMBS_UP", ["a", "b", "me"], True))}}}
-    }
+    reacted = {"data": {"addReaction": {"subject": {"reactionGroups": reacted_with(("THUMBS_UP", 3, True))}}}}
     desk.github_answers(
         rules=[
             {"match": "addReaction", "out": json.dumps(reacted)},
@@ -2794,16 +2788,16 @@ def test_a_sync_brings_reactions_back_and_a_reaction_there_goes_out_at_once(desk
 
     row = next(row for row in desk.get("/comments") if row["text"] == "a remark people liked")
     # An emoji nobody gave is left out, as GitHub's own page leaves it out.
-    assert row["reactions"] == {"THUMBS_UP": {"count": 2, "by": ["a", "b"]}}
-    assert row["replies"][0]["reactions"] == {"ROCKET": {"count": 1, "by": ["elsewho"]}}
+    assert row["reactions"] == {"THUMBS_UP": {"count": 2, "by": []}}
+    assert row["replies"][0]["reactions"] == {"ROCKET": {"count": 1, "by": []}}
 
     told = desk.post("/react", {"seq": row["seq"], "content": "THUMBS_UP", "who": "you", **where})
     assert told["ok"], told
     asked = [call for call in desk.github_calls() if "addReaction" in call][-1]
     assert "subject=PRRC_remark" in asked and "content=THUMBS_UP" in asked
-    # What GitHub says the comment now carries is what this desk holds, the reader among them by their login.
+    # What GitHub says the comment now carries is what this desk holds, the reader named among them.
     row = {held["seq"]: held for held in desk.get("/comments")}[row["seq"]]
-    assert row["reactions"] == {"THUMBS_UP": {"count": 3, "by": ["a", "b", "me"]}}
+    assert row["reactions"] == {"THUMBS_UP": {"count": 3, "by": ["you"]}}
 
     # A reaction GitHub refuses is not recorded here, and the reason comes back to say where the reader is.
     desk.github_answers(
@@ -2825,6 +2819,10 @@ def test_a_reaction_on_a_comment_sent_from_here_finds_it_on_the_pull_request_fir
             "github": True,
         },
     )["seqs"][0]
+    # Given while the comment is only here. Once it is on the pull request the reader's own follows GitHub, and the
+    # session's, which GitHub cannot hold, stays here.
+    desk.post("/react", {"seq": seq, "content": "EYES", "who": "you"})
+    desk.post("/react", {"seq": seq, "content": "HOORAY", "who": "session"})
     desk.github_answers(out=json.dumps({"html_url": "https://github.com/x/y/pull/53#review-1"}))
     desk.post("/publish", {"repo": "someone/reacting", "pr": 53, "seq": [seq]})
     assert "prNode" not in {row["seq"]: row for row in desk.get("/comments")}[seq]
@@ -2840,7 +2838,7 @@ def test_a_reaction_on_a_comment_sent_from_here_finds_it_on_the_pull_request_fir
     }
     thread = {"id": "T_sent", "isResolved": False, "path": "sample.py", "line": 48, "comments": {"nodes": [node]}}
     pulled = {"data": {"repository": {"pullRequest": {"headRefName": "feature", "reviewThreads": {"nodes": [thread]}}}}}
-    reacted = {"data": {"addReaction": {"subject": {"reactionGroups": reacted_with(("HOORAY", ["me"], True))}}}}
+    reacted = {"data": {"addReaction": {"subject": {"reactionGroups": reacted_with(("HOORAY", 1, True))}}}}
     desk.github_answers(
         rules=[
             {"match": "addReaction", "out": json.dumps(reacted)},
@@ -2851,7 +2849,13 @@ def test_a_reaction_on_a_comment_sent_from_here_finds_it_on_the_pull_request_fir
     assert told["ok"], told
     assert any("subject=PRRC_sent" in call for call in desk.github_calls())
     row = {row["seq"]: row for row in desk.get("/comments")}[seq]
-    assert (row["prNode"], row["reactions"]) == ("PRRC_sent", {"HOORAY": {"count": 1, "by": ["me"]}})
+    assert row["prNode"] == "PRRC_sent"
+    assert row["reactions"] == {"HOORAY": {"count": 2, "by": ["you", "session"]}}
+
+    desk.github_answers(rules=[{"match": "reviewThreads", "out": json.dumps(pulled)}])
+    desk.post("/sync", {"repo": "someone/reacting", "pr": 53})
+    row = {row["seq"]: row for row in desk.get("/comments")}[seq]
+    assert row["reactions"] == {"HOORAY": {"count": 1, "by": ["session"]}}
 
     # Naming no pull request cannot reach a comment that is on one.
     assert not desk.post("/react", {"seq": seq, "content": "EYES", "who": "you"})["ok"]
