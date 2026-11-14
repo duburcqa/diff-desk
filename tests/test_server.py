@@ -2704,3 +2704,161 @@ def test_a_sync_gives_a_date_to_what_was_brought_back_without_one(desk):
     row = {row["seq"]: row for row in desk.get("/comments")}[seq]
     assert row["at"] == "2026-08-20 14:03"
     assert row["replies"][0]["at"] == "2026-08-21 08:12"
+
+
+def reacted_with(*groups):
+    """The reactionGroups GitHub answers with, each `(content, count, viewer_has_reacted)`."""
+    return [{"content": c, "viewerHasReacted": mine, "reactors": {"totalCount": n}} for c, n, mine in groups]
+
+
+def answered(deed, *groups):
+    """What GitHub answers an addReaction or removeReaction with."""
+    return json.dumps({"data": {deed: {"subject": {"reactionGroups": reacted_with(*groups)}}}})
+
+
+def pulled(*nodes, line=46):
+    """A pull request holding one review thread made of these comments, each `(node id, body, reactionGroups)`."""
+    said = [
+        {"id": node, "databaseId": index, "body": body, "reactionGroups": groups}
+        for index, (node, body, groups) in enumerate(nodes, 970)
+    ]
+    thread = {
+        "id": f"T_{nodes[0][0]}",
+        "isResolved": False,
+        "path": "sample.py",
+        "line": line,
+        "startLine": None,
+        "originalLine": line,
+        "originalStartLine": None,
+        "diffSide": "RIGHT",
+        "comments": {"nodes": said},
+    }
+    return json.dumps(
+        {"data": {"repository": {"pullRequest": {"headRefName": "feature", "reviewThreads": {"nodes": [thread]}}}}}
+    )
+
+
+def test_a_reaction_on_a_comment_only_here_stays_here_until_it_is_sent(desk):
+    seq = desk.post(
+        "/comments",
+        {
+            "comments": [{"branch": "feature", "path": "sample.py", "line": 44, "side": "new", "text": "react to me"}],
+            "github": True,
+        },
+    )["seqs"][0]
+    desk.post("/reply", {"seq": seq, "text": "an answer", "who": "session"})
+    desk.github_answers(code=1, err="gh must not be asked")
+    for reply, content in ((None, "HEART"), (0, "ROCKET")):
+        assert desk.post("/react", {"seq": seq, "reply": reply, "content": content})["ok"]
+    # Taking back one the pull request never had owes it nothing.
+    desk.post("/react", {"seq": seq, "content": "EYES"})
+    desk.post("/react", {"seq": seq, "content": "EYES", "on": False})
+    assert not desk.post("/react", {"seq": seq, "content": "SHRUG"})["ok"]
+    assert not desk.post("/react", {"seq": seq, "reply": 5, "content": "EYES"})["ok"]
+    row = {row["seq"]: row for row in desk.get("/comments")}[seq]
+    assert row["reactions"] == {"HEART": {"count": 1, "by": ["you"]}}
+    assert (row["reactOwed"], row["replies"][0]["reactOwed"]) == ({"HEART": True}, {"ROCKET": True})
+
+    # Sending the thread carries the reactions with it, the reply's included though the send itself posts that reply:
+    # the threads read before the send do not hold it yet.
+    desk.github_answers(
+        out=json.dumps({"html_url": "https://github.com/x/y/pull/54#review-1"}),
+        rules=[
+            {"match": "subject=PRRC_answer", "out": answered("addReaction", ("ROCKET", 1, True))},
+            {"match": "subject=PRRC_remark", "out": answered("addReaction", ("HEART", 1, True))},
+            {"match": "reviewThreads", "times": 1, "out": pulled(("PRRC_remark", "react to me", []))},
+            {
+                "match": "reviewThreads",
+                "out": pulled(("PRRC_remark", "react to me", []), ("PRRC_answer", "an answer", [])),
+            },
+        ],
+    )
+    before = len(desk.github_calls())
+    assert desk.post("/publish", {"repo": "someone/reacting", "pr": 54, "seq": [seq]})["ok"]
+    assert len([call for call in desk.github_calls()[before:] if "addReaction" in call]) == 2
+    row = {row["seq"]: row for row in desk.get("/comments")}[seq]
+    assert "reactOwed" not in row and "reactOwed" not in row["replies"][0]
+    assert row["replies"][0]["github"] == "posted"
+    assert row["reactions"] == {"HEART": {"count": 1, "by": ["you"]}}
+    assert row["replies"][0]["reactions"] == {"ROCKET": {"count": 1, "by": ["you"]}}
+
+
+def test_a_reaction_on_the_pull_request_goes_out_at_once_or_waits_for_the_send(desk):
+    where = {"repo": "someone/reacting", "pr": 52}
+    thread = pulled(
+        ("PRRC_liked", "a remark people liked", reacted_with(("THUMBS_UP", 2, False), ("HEART", 0, False))),
+        ("PRRC_reply", "an answer", reacted_with(("ROCKET", 1, False))),
+    )
+    desk.github_answers(rules=[{"match": "reviewThreads", "out": thread}])
+    assert desk.post("/sync", where)["took"] == 1
+    row = next(row for row in desk.get("/comments") if row["text"] == "a remark people liked")
+    seq = row["seq"]
+    assert row["reactions"] == {"THUMBS_UP": {"count": 2, "by": []}}
+    assert row["replies"][0]["reactions"] == {"ROCKET": {"count": 1, "by": []}}
+
+    desk.github_answers(rules=[{"match": "addReaction", "out": answered("addReaction", ("THUMBS_UP", 3, True))}])
+    assert desk.post("/react", {"seq": seq, "content": "THUMBS_UP", **where})["ok"]
+    assert "subject=PRRC_liked" in [call for call in desk.github_calls() if "addReaction" in call][-1]
+    assert {row["seq"]: row for row in desk.get("/comments")}[seq]["reactions"]["THUMBS_UP"] == {
+        "count": 3,
+        "by": ["you"],
+    }
+
+    # A refusal changes nothing here, and its reason is what the page says.
+    refusal = json.dumps({"errors": [{"message": "Resource not accessible"}]})
+    desk.github_answers(rules=[{"match": "removeReaction", "out": refusal}])
+    taken_back = {"seq": seq, "content": "THUMBS_UP", "on": False, **where}
+    assert desk.post("/react", taken_back) == {"ok": False, "error": "Resource not accessible"}
+
+    # Held back, it moves GitHub's count by one and stays owed across a sync, until the send carries it.
+    desk.github_answers(code=1, err="gh must not be asked")
+    desk.post("/react", {**taken_back, "at_once": False})
+    row = {row["seq"]: row for row in desk.get("/comments")}[seq]
+    assert (row["reactOwed"], row["reactions"]["THUMBS_UP"]) == ({"THUMBS_UP": False}, {"count": 2, "by": []})
+    # Undone before the send, it owes the pull request nothing.
+    desk.post("/react", {**taken_back, "on": True, "at_once": False})
+    assert "reactOwed" not in {row["seq"]: row for row in desk.get("/comments")}[seq]
+    desk.post("/react", {**taken_back, "at_once": False})
+    held = pulled(
+        ("PRRC_liked", "a remark people liked", reacted_with(("THUMBS_UP", 3, True))), ("PRRC_reply", "an answer", [])
+    )
+    desk.github_answers(rules=[{"match": "reviewThreads", "out": held}])
+    desk.post("/sync", where)
+    assert {row["seq"]: row for row in desk.get("/comments")}[seq]["reactions"]["THUMBS_UP"] == {"count": 2, "by": []}
+    desk.github_answers(
+        rules=[
+            {"match": "removeReaction", "out": answered("removeReaction", ("THUMBS_UP", 2, False))},
+            {"match": "reviewThreads", "out": held},
+        ]
+    )
+    assert desk.post("/publish", {**where, "seq": [seq]})["ok"]
+    row = {row["seq"]: row for row in desk.get("/comments")}[seq]
+    assert ("reactOwed" in row, row["reactions"]["THUMBS_UP"]) == (False, {"count": 2, "by": []})
+
+
+def test_a_reaction_on_a_comment_sent_from_here_finds_it_on_the_pull_request_first(desk):
+    where = {"repo": "someone/reacting", "pr": 53}
+    seq = desk.post(
+        "/comments",
+        {
+            "comments": [
+                {"branch": "feature", "path": "sample.py", "line": 48, "side": "new", "text": "sent, then liked"}
+            ],
+            "github": True,
+        },
+    )["seqs"][0]
+    desk.github_answers(out=json.dumps({"html_url": "https://github.com/x/y/pull/53#review-1"}))
+    desk.post("/publish", {**where, "seq": [seq]})
+    assert "prNode" not in {row["seq"]: row for row in desk.get("/comments")}[seq]
+
+    desk.github_answers(
+        rules=[
+            {"match": "addReaction", "out": answered("addReaction", ("HOORAY", 1, True))},
+            {"match": "reviewThreads", "out": pulled(("PRRC_sent", "sent, then liked", []), line=48)},
+        ]
+    )
+    assert desk.post("/react", {"seq": seq, "content": "HOORAY", **where})["ok"]
+    row = {row["seq"]: row for row in desk.get("/comments")}[seq]
+    assert (row["prNode"], row["reactions"]) == ("PRRC_sent", {"HOORAY": {"count": 1, "by": ["you"]}})
+    # Naming no pull request cannot reach a comment that is on one.
+    assert not desk.post("/react", {"seq": seq, "content": "EYES"})["ok"]

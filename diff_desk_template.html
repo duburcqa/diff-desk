@@ -747,6 +747,23 @@
   .thread .who .by.you { color: var(--add-ink); }
   .thread .who .by.them { color: var(--stale); }
   .thread .said { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: normal; color: var(--ink); }
+  .thread .reacts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .thread .react {
+    font: inherit;
+    font-size: 11.5px;
+    line-height: 18px;
+    padding: 0 7px;
+    border: 1px solid var(--rule-strong);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .thread .react:hover:not(:disabled) { border-color: var(--accent); }
+  .thread .react.mine { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); }
+  .thread .react.owed { border-style: dashed; }
+  button.tiny.reactadd { font-size: 12px; }
+  .thread .react:disabled { cursor: default; }
   /* What is said reads as text set in blocks: the first paragraph runs on from the name that opens it, and every block
      after it starts on a line of its own, a little apart from the one above. */
   .thread .said p { margin: 6px 0 0; }
@@ -1203,6 +1220,7 @@
     <button class="setting" id="hideclosed" aria-pressed="false"><span class="what">Hide resolved comments<small>The threads already resolved leave the page</small></span><i class="switch" aria-hidden="true"></i></button>
     <div class="setting authors" id="authorsrow" hidden><span class="what">Comments by<small>The threads opened by an author left unpicked leave the page and the comment steps</small><span class="chips" id="authors"></span></span></div>
     <div class="setting authors"><span class="what">Pull request<small>The threads kept by where they stand: sent to the pull request, or still only on this desk</small><span class="chips" id="sentfilter"><button class="chip" type="button" data-sent="all" aria-pressed="true">All</button><button class="chip" type="button" data-sent="sent" aria-pressed="false">Sent</button><button class="chip" type="button" data-sent="local" aria-pressed="false">Local</button></span></span></div>
+    <button class="setting" id="reactnow" aria-pressed="true"><span class="what">Sync reactions automatically<small>A reaction given or taken back on a comment already on the pull request goes there at the press. Off, it waits for the thread's next send, as a reply does</small></span><i class="switch" aria-hidden="true"></i></button>
     <button class="setting" id="onlyunread" aria-pressed="false"><span class="what">Unread comments only<small>The threads already read leave the page and the comment steps. One read since this was switched on stays until it is switched off</small></span><i class="switch" aria-hidden="true"></i></button>
   </div>
 </div>
@@ -1360,7 +1378,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "qx", "ctx", "settingsopen", "settings", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "logresolved", "logunread", "logonlynew", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "find", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
+  for (const id of ["tabs", "scope", "q", "qx", "ctx", "settingsopen", "settings", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "logresolved", "logunread", "logonlynew", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "find", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -1414,6 +1432,7 @@
       mutedAuthors: [...mutedAuthors],
       sentFilter,
       onlyUnread: els.onlyunread.getAttribute("aria-pressed") === "true",
+      reactNow: reactNow(),
     };
     try {
       localStorage.setItem("diffdesk.choices", JSON.stringify(choices));
@@ -1435,6 +1454,7 @@
     els.logsort.value = choices.sort === "thread" ? "thread" : "batch";
     els.hidedone.setAttribute("aria-pressed", String(Boolean(choices.hideDone)));
     document.body.classList.toggle("hide-done", Boolean(choices.hideDone));
+    els.reactnow.setAttribute("aria-pressed", String(choices.reactNow !== false));
     els.hidefiles.setAttribute("aria-pressed", String(Boolean(choices.hideFiles)));
     document.body.classList.toggle("hide-files", Boolean(choices.hideFiles));
     els.hideclosed.setAttribute("aria-pressed", String(Boolean(choices.hideClosed)));
@@ -1681,6 +1701,88 @@
       notes.live = false;
       return { ok: false, error: error.message };
     }
+  }
+
+  // The reactions GitHub lets anyone give, in the order its own page lists them.
+  const REACTIONS = [
+    ["THUMBS_UP", "\u{1F44D}"],
+    ["THUMBS_DOWN", "\u{1F44E}"],
+    ["LAUGH", "\u{1F604}"],
+    ["HOORAY", "\u{1F389}"],
+    ["CONFUSED", "\u{1F615}"],
+    ["HEART", "\u{2764}\u{FE0F}"],
+    ["ROCKET", "\u{1F680}"],
+    ["EYES", "\u{1F440}"],
+  ];
+
+  // The reactions on one remark or reply, put under its words, and the button that adds one, for the line to carry.
+  // A press on a comment the pull request holds reacts there at once, as GitHub's own page does.
+  function reacting(note, index, item, host) {
+    const live = !note.pending && notes.live;
+    const react = async (content, on) => {
+      const outcome = await post("react", {
+        seq: note.seq,
+        reply: index,
+        content,
+        on,
+        at_once: reactNow(),
+        ...where(),
+      });
+      if (!outcome.ok) announce("reaction", `[${note.seq}]`, outcome.error || "GitHub unreachable");
+      await loadNotes();
+      render();
+    };
+    const row = document.createElement("div");
+    row.className = "reacts";
+    for (const [content, emoji] of REACTIONS) {
+      const group = (item.reactions || {})[content];
+      if (!group || !group.count) continue;
+      const mine = group.by.some(isReader);
+      const chip = document.createElement("button");
+      // Given on a comment already on the pull request, and waiting for the thread's next send to reach it.
+      const waiting = item.github === "posted" && content in (item.reactOwed || {});
+      chip.className = `react${mine ? " mine" : ""}${waiting ? " owed" : ""}`;
+      chip.dataset.content = content;
+      chip.textContent = `${emoji} ${group.count}`;
+      // GitHub is asked how many reacted and whether the reader did, not who everybody else is.
+      const names = group.by.map(spokenBy);
+      const others = group.count - names.length;
+      if (others > 0) names.push(names.length ? `${others} more` : `${others} on the pull request`);
+      chip.title = `${names.join(", ")} reacted with ${emoji}${waiting ? ", not on the pull request yet" : ""}`;
+      chip.disabled = !live;
+      chip.addEventListener("click", () => react(content, !mine));
+      row.append(chip);
+    }
+    if (row.childElementCount) host.append(row);
+    if (!live) return null;
+    const add = document.createElement("button");
+    add.className = "tiny reactadd";
+    add.textContent = "\u{263A}+";
+    add.title = "React";
+    add.addEventListener("click", () => {
+      // A second press puts the picker away again.
+      const open = host.querySelector(":scope > .reacts.picking");
+      if (open) return open.remove();
+      const picker = document.createElement("div");
+      picker.className = "reacts picking";
+      for (const [content, emoji] of REACTIONS) {
+        const held = (item.reactions || {})[content];
+        const choice = document.createElement("button");
+        choice.className = held && held.by.some(isReader) ? "react mine" : "react";
+        choice.dataset.content = content;
+        choice.textContent = emoji;
+        choice.addEventListener("click", () => react(content, !(held && held.by.some(isReader))));
+        picker.append(choice);
+      }
+      const shut = document.createElement("button");
+      shut.className = "react";
+      shut.textContent = "\u00d7";
+      shut.title = "Close";
+      shut.addEventListener("click", () => picker.remove());
+      picker.append(shut);
+      host.append(picker);
+    });
+    return add;
   }
 
   function shown(host, images) {
@@ -1975,6 +2077,11 @@
     if (note.github !== "posted") owes.push("the remark");
     if (said) owes.push(`${said} repl${said === 1 ? "y" : "ies"}`);
     if (note.state === "resolved" && note.prResolve !== "done") owes.push("its resolution");
+    const reacted = [note, ...(note.replies || []).filter((answer) => !answer.whisper)].reduce(
+      (count, item) => count + Object.keys(item.reactOwed || {}).length,
+      0,
+    );
+    if (reacted) owes.push(`${reacted} reaction${reacted === 1 ? "" : "s"}`);
     return owes.join(" and ");
   }
 
@@ -2024,6 +2131,9 @@
   }
 
   const withResolved = () => els.logresolved.checked;
+  function reactNow() {
+    return els.reactnow.getAttribute("aria-pressed") !== "false";
+  }
 
   // The newest comment this page knows of, which is what a fold decision is taken against.
   const latest = () => Math.max(0, ...notes.sent.map((note) => note.seq));
@@ -3105,6 +3215,7 @@
     text.append(who);
     written(text.appendChild(spoke()), note.text);
     shown(text, note.images);
+    const reactTo = reacting(note, null, note, text);
     head.append(text);
     if (note.state === "resolved") {
       const turn = document.createElement("button");
@@ -3136,6 +3247,7 @@
       row.append(cell);
       return row;
     }
+    if (reactTo) head.append(reactTo);
     if ((note.pending || notes.live) && !note.who) {
       const change = document.createElement("button");
       change.className = "tiny";
@@ -3304,6 +3416,8 @@
       written(body.appendChild(spoke()), answer.text);
       shown(body, answer.images);
       said.append(body);
+      const reactTo = reacting(note, index, answer, body);
+      if (reactTo) said.append(reactTo);
       // Whether the pull request holds this reply, shown on the reply itself: what a thread still owes is what its own
       // Sync would carry, and a reader deciding whether to press it reads that off the replies.
       if (!note.pending && !answer.whisper && answer.github !== "none") {
@@ -5857,6 +5971,34 @@
     });
     sayWhereToStep();
   });
+  els.reactnow.addEventListener("click", async () => {
+    els.reactnow.setAttribute("aria-pressed", String(!reactNow()));
+    keepChoices();
+    if (reactNow()) await flushReactions();
+  });
+
+  // Switched back on, the reactions held for the next send on comments already on this pull request go now, and
+  // nothing else of their threads goes with them.
+  async function flushReactions() {
+    const request = branch().pr;
+    if (!request || !notes.live) return;
+    let sent = 0;
+    for (const note of notes.sent) {
+      if (note.state === "deleted" || note.prNumber !== request.number) continue;
+      const items = [[null, note], ...(note.replies || []).map((answer, index) => [index, answer])];
+      for (const [index, item] of items) {
+        if (item.github !== "posted" || item.whisper) continue;
+        for (const [content, on] of Object.entries(item.reactOwed || {})) {
+          const outcome = await post("react", { seq: note.seq, reply: index, content, on, ...where() });
+          if (!outcome.ok) announce("reaction", `[${note.seq}]`, outcome.error || "GitHub unreachable");
+          sent += 1;
+        }
+      }
+    }
+    if (!sent) return;
+    await loadNotes();
+    render();
+  }
   els.hidefiles.addEventListener("click", () => {
     const on = els.hidefiles.getAttribute("aria-pressed") !== "true";
     els.hidefiles.setAttribute("aria-pressed", String(on));
@@ -6002,7 +6144,10 @@
   function drawNews() {
     // Redrawn for news alone. Rebuilding every card each round replaces the node under a press, so a click that
     // straddles the round lands on nothing, and a review of any size is rebuilt for no reason.
-    const said = notes.sent.map((note) => `${note.seq}:${note.event || 0}:${note.state}`).join(",");
+    // Reactions are news too, though they move no event: a sync brings them back without anybody saying anything.
+    const reacted = (note) =>
+      [note, ...(note.replies || [])].map((item) => JSON.stringify([item.reactions, item.reactOwed])).join("");
+    const said = notes.sent.map((note) => `${note.seq}:${note.event || 0}:${note.state}:${reacted(note)}`).join(",");
     if (said === drawnFor) return;
     drawnFor = said;
     drawLog();

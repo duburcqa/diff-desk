@@ -55,6 +55,8 @@ Nothing said here has left the desk until the reader sends the thread, so an ans
 
 `desk.py sync` brings back what the pull request holds: replies added there, its word on what is resolved, and the comments written there that this desk has no record of - a reviewer's remark, a bot's report - each numbered like any other and carrying its author. Run it when the reviewer mentions having answered on GitHub, or before working through comments, so this desk holds everything they have said. `desk.py comments [--all]` lists what is outstanding.
 
+`desk.py comments` prints the emoji reactions a remark or a reply carries, as `reactions thumbs_up 1 (you)`. A reaction does not wake a watch, so read them when listing comments. A reviewer's thumbs-up on an answer accepts it and asks for nothing more; their `confused` or `eyes` is worth a look at that answer.
+
 `desk.py comments --all` prints the resolved threads as well, which is what a long review has already decided: what it settles generalises past the line it was written on, and nothing carries that forward on its own. Read them on the ground about to be touched, before touching it - the answer that closed a thread says how it was settled, and who wrote that answer says whose decision it was. A thread the reviewer answered themselves is their edit to keep, not a line to revisit. Answering either question wrongly is answering the same remark twice.
 
 A comment brought in that way is answered and resolved like any other, and is the one kind that cannot be reworded or deleted from here: the remark is its author's, on the copy everyone reads.

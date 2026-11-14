@@ -4188,3 +4188,38 @@ def test_the_semantic_view_faces_both_versions_and_comments_on_the_line_shown(pa
     assert page.locator("#semantic").get_attribute("aria-pressed") == "true"
     # Left behind, the comment would reopen a file other tests fold away.
     desk.post("/drop", {"seq": note["seq"]})
+
+
+def test_a_remark_and_a_reply_are_reacted_to_from_the_page(page, desk):
+    branch = page.evaluate("() => data.branches[0].ref")
+    saying = f"worth an emoji, number {len(desk.get('/comments')) + 1}"
+    made = desk.post(
+        "/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": saying}]
+    )["seq"]
+    desk.post("/reply", {"seq": made, "text": "said by the session", "who": "session"})
+    desk.post("/react", {"seq": made, "reply": 0, "content": "EYES"})
+    page.reload(wait_until="load")
+    thread = page.locator(f"#note-{made}")
+
+    # A reaction is shown with its count, and pressing the reader's own takes it back.
+    seen = thread.locator(".line.reply .react.mine[data-content='EYES']")
+    assert seen.inner_text() == "\U0001f440 1"
+    seen.click()
+    page.wait_for_selector(f"#note-{made} .line.reply .react[data-content='EYES']", state="detached")
+
+    # The remark's is picked from the smiley, and the setting decides whether it waits for the thread's send.
+    page.locator("#settingsopen").click()
+    page.locator("#reactnow").click()
+    page.locator("#settingsopen").click()
+    head = thread.locator(".thread > .line").first
+    head.locator("button.reactadd").click()
+    head.locator("button.reactadd").click()
+    assert head.locator(".reacts.picking").count() == 0
+    head.locator("button.reactadd").click()
+    with page.expect_request("**/react") as asked:
+        head.locator(".reacts.picking .react[data-content='HOORAY']").click()
+    assert asked.value.post_data_json["at_once"] is False
+    page.wait_for_selector(f"#note-{made} .thread > .line .react.mine[data-content='HOORAY']")
+    row = {row["seq"]: row for row in desk.get("/comments")}[made]
+    assert row["reactions"] == {"HOORAY": {"count": 1, "by": ["you"]}}
+    assert row["replies"][0]["reactions"] == {}

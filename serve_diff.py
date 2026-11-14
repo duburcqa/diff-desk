@@ -19,6 +19,9 @@ Endpoints, all on 127.0.0.1 so nothing is exposed off the machine:
   POST /reply                 {seq, text, who} - add a reply to a comment, from the session or from the reviewer
   POST /resolve               {seq: [...], answer, resolved, who} - close comments, or reopen them
   POST /drop                  {seq, reply, who, repo, pr} - delete a comment, or only its last reply, here and there
+  POST /react                 {seq, reply, content, on, who, at_once, repo, pr} - add or take back an emoji reaction
+                              on a remark or a reply: on the pull request at once when it holds that comment, or
+                              else owed to the thread's next send
   POST /publish               {repo, pr, summary, seq, resolved} - send those threads whole: the remark if it is not
                               there yet, the replies the pull request does not hold, and the resolution of one closed
                               here. Naming none of them carries on with what a send already failed at, and never sends
@@ -249,13 +252,27 @@ query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
           originalLine
           originalStartLine
           diffSide
-          comments(first: 50) { nodes { databaseId body path state createdAt author { login } } }
+          comments(first: 50) { nodes { id databaseId body path state createdAt author { login } ...Reacted } }
         }
       }
     }
   }
 }
 """
+
+# The reactions of one comment, by emoji: how many, and whether the reader is among them. The reactors are not named,
+# since a page of them under every comment of a pull request costs fifty times what the rest of the query does, and the
+# page syncs every few seconds.
+REACTED = """
+fragment Reacted on Reactable {
+  reactionGroups { content viewerHasReacted reactors { totalCount } }
+}
+"""
+
+THREADS += REACTED
+
+# What GitHub calls each emoji a comment can carry, which is the whole of what it lets anyone react with.
+REACTIONS = ("THUMBS_UP", "THUMBS_DOWN", "LAUGH", "HOORAY", "CONFUSED", "HEART", "ROCKET", "EYES")
 
 RESOLVE = "mutation($thread: ID!) { resolveReviewThread(input: {threadId: $thread}) { thread { isResolved } } }"
 
@@ -295,6 +312,75 @@ def review_threads(repo, number):
         return Reviewed(threads, pulls[0].get("headRefName") or f"#{number}"), ""
     except (IndexError, KeyError, TypeError, json.JSONDecodeError) as error:
         return None, f"the pull request's threads could not be read: {type(error).__name__}"
+
+
+def reactions_of(node):
+    """The reactions one comment of the pull request carries, by emoji: how many, and the reader when they are among
+    them, which is all a sync asks GitHub to name."""
+    held = {}
+    for group in node.get("reactionGroups") or ():
+        count = (group.get("reactors") or {}).get("totalCount")
+        if count:
+            held[group["content"]] = {"count": count, "by": ["you"] if group.get("viewerHasReacted") else []}
+    return held
+
+
+def merged_reactions(there, owed):
+    """What the pull request says a comment carries, with the reader's reactions it is still owed laid over it."""
+    held = {content: {"count": group["count"], "by": list(group["by"])} for content, group in there.items()}
+    for content, on in owed.items():
+        group = held.setdefault(content, {"count": 0, "by": []})
+        if on and "you" not in group["by"]:
+            group["by"].insert(0, "you")
+            group["count"] += 1
+        elif not on and "you" in group["by"]:
+            group["by"].remove("you")
+            group["count"] -= 1
+    return {content: group for content, group in held.items() if group["count"]}
+
+
+def reactions_owed(row):
+    """Each remark or reply of a thread that holds reactions the pull request is owed, by its place: None for the
+    remark, else the reply's index. A whisper never leaves this desk, and neither do its reactions."""
+    items = [(None, row), *enumerate(row.get("replies") or [])]
+    return [(index, item) for index, item in items if item.get("reactOwed") and not item.get("whisper")]
+
+
+def known_by(node):
+    """What one comment of the pull request is known by from then on: its node, which a reaction is sent against, and
+    the reactions it carries, the pull request's word on them being the one everyone reads.
+
+    A comment GitHub answered for without either is left as this desk holds it.
+    """
+    known = {"prNode": node["id"]} if node.get("id") else {}
+    if "reactionGroups" in node:
+        known["reactions"] = reactions_of(node)
+    return known
+
+
+def react_there(subject, content, on):
+    """Add or take back the reader's reaction on one comment of the pull request, and answer with the reactions it then
+    carries, or nothing and why.
+
+    Either asked twice lands on the same state, so a lost answer costs nothing to ask for again.
+    """
+    deed = "addReaction" if on else "removeReaction"
+    document = (
+        "mutation($subject: ID!, $content: ReactionContent!) {"
+        f" {deed}(input: {{subjectId: $subject, content: $content}}) {{ subject {{ ...Reacted }} }} }}" + REACTED
+    )
+    asking = ["api", "graphql", "-f", f"query={document}", "-f", f"subject={subject}", "-f", f"content={content}"]
+    done = gen_diff_data.gh(*asking, repeatable=True)
+    try:
+        answer = json.loads(done.stdout)
+    except json.JSONDecodeError:
+        return None, gen_diff_data.failure_of(done)[:300] or "GitHub gave no answer"
+    if answer.get("errors"):
+        return None, " ".join(str(answer["errors"][0].get("message") or answer["errors"])[:300].split())
+    subject = ((answer.get("data") or {}).get(deed) or {}).get("subject")
+    if subject is None:
+        return None, "GitHub did not say what the comment now carries"
+    return reactions_of(subject), ""
 
 
 def resolve_thread(thread):
@@ -399,7 +485,7 @@ def owes_there(row):
     """
     if any(not answer.get("whisper") and answer.get("github") != "posted" for answer in row.get("replies") or ()):
         return True
-    return row.get("state") == "resolved"
+    return row.get("state") == "resolved" or bool(reactions_owed(row))
 
 
 def thread_of(threads, note):
@@ -446,11 +532,53 @@ def heard_again(row, thread):
             answer["github"], answer["error"] = "failed", PENDING
         pairs.append((answer, node))
     for item, node in pairs:
+        known = known_by(node)
+        if "reactions" in known:
+            known["reactions"] = merged_reactions(known["reactions"], item.get("reactOwed") or {})
+        item.update(known)
         # Only somebody else's word follows the pull request: this desk's own is rewritten here, and one rewritten there
         # is still known by its id.
         if item.get("who") and item["who"] not in ours and node["body"] != item["text"]:
             item.setdefault("edits", []).append({"at": time.strftime("%Y-%m-%d %H:%M:%S"), "text": item["text"]})
             item["text"] = node["body"]
+
+
+def react_here(item, content, on):
+    """Give or take back the reader's reaction on this desk, and record what it owes the pull request."""
+    if not item.get("whisper"):
+        owed = item.setdefault("reactOwed", {})
+        # Undoing one still owed leaves the pull request as it was, and taking back one it never had owes it nothing.
+        if owed.get(content) is (not on) or (not on and item.get("github") != "posted"):
+            owed.pop(content, None)
+        else:
+            owed[content] = on
+        if not owed:
+            item.pop("reactOwed", None)
+    group = item.setdefault("reactions", {}).setdefault(content, {"count": 0, "by": []})
+    # Counted by a step rather than by the names held, since GitHub reports how many reacted without naming them.
+    if on and "you" not in group["by"]:
+        group["by"].append("you")
+        group["count"] += 1
+    elif not on and "you" in group["by"]:
+        group["by"].remove("you")
+        group["count"] -= 1
+    if group["count"] <= 0:
+        del item["reactions"][content]
+
+
+def settle_reactions(row, reacted):
+    """Write onto one thread what GitHub said its comments carry once their owed reactions landed, and forget those."""
+    for index, landed in reacted.items():
+        replies = row.get("replies") or []
+        if index is not None and not 0 <= index < len(replies):
+            continue
+        item = row if index is None else replies[index]
+        owed = {key: on for key, on in (item.get("reactOwed") or {}).items() if key not in landed["landed"]}
+        item["reactions"] = merged_reactions(landed["reactions"], owed)
+        if owed:
+            item["reactOwed"] = owed
+        else:
+            item.pop("reactOwed", None)
 
 
 def owed_by(row, thread, going):
@@ -894,12 +1022,14 @@ def brought_in(thread, order, ref):
                 "at": said_at(answer),
                 "github": "posted",
                 "prComment": answer["databaseId"],
+                **known_by(answer),
             }
             for answer in said[1:]
         ],
         "edits": [],
         "prResolve": "done" if thread["isResolved"] else "none",
         "prThread": thread["id"],
+        **known_by(said[0]),
     }
 
 
@@ -958,6 +1088,7 @@ def incoming(row, said):
             "at": said_at(answer),
             "github": "posted",
             "prComment": answer["databaseId"],
+            **known_by(answer),
         }
         for answer in said[1:]
         if answer["body"] not in ours and answer["databaseId"] not in known
@@ -1290,6 +1421,7 @@ class Handler(BaseHTTPRequestHandler):
             "/reply": self._reply,
             "/resolve": self._resolve,
             "/drop": self._drop,
+            "/react": self._react,
             "/forget": self._forget,
             "/publish": self._publish,
             "/sync": self._sync,
@@ -1598,6 +1730,80 @@ class Handler(BaseHTTPRequestHandler):
         print(f"FORGOT whisper [{at}] of [{seq}]", flush=True)
         self._json({"ok": True, "seq": seq, "whisper": at})
 
+    def _react(self):
+        """Add or take back one emoji reaction on a remark or a reply, named by its place in the thread as an edit names
+        it.
+
+        On a comment the pull request holds, the reader's reaction goes out at the press, as GitHub's own page sends
+        it, unless the request asks for it to wait with `at_once` false. One that waits, and one on a comment that is
+        only here, is recorded under `reactOwed` and goes out when the thread is sent. Reactions are the reader's alone,
+        since the pull request knows the reader's account and no other.
+        """
+        order = self._body()
+        content, index, on = order.get("content"), order.get("reply"), order.get("on", True) is not False
+        at_once = order.get("at_once", True) is not False
+        if content not in REACTIONS:
+            self._json({"ok": False, "error": f"GitHub has no reaction named {content!r}"})
+            return
+
+        def reacted_on(rows):
+            found = next((row for row in rows if row["seq"] == order.get("seq")), None)
+            if found is None or found.get("state") == "deleted":
+                return found, None, f"no comment numbered {order.get('seq')}"
+            if index is None:
+                return found, found, ""
+            replies = found.get("replies") or []
+            if not 0 <= index < len(replies):
+                return found, None, f"comment {found['seq']} has no reply {index}"
+            return found, replies[index], ""
+
+        with CHANGING:
+            found, item, refused = reacted_on(read_notes())
+        held = None
+        if not refused and at_once and item.get("github") == "posted" and not item.get("whisper"):
+            held, refused = self._react_there(order, item, content, on)
+        if refused:
+            print(f"REACT FAILED {refused}", flush=True)
+            self._json({"ok": False, "error": refused})
+            return
+        with changing() as rows:
+            found, item, refused = reacted_on(rows)
+            if not refused and held is not None:
+                owed = item.get("reactOwed") or {}
+                owed.pop(content, None)
+                if not owed:
+                    item.pop("reactOwed", None)
+                item["reactions"] = merged_reactions(held, owed)
+            elif not refused:
+                react_here(item, content, on)
+        if refused:
+            self._json({"ok": False, "error": refused})
+            return
+        named = "" if index is None else f" reply {index}"
+        print(f"REACT [{found['seq']}]{named} {'+' if on else '-'}{content}", flush=True)
+        self._json({"ok": True, "seq": found["seq"], "reply": index, "reactions": item.get("reactions") or {}})
+
+    def _react_there(self, order, item, content, on):
+        """React on the pull request to one comment it holds, finding that comment's node first when this desk has never
+        been told it. Answers with the reactions it then carries, or nothing and why."""
+        if not (order.get("repo") and order.get("pr")):
+            return None, "it is on the pull request, so the pull request has to be named to react to it"
+        subject = item.get("prNode")
+        if not subject:
+            reviewed, trouble = review_threads(order["repo"], order["pr"])
+            if reviewed is None:
+                return None, trouble
+            with changing() as rows:
+                found = next((row for row in rows if row["seq"] == order.get("seq")), None)
+                thread = thread_of(reviewed.threads, found) if found is not None else None
+                if thread is not None:
+                    heard_again(found, thread)
+                    index = order.get("reply")
+                    subject = (found if index is None else found["replies"][index]).get("prNode")
+            if not subject:
+                return None, NOWHERE
+        return react_there(subject, content, on)
+
     def _drop(self):
         """Delete a comment, or only its last reply, here and on the pull request when it was posted.
 
@@ -1777,7 +1983,7 @@ class Handler(BaseHTTPRequestHandler):
         if not carrying:
             return 0, 0, ""
         reviewed, trouble = review_threads(order["repo"], order["pr"])
-        owing, plans = [], []
+        owing, plans, reacting = [], [], []
         for row in carrying:
             thread = None if reviewed is None else thread_of(reviewed.threads, row)
             if thread is None:
@@ -1795,7 +2001,9 @@ class Handler(BaseHTTPRequestHandler):
             asked = owed_by(row, thread, going)
             plans.append((row["seq"], thread, going, len(owing), len(asked)))
             owing.extend(asked)
+            reacting.extend((row, index) for index, _ in reactions_owed(row))
         answers = carry_out(order["repo"], order["pr"], owing)
+        reacted, trouble = self._carry_reactions(order, reacting, trouble)
         replies, resolved = 0, 0
         with changing() as fresh:
             for seq, thread, going, at, count in plans:
@@ -1807,10 +2015,43 @@ class Handler(BaseHTTPRequestHandler):
                     if held["seq"] == seq:
                         heard_again(held, thread)
                         settle_sent(held, thread, going, step)
+                        settle_reactions(held, reacted.get(seq) or {})
                         touched(fresh, held, "session")
         if replies or resolved:
             print(f"SENT {replies} reply(ies)" + (f", {resolved} resolved there" if resolved else ""), flush=True)
         return replies, resolved, trouble
+
+    def _carry_reactions(self, order, reacting, trouble):
+        """Give or take back on the pull request each reaction a thread owes it, one request apiece.
+
+        A reply this send has just posted is not in the threads read before it, so the threads are read again for its
+        node. Answers, by comment and then by place in the thread, what GitHub said the comment carries after each
+        landed, with the emoji that landed; the first refusal stands as the send's trouble when nothing else went wrong
+        first.
+        """
+
+        def item_at(row, index):
+            return row if index is None else row["replies"][index]
+
+        if any(not item_at(row, index).get("prNode") for row, index in reacting):
+            reviewed, _ = review_threads(order["repo"], order["pr"])
+            for row, _ in reacting:
+                thread = None if reviewed is None else thread_of(reviewed.threads, row)
+                if thread is not None:
+                    heard_again(row, thread)
+        reacted = {}
+        for row, index in reacting:
+            seq, item = row["seq"], item_at(row, index)
+            subject = item.get("prNode")
+            for content, on in item["reactOwed"].items():
+                held, refused = react_there(subject, content, on) if subject else (None, NOWHERE)
+                if held is None:
+                    trouble = trouble or refused
+                    continue
+                landed = reacted.setdefault(seq, {}).setdefault(index, {"reactions": held, "landed": set()})
+                landed["reactions"] = held
+                landed["landed"].add(content)
+        return reacted, trouble
 
     def _sync(self):
         """Bring this desk and the pull request to the same state.
