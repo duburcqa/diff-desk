@@ -134,8 +134,8 @@ def show(note, since=None):
         marks.append(f"github {note['github']}")
     if note.get("error"):
         marks.append(f"error {note['error'][:60]}")
-    if reacted(note):
-        marks.append(f"reactions {reacted(note)}")
+    if held := reacted(note):
+        marks.append(f"reactions {held}")
     # Flushed as it goes: a watch that keeps running holds its output in a buffer otherwise, and a session reading
     # along sees a heading with nothing under it.
     print(
@@ -155,8 +155,8 @@ def show(note, since=None):
         news = "*" if since is not None and answer.get("event", 0) > since else " "
         print(f"     {news}[{index}] {said} {answer['at']}: {' '.join(answer['text'].split())}", flush=True)
         carried(answer, "          ")
-        if reacted(answer):
-            print(f"          reactions {reacted(answer)}", flush=True)
+        if held := reacted(answer):
+            print(f"          reactions {held}", flush=True)
         for earlier in answer.get("edits") or []:
             print(f"          was {earlier['at']}: {' '.join(earlier['text'].split())[:80]}", flush=True)
     for earlier in note.get("edits") or []:
