@@ -4343,7 +4343,29 @@
 
   function visible(files) {
     const query = state.query.trim().toLowerCase();
-    return query ? files.filter((file) => file.path.toLowerCase().includes(query)) : files;
+    const ordered = inTreeOrder(files);
+    return query ? ordered.filter((file) => file.path.toLowerCase().includes(query)) : ordered;
+  }
+
+  // The files in the order the file list draws them, each folder's folders before its own files, so the diff reads
+  // down in the order the list does. Kept per list of files, since every step and every redraw asks for it.
+  const treeOrders = new WeakMap();
+
+  function inTreeOrder(files) {
+    if (treeOrders.has(files)) return treeOrders.get(files);
+    const root = { folders: new Map(), files: [] };
+    for (const file of files) {
+      let node = root;
+      for (const step of file.path.split("/").slice(0, -1)) {
+        if (!node.folders.has(step)) node.folders.set(step, { folders: new Map(), files: [] });
+        node = node.folders.get(step);
+      }
+      node.files.push(file);
+    }
+    const flat = (node) => [...[...node.folders.values()].flatMap(flat), ...node.files];
+    const ordered = flat(root);
+    treeOrders.set(files, ordered);
+    return ordered;
   }
 
   /* ---------- picking a file by name ---------- */

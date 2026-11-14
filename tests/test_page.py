@@ -4227,6 +4227,13 @@ def test_a_remark_and_a_reply_are_reacted_to_from_the_page(page, desk):
 
 def test_the_file_list_follows_the_file_scrolled_onto(page):
     current = "() => document.querySelector('.fileitem[data-current=\"true\"] .name')?.title"
+    # The diff reads down in the order the list does, each folder's folders before its own files.
+    listed = page.evaluate(
+        "() => [...document.querySelectorAll('#filelist .fileitem .name')].map((name) => name.title)"
+    )
+    assert listed == page.evaluate(
+        "() => [...document.querySelectorAll('section.file')].map((card) => card.dataset.path)"
+    )
     first, second = page.evaluate(
         "() => [...document.querySelectorAll('section.file')].map((card) => card.dataset.path)"
     )[:2]
