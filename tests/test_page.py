@@ -107,7 +107,13 @@ def comments_reach(page):
 
 
 def reached(page, want):
-    """Wait for a pick to have brought the file it names under the bar, which is where it leaves the reader."""
+    """Wait for a pick to have brought the file it names under the bar, which is where it leaves the reader.
+
+    Read once the aim has landed and the page has stopped moving: the files it flew past are built at the landing, and
+    the file passes under the bar on the way to where the page then puts it back.
+    """
+    page.wait_for_function("() => reaching === null")
+    at_rest(page)
     page.wait_for_function(f"(want) => ({NEAREST})() === want", arg=want)
 
 
@@ -938,7 +944,7 @@ def test_a_comment_stays_inside_the_view_when_the_diff_is_scrolled(page, desk):
 
 def test_a_card_reaches_as_far_across_once_its_lines_are_let_go_of(page):
     # Narrow enough that the lines overflow, short enough that a card leaves the reach that keeps it built.
-    page.set_viewport_size({"width": 200, "height": 400})
+    page.set_viewport_size({"width": 160, "height": 400})
     page.reload(wait_until="load")
     page.wait_for_selector("tr[data-line]")
     held = page.evaluate(
@@ -3412,10 +3418,10 @@ def test_a_file_holding_an_unread_comment_opens_itself(page, desk):
     # Away while it arrives, since a poll landing on an open page would show it and reading it is what folds the file
     # away again: what is being asked here is what the reader finds on coming back.
     page.goto("about:blank")
-    desk.post(
+    arrived = desk.post(
         "/comments",
         [{"branch": branch, "path": "added.py", "line": 1, "side": "new", "text": "arrived after you read it"}],
-    )
+    )["seqs"][0]
     page.go_back(wait_until="load")
     page.wait_for_selector("section.file")
     comments_reach(page)
@@ -3424,7 +3430,8 @@ def test_a_file_holding_an_unread_comment_opens_itself(page, desk):
     assert again.get_attribute("data-open") == "true"
     assert "arrived after you read it" in again.inner_text()
 
-    # Shown once, it stops asking: the file goes back to being folded away.
+    # Shown once, it stops asking: the file goes back to being folded away. Brought in front of the reader, as below.
+    read(page, arrived)
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
     comments_reach(page)
@@ -4223,3 +4230,57 @@ def test_a_remark_and_a_reply_are_reacted_to_from_the_page(page, desk):
     row = {row["seq"]: row for row in desk.get("/comments")}[made]
     assert row["reactions"] == {"HOORAY": {"count": 1, "by": ["you"]}}
     assert row["replies"][0]["reactions"] == {}
+
+
+def test_the_file_list_follows_the_file_scrolled_onto(page):
+    current = "() => document.querySelector('.fileitem[data-current=\"true\"] .name')?.title"
+    # The diff reads down in the order the list does, each folder's folders before its own files.
+    listed = page.evaluate(
+        "() => [...document.querySelectorAll('#filelist .fileitem .name')].map((name) => name.title)"
+    )
+    assert listed == page.evaluate(
+        "() => [...document.querySelectorAll('section.file')].map((card) => card.dataset.path)"
+    )
+    first, second = page.evaluate(
+        "() => [...document.querySelectorAll('section.file')].map((card) => card.dataset.path)"
+    )[:2]
+    page.locator(".fileitem .name", has_text=first.split("/")[-1]).first.click()
+    page.wait_for_function("() => reaching === null")
+    assert page.evaluate(current) == first
+
+    # Scrolled by hand until the second file's head reaches the bar, the list moves its pick there.
+    page.wait_for_function(
+        """(path) => {
+          const card = document.querySelector(`section.file[data-path="${path}"]`);
+          const covered = document.querySelector('header').getBoundingClientRect().bottom;
+          window.scrollBy(0, card.getBoundingClientRect().top - covered);
+          return document.querySelector('.fileitem[data-current="true"] .name')?.title === path;
+        }""",
+        arg=second,
+        polling=100,
+    )
+    # And back, past the first file's head.
+    page.evaluate("() => window.scrollTo(0, 0)")
+    page.wait_for_function(f"(path) => ({current})() === path", arg=first)
+
+    # A reviewed file hidden by the setting is passed over, as if it were not there.
+    page.evaluate(
+        "(path) => { document.querySelector(`section.file[data-path='${path}']`).dataset.done = 'true'; }", second
+    )
+    page.evaluate("() => document.body.classList.add('hide-done')")
+    third = page.evaluate("() => [...document.querySelectorAll('section.file')].map((card) => card.dataset.path)")[2]
+    try:
+        page.wait_for_function(
+            """(path) => {
+              const card = document.querySelector(`section.file[data-path="${path}"]`);
+              const covered = document.querySelector('header').getBoundingClientRect().bottom;
+              window.scrollBy(0, card.getBoundingClientRect().top - covered);
+              return document.querySelector('.fileitem[data-current="true"] .name')?.title === path;
+            }""",
+            arg=third,
+            polling=100,
+        )
+        page.evaluate("() => window.scrollBy(0, -40)")
+        page.wait_for_function(f"(path) => ({current})() === path", arg=first)
+    finally:
+        page.evaluate("() => document.body.classList.remove('hide-done')")

@@ -4343,7 +4343,29 @@
 
   function visible(files) {
     const query = state.query.trim().toLowerCase();
-    return query ? files.filter((file) => file.path.toLowerCase().includes(query)) : files;
+    const ordered = inTreeOrder(files);
+    return query ? ordered.filter((file) => file.path.toLowerCase().includes(query)) : ordered;
+  }
+
+  // The files in the order the file list draws them, each folder's folders before its own files, so the diff reads
+  // down in the order the list does. Kept per list of files, since every step and every redraw asks for it.
+  const treeOrders = new WeakMap();
+
+  function inTreeOrder(files) {
+    if (treeOrders.has(files)) return treeOrders.get(files);
+    const root = { folders: new Map(), files: [] };
+    for (const file of files) {
+      let node = root;
+      for (const step of file.path.split("/").slice(0, -1)) {
+        if (!node.folders.has(step)) node.folders.set(step, { folders: new Map(), files: [] });
+        node = node.folders.get(step);
+      }
+      node.files.push(file);
+    }
+    const flat = (node) => [...[...node.folders.values()].flatMap(flat), ...node.files];
+    const ordered = flat(root);
+    treeOrders.set(files, ordered);
+    return ordered;
   }
 
   /* ---------- picking a file by name ---------- */
@@ -5674,16 +5696,25 @@
     for (const node of entries()) node.setAttribute("data-current", String(Number(node.dataset.index) === state.current));
   }
 
-  function leftToReview(down) {
-    // Counted from the file the reader is on, which is the last one whose head has passed the line a stepped-to file
-    // comes to rest at - the header plus the breathing space the card's own scroll margin asks for, read off the style
-    // so the two cannot drift apart. Measuring against the header alone would offer them the file they are reading.
-    const cards = [...document.querySelectorAll("section.file")];
-    if (!cards.length) return undefined;
+  function readingAt(cards) {
+    // The file the reader is on, by its place among the cards, or -1 above the first: the last one whose head has passed
+    // the line a stepped-to file comes to rest at - the header plus the breathing space the card's own scroll margin
+    // asks for, read off the style so the two cannot drift apart. Measuring against the header alone would name the
+    // next file.
     const covered = document.querySelector("header").getBoundingClientRect().bottom;
     const resting = Math.max(covered, parseFloat(getComputedStyle(cards[0]).scrollMarginTop) || covered) + LANDED;
     const below = cards.findIndex((card) => card.getBoundingClientRect().top > resting);
-    const here = below === -1 ? cards.length - 1 : below - 1;
+    return below === -1 ? cards.length - 1 : below - 1;
+  }
+
+  // The cards on the page, less those a setting hides: a hidden card measures as standing at the very top, which would
+  // read as the file the reader is on.
+  const shownCards = () => [...document.querySelectorAll("section.file")].filter((card) => card.getClientRects().length);
+
+  function leftToReview(down) {
+    const cards = shownCards();
+    if (!cards.length) return undefined;
+    const here = readingAt(cards);
     const ahead = down ? cards.slice(here + 1) : cards.slice(0, Math.max(0, here)).reverse();
     return ahead.find((card) => card.dataset.done !== "true");
   }
@@ -5773,6 +5804,9 @@
     const target = document.getElementById(`f${index}`);
     if (!target) return;
     state.current = index;
+    // Kept where the jump leaves the page until the reader scrolls on from there: a short file at the foot of the page
+    // cannot be brought up to the top, and reading the file the reader is on there would take the pick away from them.
+    pickedAt = undefined;
     const entry = entries().find((node) => Number(node.dataset.index) === index);
     for (let shelf = entry && entry.closest(".folder"); shelf; shelf = shelf.parentElement.closest(".folder")) {
       shelf.dataset.open = "true";
@@ -5801,6 +5835,34 @@
       const before = anchor ? anchor.getBoundingClientRect().top : null;
       letGo();
       if (anchor && anchor.isConnected) window.scrollBy(0, anchor.getBoundingClientRect().top - before);
+    });
+  });
+
+  // The file list follows the reader through the diff: the file they scroll onto becomes the current one there, and
+  // the list scrolls to keep it in view without moving the page.
+  let pickedAt = null;
+  let following = null;
+  window.addEventListener("scroll", () => {
+    if (following) return;
+    following = requestAnimationFrame(() => {
+      following = null;
+      if (reaching !== null) return;
+      if (pickedAt === undefined) pickedAt = window.scrollY;
+      if (pickedAt !== null && Math.abs(window.scrollY - pickedAt) < 8) return;
+      pickedAt = null;
+      const cards = shownCards();
+      if (!cards.length) return;
+      const index = Number(cards[Math.max(0, readingAt(cards))].id.slice(1));
+      if (index === state.current) return;
+      state.current = index;
+      markCurrent();
+      const entry = entries().find((node) => Number(node.dataset.index) === index);
+      if (!entry || !entry.getClientRects().length) return;
+      const list = entry.closest("aside");
+      const box = entry.getBoundingClientRect();
+      const room = list.getBoundingClientRect();
+      if (box.top < room.top) list.scrollTop -= room.top - box.top;
+      else if (box.bottom > room.bottom) list.scrollTop += box.bottom - room.bottom;
     });
   });
 
