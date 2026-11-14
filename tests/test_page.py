@@ -4197,15 +4197,15 @@ def test_a_remark_and_a_reply_are_reacted_to_from_the_page(page, desk):
         "/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": saying}]
     )["seq"]
     desk.post("/reply", {"seq": made, "text": "said by the session", "who": "session"})
-    desk.post("/react", {"seq": made, "reply": 0, "content": "EYES", "who": "session"})
+    desk.post("/react", {"seq": made, "reply": 0, "content": "EYES"})
     page.reload(wait_until="load")
     thread = page.locator(f"#note-{made}")
 
-    # Somebody else's reaction is shown with its count, and pressing it adds the reader's own.
-    seen = thread.locator(".line.reply .react[data-content='EYES']")
+    # A reaction is shown with its count, and pressing the reader's own takes it back.
+    seen = thread.locator(".line.reply .react.mine[data-content='EYES']")
     assert seen.inner_text() == "\U0001f440 1"
     seen.click()
-    page.wait_for_selector(f"#note-{made} .line.reply .react.mine[data-content='EYES']")
+    page.wait_for_selector(f"#note-{made} .line.reply .react[data-content='EYES']", state="detached")
 
     # The remark's is picked from the smiley, and the setting decides whether it waits for the thread's send.
     page.locator("#settingsopen").click()
@@ -4220,4 +4220,4 @@ def test_a_remark_and_a_reply_are_reacted_to_from_the_page(page, desk):
     page.wait_for_selector(f"#note-{made} .thread > .line .react.mine[data-content='HOORAY']")
     row = {row["seq"]: row for row in desk.get("/comments")}[made]
     assert row["reactions"] == {"HOORAY": {"count": 1, "by": ["you"]}}
-    assert row["replies"][0]["reactions"] == {"EYES": {"count": 2, "by": ["session", "you"]}}
+    assert row["replies"][0]["reactions"] == {}

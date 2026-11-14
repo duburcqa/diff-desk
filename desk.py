@@ -122,7 +122,8 @@ def reacted(item):
     """The reactions one remark or reply carries, as one line, or nothing when it carries none."""
     held = item.get("reactions") or {}
     return ", ".join(
-        f"{content.lower()} {group['count']} ({', '.join(group['by'])})" for content, group in held.items()
+        f"{content.lower()} {group['count']}" + (f" ({', '.join(group['by'])})" if group["by"] else "")
+        for content, group in held.items()
     )
 
 

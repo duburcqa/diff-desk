@@ -1727,7 +1727,6 @@
         reply: index,
         content,
         on,
-        who: "you",
         at_once: reactNow(),
         ...where(),
       });
@@ -5990,7 +5989,7 @@
       for (const [index, item] of items) {
         if (item.github !== "posted" || item.whisper) continue;
         for (const [content, on] of Object.entries(item.reactOwed || {})) {
-          const outcome = await post("react", { seq: note.seq, reply: index, content, on, who: "you", ...where() });
+          const outcome = await post("react", { seq: note.seq, reply: index, content, on, ...where() });
           if (!outcome.ok) announce("reaction", `[${note.seq}]`, outcome.error || "GitHub unreachable");
           sent += 1;
         }
