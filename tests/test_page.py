@@ -911,6 +911,21 @@ def test_a_comment_stays_inside_the_view_when_the_diff_is_scrolled(page, desk):
     branch = page.evaluate("() => data.branches[0].ref")
     long = "A remark long enough to need clipping: " + "the quick brown fox jumps over the lazy dog. " * 12
     desk.post("/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": long}])
+    page.reload(wait_until="load")
+    page.wait_for_selector(".thread")
+    spare = page.evaluate(
+        """() => {
+          const table = document.querySelector('.body .thread').closest('table');
+          return [...table.querySelectorAll('td.ln')].filter((cell) => cell.textContent).map((cell) => {
+            const text = document.createRange();
+            text.selectNodeContents(cell);
+            return Math.round(cell.getBoundingClientRect().width - text.getBoundingClientRect().width);
+          });
+        }"""
+    )
+    # The comment spans the whole card, and the room it takes beyond the code goes to the code, each line number
+    # keeping the width it needs.
+    assert spare and max(spare) <= 40, spare
     # Narrow enough that the diff's own lines overflow, which is when a comment used to be dragged off with them.
     page.set_viewport_size({"width": 820, "height": 900})
     page.reload(wait_until="load")

@@ -525,9 +525,11 @@
   .body::-webkit-scrollbar-thumb { background: var(--rule-strong); border-radius: 5px; }
   table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
   td { padding: 0 0 0 6px; vertical-align: top; white-space: pre; }
+  /* The narrow columns take a width below their content, so each is as wide as what it holds. A percentage would say
+     the same in Chrome, but WebKit hands percentage columns a share of a comment row spanning the whole table. */
   td.ln {
     user-select: none;
-    width: 1%;
+    width: 1px;
     padding: 0 8px;
     text-align: right;
     color: var(--faint);
@@ -536,7 +538,7 @@
     border-right: 1px solid var(--rule);
     cursor: pointer;
   }
-  td.mark { width: 1%; padding: 0 4px 0 6px; color: var(--faint); user-select: none; }
+  td.mark { width: 1px; padding: 0 4px 0 6px; color: var(--faint); user-select: none; }
   td.gut { width: 21px; min-width: 21px; padding: 0 3px; user-select: none; }
   td.code .hljs-comment, td.code .hljs-quote { color: var(--faint); font-style: italic; }
   td.code .hljs-string, td.code .hljs-regexp, td.code .hljs-char.escape_, td.code .hljs-subst { color: var(--str); }
