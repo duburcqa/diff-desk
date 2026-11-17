@@ -5720,6 +5720,8 @@
     // the reader was just taken to is neither ahead nor behind. A thread whose file is not built yet is measured by the
     // file, and those sharing it keep the order of their lines.
     const hidingClosed = document.body.classList.contains("hide-closed");
+    const covered = document.querySelector("header").getBoundingClientRect().bottom;
+    const middle = (covered + window.innerHeight) / 2;
     const placed = [];
     for (const note of mine()) {
       if (filteredOut(note) || (hidingClosed && note.state === "resolved")) continue;
@@ -5728,7 +5730,12 @@
       const thread =
         document.getElementById(`note-${note.seq}`) || document.querySelector(`.filenote[data-seq="${note.seq}"]`);
       const shown = thread && thread.getClientRects().length ? thread : card;
-      placed.push({ note, off: missedBy(shown, note.seq), line: note.line || 0 });
+      // The thread the reader was taken to is where they stand for as long as it spans the middle of the view: a reply
+      // written in it makes it taller and moves its centre, which would otherwise put it ahead of them again.
+      const box = shown.getBoundingClientRect();
+      const isReading =
+        shown === thread && state.reached && state.reached.seq === note.seq && box.top <= middle && box.bottom >= middle;
+      placed.push({ note, off: isReading ? 0 : missedBy(shown, note.seq), line: note.line || 0 });
     }
     placed.sort((first, second) => first.off - second.off || first.line - second.line);
     const ahead = placed.find((place) => place.off >= LANDED);

@@ -1376,6 +1376,25 @@ def test_comments_are_filtered_by_their_author_and_stepped_through(page, desk):
     page.locator(f"#note-{theirs}").wait_for(state="attached")
 
 
+def test_the_next_step_leaves_a_thread_answered_where_it_was_reached(page, desk):
+    comments = [
+        {"branch": "feature", "path": "sample.py", "line": line, "side": "new", "text": f"stepped past, line {line}"}
+        for line in (30, 160)
+    ]
+    first = desk.post("/comments", {"comments": comments})["seqs"][0]
+    page.reload(wait_until="load")
+    comments_reach(page)
+    page.evaluate(f"() => goTo('{first}')")
+    page.wait_for_function(f"() => reaching === null && state.reached && state.reached.seq === {first}")
+    # Answered where it was reached, the thread grows under the reader, who is still on it.
+    desk.post("/reply", {"seq": first, "text": "answered where it was reached", "who": "you"})
+    page.evaluate("() => loadNotes()")
+    page.locator(f"#note-{first}").get_by_text("answered where it was reached").wait_for()
+    at_rest(page)
+    page.locator("#cnext").click()
+    page.wait_for_function(f"() => reaching === null && state.reached.seq !== {first}", timeout=5000)
+
+
 def test_stepping_lands_on_the_file_left_to_review_nearest_the_reader(page):
     page.set_viewport_size({"width": 1200, "height": 500})
     paths = page.evaluate("() => [...document.querySelectorAll('section.file')].map((card) => card.dataset.path)")
