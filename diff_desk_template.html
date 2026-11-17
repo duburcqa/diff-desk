@@ -1287,14 +1287,6 @@
         <option value="thread">thread</option>
       </select>
     </label>
-    <label class="seen" id="logonlynew" title="List only the threads holding something not yet read">
-      <input type="checkbox" id="logunread" />
-      <span>Only unread</span>
-    </label>
-    <label class="seen" id="logshow" title="List what is resolved, and include it when syncing with the pull request">
-      <input type="checkbox" id="logresolved" />
-      <span>Show resolved</span>
-    </label>
     <button class="ghost" id="logclose">Close</button>
   </div>
   <div class="rows" id="logrows"></div>
@@ -1380,7 +1372,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "qx", "ctx", "settingsopen", "settings", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "logresolved", "logunread", "logonlynew", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "find", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
+  for (const id of ["tabs", "scope", "q", "qx", "ctx", "settingsopen", "settings", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "find", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -1423,8 +1415,6 @@
   function keepChoices() {
     const choices = {
       log: els.log.dataset.open === "true",
-      unread: els.logunread.checked,
-      resolved: els.logresolved.checked,
       sort: els.logsort.value,
       hideDone: els.hidedone.getAttribute("aria-pressed") === "true",
       hideFiles: els.hidefiles.getAttribute("aria-pressed") === "true",
@@ -1451,8 +1441,6 @@
       choices = {};
     }
     els.log.dataset.open = String(Boolean(choices.log));
-    els.logunread.checked = Boolean(choices.unread);
-    els.logresolved.checked = Boolean(choices.resolved);
     els.logsort.value = choices.sort === "thread" ? "thread" : "batch";
     els.hidedone.setAttribute("aria-pressed", String(Boolean(choices.hideDone)));
     document.body.classList.toggle("hide-done", Boolean(choices.hideDone));
@@ -2132,7 +2120,7 @@
     return notes.sent.filter((note) => belongs(note) && note.path !== "(review)" && note.state !== "deleted");
   }
 
-  const withResolved = () => els.logresolved.checked;
+  const withResolved = () => els.hideclosed.getAttribute("aria-pressed") !== "true";
   function reactNow() {
     return els.reactnow.getAttribute("aria-pressed") !== "false";
   }
@@ -2149,8 +2137,9 @@
 
   function drawLog() {
     const all = mine();
-    const shown = withResolved() ? all : all.filter((note) => note.state !== "resolved");
-    const rows = els.logunread.checked ? shown.filter(unread) : shown;
+    // The thread open in the panel stays listed whatever the settings hide: the press on its row asked to read it.
+    const shown = withResolved() ? all : all.filter((note) => note.state !== "resolved" || note.seq === unmoored);
+    const rows = shown.filter((note) => !readOut(note));
     const owed = rows.filter((note) => OWED.includes(note.github));
     const counted = [
       `${all.filter((note) => note.state === "open").length} open`,
@@ -5731,6 +5720,8 @@
     // the reader was just taken to is neither ahead nor behind. A thread whose file is not built yet is measured by the
     // file, and those sharing it keep the order of their lines.
     const hidingClosed = document.body.classList.contains("hide-closed");
+    const covered = document.querySelector("header").getBoundingClientRect().bottom;
+    const middle = (covered + window.innerHeight) / 2;
     const placed = [];
     for (const note of mine()) {
       if (filteredOut(note) || (hidingClosed && note.state === "resolved")) continue;
@@ -5739,7 +5730,12 @@
       const thread =
         document.getElementById(`note-${note.seq}`) || document.querySelector(`.filenote[data-seq="${note.seq}"]`);
       const shown = thread && thread.getClientRects().length ? thread : card;
-      placed.push({ note, off: missedBy(shown, note.seq), line: note.line || 0 });
+      // The thread the reader was taken to is where they stand for as long as it spans the middle of the view: a reply
+      // written in it makes it taller and moves its centre, which would otherwise put it ahead of them again.
+      const box = shown.getBoundingClientRect();
+      const isReading =
+        shown === thread && state.reached && state.reached.seq === note.seq && box.top <= middle && box.bottom >= middle;
+      placed.push({ note, off: isReading ? 0 : missedBy(shown, note.seq), line: note.line || 0 });
     }
     placed.sort((first, second) => first.off - second.off || first.line - second.line);
     const ahead = placed.find((place) => place.off >= LANDED);
@@ -5758,6 +5754,11 @@
   function filteredOut(note) {
     if (mutedAuthors.has(authorOf(note))) return true;
     if (sentFilter !== "all" && (note.github === "posted") !== (sentFilter === "sent")) return true;
+    return readOut(note);
+  }
+
+  // Under "Unread comments only", a thread read since the switch was turned on stays where the reader is reading it.
+  function readOut(note) {
     if (els.onlyunread.getAttribute("aria-pressed") !== "true") return false;
     if (unread(note)) keptUnread.add(note.seq);
     return !keptUnread.has(note.seq);
@@ -5883,6 +5884,7 @@
       keptUnread.clear();
       els.onlyunread.setAttribute("aria-pressed", String(els.onlyunread.getAttribute("aria-pressed") !== "true"));
     });
+    drawLog();
   });
   els.cback.addEventListener("click", () => {
     const { back } = commentsAround();
@@ -6033,6 +6035,7 @@
       document.body.classList.toggle("hide-closed", on);
       keepChoices();
     });
+    drawLog();
     sayWhereToStep();
   });
   els.reactnow.addEventListener("click", async () => {
@@ -6124,15 +6127,6 @@
   });
   els.logsync.addEventListener("click", () => syncThere(true));
   els.logsend.addEventListener("click", () => sendThreads(alreadyThere()));
-  els.logresolved.addEventListener("change", () => {
-    keepChoices();
-    drawLog();
-    render();
-  });
-  els.logunread.addEventListener("change", () => {
-    keepChoices();
-    drawLog();
-  });
   els.logsort.addEventListener("change", () => {
     keepChoices();
     drawLog();

@@ -1059,10 +1059,9 @@ def test_the_comments_panel_reads_by_batch_or_by_what_moved_last(page, desk):
     assert "the older batch" in page.locator("#logrows .logrow").first.inner_text()
     assert page.locator("#logrows .batch").count() == 0
 
-    # And how the page is being read outlives the reload: the panel open, its listing sorted and filtered as it was, the
-    # header hiding what it hid. A refresh comes to a reload once the desk has been served over, and it must not cost
-    # the reader their place.
-    page.locator("#logresolved").check()
+    # And how the page is being read outlives the reload: the panel open, its listing sorted as it was, the header
+    # hiding what it hid. A refresh comes to a reload once the desk has been served over, and it must not cost the
+    # reader their place.
     flip(page, "hideclosed")
     # The file list folds from its own head, the diff takes the width it held, and a rail at the edge brings it back.
     # The bar holds one row in a laptop window, with nothing in it that is not a control.
@@ -1077,7 +1076,6 @@ def test_the_comments_panel_reads_by_batch_or_by_what_moved_last(page, desk):
     page.wait_for_selector("section.file")
     assert page.locator("#log").get_attribute("data-open") == "true"
     assert page.locator("#logsort").input_value() == "thread"
-    assert page.locator("#logresolved").is_checked()
     assert page.locator("#hideclosed").get_attribute("aria-pressed") == "true"
     assert page.evaluate("() => document.body.classList.contains('hide-closed')")
     assert page.locator("#hidefiles").get_attribute("aria-pressed") == "true"
@@ -1116,8 +1114,6 @@ def test_a_comment_resolved_here_does_not_claim_the_pull_request_agrees(page, de
 
     page.locator("#logopen").click()
     page.wait_for_selector("#log[data-open='true']")
-    # Settled comments are out of the listing by default, so this one is asked for.
-    page.locator("#logresolved").check()
     row = page.locator("#logrows .logrow").filter(has_text="a remark of its own").first
     row.wait_for()
     marks = row.locator(".mark").all_inner_texts()
@@ -1127,7 +1123,6 @@ def test_a_comment_resolved_here_does_not_claim_the_pull_request_agrees(page, de
     assert "on the PR" in marks
     assert [mark for mark in marks if mark.startswith("not resolved there")]
     assert "resolved there" not in marks
-    page.locator("#logresolved").uncheck()
     page.locator("#logclose").click()
 
 
@@ -1379,6 +1374,25 @@ def test_comments_are_filtered_by_their_author_and_stepped_through(page, desk):
     page.locator("#authors .chip", has_text="elsewho").click()
     page.locator("#settingsopen").click()
     page.locator(f"#note-{theirs}").wait_for(state="attached")
+
+
+def test_the_next_step_leaves_a_thread_answered_where_it_was_reached(page, desk):
+    comments = [
+        {"branch": "feature", "path": "sample.py", "line": line, "side": "new", "text": f"stepped past, line {line}"}
+        for line in (30, 160)
+    ]
+    first = desk.post("/comments", {"comments": comments})["seqs"][0]
+    page.reload(wait_until="load")
+    comments_reach(page)
+    page.evaluate(f"() => goTo('{first}')")
+    page.wait_for_function(f"() => reaching === null && state.reached && state.reached.seq === {first}")
+    # Answered where it was reached, the thread grows under the reader, who is still on it.
+    desk.post("/reply", {"seq": first, "text": "answered where it was reached", "who": "you"})
+    page.evaluate("() => loadNotes()")
+    page.locator(f"#note-{first}").get_by_text("answered where it was reached").wait_for()
+    at_rest(page)
+    page.locator("#cnext").click()
+    page.wait_for_function(f"() => reaching === null && state.reached.seq !== {first}", timeout=5000)
 
 
 def test_stepping_lands_on_the_file_left_to_review_nearest_the_reader(page):
@@ -1897,11 +1911,13 @@ def test_the_panel_marks_what_holds_something_unread(page, desk):
     page.wait_for_selector(f"#logrows .logrow[data-seq='{answered['seq']}'][data-unread='true']")
     assert quiet_row.get_attribute("data-unread") == "false"
 
-    # Asked for, only what is unread is listed. A thread counts as read once it has been in front of the reader, so
-    # what remains listed is what they have not seen, however few that is.
-    page.locator("#logunread").check()
-    assert page.locator("#logrows .logrow[data-unread='false']").count() == 0
-    page.locator("#logunread").uncheck()
+    # Asked for in the settings, the listing keeps only what is unread, as the diff does: a thread already read when it
+    # is asked for leaves.
+    page.locator("#logclose").click()
+    flip(page, "onlyunread")
+    page.locator("#logopen").click()
+    page.wait_for_selector("#log[data-open='true']")
+    quiet_row.wait_for(state="detached")
     page.locator("#logclose").click()
 
 
@@ -1957,7 +1973,6 @@ def test_a_thread_with_nowhere_to_go_is_read_in_the_panel(page, desk):
 
     page.locator("#logopen").click()
     page.wait_for_selector("#log[data-open='true']")
-    page.locator("#logresolved").check()
     row = page.locator(f"#logrows .logrow[data-seq='{seq}']")
     # Hovered, a resolved row takes the accent at its border like any other row: what a press would land on is shown.
     row.hover()
@@ -2053,7 +2068,6 @@ def test_a_thread_with_nowhere_to_go_is_read_in_the_panel(page, desk):
     row.click()
     assert page.locator(".logthread").count() == 0
     desk.post("/drop", {"seq": seq, "who": "you"})
-    page.locator("#logresolved").uncheck()
     page.locator("#logclose").click()
 
 
@@ -2209,29 +2223,14 @@ def test_the_log_reaches_a_comment_and_leaves_what_is_settled_out(page, desk):
     assert reached["inView"]
     card.locator("input[type=checkbox]").uncheck()
 
-    # Settled here, it drops out of the listing until the listing is asked to show it.
+    # Settled here, it stays listed, as it stays in the diff.
     desk.post("/resolve", {"seq": [made], "who": "session"})
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
     page.locator("#logopen").click()
     page.wait_for_selector("#log[data-open='true']")
-    listing = page.locator("#logrows .logrow").filter(has_text=saying)
-    assert listing.count() == 0
-    page.locator("#logresolved").check()
-    page.locator("#logrows .logrow").filter(has_text=saying).first.wait_for()
-    assert page.locator("#logrows .logrow").filter(has_text=saying).count() >= 1
-
-    # Settled threads pile up as a review goes on, so they can be taken out of the diff altogether. Reaching one from
-    # the listing shows it again, where it hangs, without bringing back the rest.
-    page.locator("#logclose").click()
-    flip(page, "hideclosed")
-    page.locator(f"#note-{made}").wait_for(state="hidden")
-    page.locator("#logopen").click()
-    page.wait_for_selector("#log[data-open='true']")
-    page.locator("#logresolved").check()
     page.locator("#logrows .logrow").filter(has_text=saying).first.click()
     page.locator(f"#note-{made}").wait_for(state="visible")
-    assert page.locator("#hideclosed").get_attribute("aria-pressed") == "true"
     # Gone to in order to be read: a settled thread the reader has been shown is folded away to its outline, and
     # arriving at it shows every word instead of folding it back under them.
     assert page.locator(f"#note-{made} .thread.folded").count() == 0
@@ -2240,10 +2239,13 @@ def test_the_log_reaches_a_comment_and_leaves_what_is_settled_out(page, desk):
     page.evaluate("() => render()")
     page.locator(f"#note-{made}").wait_for(state="visible")
     assert page.locator(f"#note-{made} .thread.folded").count() == 0
+
+    # Settled threads pile up as a review goes on, so they can be taken out of the diff and the listing altogether.
     flip(page, "hideclosed")
+    page.locator(f"#note-{made}").wait_for(state="hidden")
     page.locator("#logopen").click()
     page.wait_for_selector("#log[data-open='true']")
-    page.locator("#logresolved").uncheck()
+    assert page.locator("#logrows .logrow").filter(has_text=saying).count() == 0
     page.locator("#logclose").click()
 
 
