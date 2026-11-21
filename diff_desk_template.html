@@ -2622,7 +2622,7 @@
     const outcome = await post("sync", where());
     if (loud) {
       els.logresult.textContent = outcome.ok
-        ? `Brought back ${outcome.brought} reply(ies), took ${outcome.took} comment(s) in, closed ${outcome.closed} here`
+        ? `Brought back ${outcome.brought} reply(ies), took ${outcome.took} comment(s) in, closed ${outcome.closed} here, ${outcome.gone} deleted there`
         : `Could not sync: ${outcome.error || "GitHub unreachable"}`;
     }
     if (!outcome.ok) announce("sync", `PR #${request.number}`, outcome.error || "GitHub unreachable");

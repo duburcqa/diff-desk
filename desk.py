@@ -412,7 +412,7 @@ def sync(args):
         sys.exit(outcome.get("error", "the sync was refused"))
     print(
         f"brought {outcome['brought']} reply(ies) back, took {outcome['took']} comment(s) in, "
-        f"closed {outcome['closed']} here"
+        f"closed {outcome['closed']} here, {outcome['gone']} deleted there"
     )
 
 
