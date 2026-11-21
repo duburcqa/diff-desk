@@ -4098,7 +4098,9 @@
   // A remark is aimed at the lines the reader has in front of them. Sending it once the code under it has moved would
   // hang it on lines they never read, so the box holds what it holds until the diffs are refreshed.
   async function moveRefused(box, hint, aimed) {
-    if (document.getElementById("moved").disabled) return false;
+    // A branch that has not moved holds the lines as the reader has them. One being collected again may have, until
+    // the collect says otherwise.
+    if (els.moved.disabled && !els.moved.dataset.busy) return false;
     if (await stillReads(aimed.path, aimed.line, aimed.side, aimed.anchor)) return false;
     box.dataset.stale = "true";
     hint.textContent = "The lines this comment was written on have moved. Refresh the diffs, then aim it again.";
@@ -4656,9 +4658,13 @@
     } catch (error) {
       els.srcstatus.textContent = `scan failed: ${error.message}`;
     } finally {
-      // Pressable again when the scan did not land, since the branch has still moved on.
+      // Pressable again when the scan did not land, since the branch has still moved on. One that landed holds the
+      // diffs as they stood when it began, and the branch may have moved again while it was collected, so the desk is
+      // asked rather than the page taken for up to date. Asked while still busy, which keeps the lines a remark is
+      // aimed at checked until the answer is in (see 'moveRefused').
+      if (landed) await watchBranch();
+      else els.moved.disabled = false;
       delete els.moved.dataset.busy;
-      els.moved.disabled = landed;
       clearInterval(following);
       els.loading.style.width = "100%";
       els.loading.dataset.on = "false";

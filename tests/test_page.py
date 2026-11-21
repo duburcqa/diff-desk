@@ -3572,7 +3572,9 @@ def test_a_page_load_shows_at_once_and_brings_the_diffs_up_to_date(page, desk):
     gen_diff_data.run(desk.repo, "checkout", "-q", branch)
     written = desk.repo / "added.py"
     kept = written.read_text()
-    # The collect is held back for as long as the test likes, standing for a branch that takes long to read.
+    # The collect is held back for as long as the test likes, standing for a branch that takes long to read. Held only
+    # once the page in front of the test is done bringing itself up to date, so what is held is the reload's own.
+    page.wait_for_load_state("networkidle")
     held = []
     # Playwright takes a handler of its own making only, never a method of a list.
     page.route("**/scan", lambda route: held.append(route))  # noqa: PLW0108
@@ -3592,11 +3594,15 @@ def test_a_page_load_shows_at_once_and_brings_the_diffs_up_to_date(page, desk):
                 break
             page.wait_for_timeout(50)
 
-        # Once collected, the diffs as they now stand are drawn in place, with nothing left to refresh.
-        held[0].continue_()
+        # Once collected, the diffs as they stood then are drawn in place. Work saved while they were collected is news
+        # the page has not drawn, so the refresh stays on offer rather than the page being taken for up to date.
+        answer = held[0].fetch()
+        written.write_text(kept + "SAID_ON_DISK = 1\nSAID_MEANWHILE = 1\n")
+        held[0].fulfill(response=answer)
         page.wait_for_function("() => document.getElementById('main').innerText.includes('SAID_ON_DISK')")
         page.wait_for_function("() => document.getElementById('loading').dataset.on === 'false'")
-        assert page.locator("#moved").is_disabled()
+        assert "SAID_MEANWHILE" not in page.locator("#main").inner_text()
+        assert not page.locator("#moved").is_disabled()
         assert page.evaluate("() => data.branches[state.branch].ref") == branch
     finally:
         page.unroute("**/scan")
