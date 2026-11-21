@@ -3330,6 +3330,62 @@ def test_a_recorded_comment_shows_the_number_it_is_referred_to_by(page, desk):
     assert head.inner_text().startswith(f"[{made}]")
 
 
+def test_a_comment_being_written_out_of_sight_is_listed_in_the_tray(page, desk):
+    branch = page.evaluate("() => data.branches[0].ref")
+    made = desk.post(
+        "/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": "to answer"}]
+    )["seq"]
+    page.reload(wait_until="load")
+    page.wait_for_selector(f"#note-{made} .thread")
+    reply = page.locator(f"#note-{made} .line.actions:not(.aside) textarea")
+    reply.fill("half an answer")
+    aim(page, "half a remark")
+    remark = page.locator("tr[data-composer='true'] textarea")
+    try:
+        # In sight, the words are where the reader left them, and the tray says nothing of them.
+        remark.scroll_into_view_if_needed()
+        page.evaluate("() => drawUnsent()")
+        assert "half a remark" not in page.locator("#unsentlist").text_content()
+
+        # Scrolled to the far end of the review from the file they are written in, both are listed, and nothing of a
+        # review being sent is shown, since none is pending.
+        page.evaluate(
+            """() => {
+              const card = document.querySelector("section.file[data-path='sample.py']");
+              const top = card.getBoundingClientRect().top + window.scrollY;
+              window.scrollTo(0, top > 2 * window.innerHeight ? 0 : document.documentElement.scrollHeight);
+            }"""
+        )
+        page.wait_for_selector("#tray[data-open='true'] #unsent:not([hidden])")
+        listed = page.locator("#unsentlist li")
+        page.wait_for_function("() => document.querySelectorAll('#unsentlist li').length === 2")
+        assert "half a remark" in listed.filter(has_text="sample.py L").inner_text()
+        assert "half an answer" in listed.filter(has_text=f"[{made}] reply").inner_text()
+        assert not page.locator("#traysend").is_visible()
+
+        # Pressed, an entry brings the reader back to its box with the keyboard in it, and leaves the list.
+        listed.filter(has_text="half a remark").locator(".goes").click()
+        page.wait_for_function("() => document.activeElement.closest('tr[data-composer]') !== null")
+        assert remark.input_value() == "half a remark"
+        page.wait_for_function("() => !document.getElementById('unsentlist').textContent.includes('half a remark')")
+        page.evaluate(
+            """() => {
+              const card = document.querySelector("section.file[data-path='sample.py']");
+              const top = card.getBoundingClientRect().top + window.scrollY;
+              window.scrollTo(0, top > 2 * window.innerHeight ? 0 : document.documentElement.scrollHeight);
+            }"""
+        )
+        page.wait_for_function("() => document.querySelectorAll('#unsentlist li').length === 2")
+        listed.filter(has_text="half an answer").locator(".goes").click()
+        page.wait_for_function(f"() => document.activeElement.closest('#note-{made}') !== null")
+        assert page.evaluate("() => document.activeElement.value") == "half an answer"
+        page.wait_for_function("() => !document.getElementById('unsentlist').textContent.includes('half an answer')")
+    finally:
+        reply.fill("")
+        page.locator("tr[data-composer='true'] button.ghost", has_text="Cancel").first.click()
+        desk.post("/drop", {"seq": made, "who": "you"})
+
+
 def test_a_file_comment_being_written_outlives_the_poll(page, desk):
     card = sample(page)
     card.locator(".filehead button[data-tip='Comment on this file']").first.click()
