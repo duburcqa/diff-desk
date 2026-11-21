@@ -414,25 +414,57 @@ def parse(diff):
 
 
 def open_pulls(root, upstream):
-    """Every open pull request of a repository, keyed by the ref it is opened from, or None when GitHub does not answer.
+    """Every open pull request of a repository, each naming the owner and the branch it is opened from, or None.
 
     One listing, matched locally: asking per ref costs a request each and a single hiccup silently drops that branch's
-    link.
+    link. None is what GitHub not answering comes to.
     """
     listing = ("pr", "list", "--repo", upstream, "--state", "open", "--limit", "200")
-    told = gh(*listing, "--json", "number,url,title,headRefName", repeatable=True, cwd=root, budget=15)
+    fields = "number,url,title,headRefName,headRepositoryOwner"
+    told = gh(*listing, "--json", fields, repeatable=True, cwd=root, budget=15)
     if told.returncode != 0:
         return None
     try:
         rows = json.loads(told.stdout or "[]")
     except json.JSONDecodeError:
         return None
-    return {row["headRefName"]: row for row in rows}
+    # The owner is kept as a login alone, which is all a branch is matched on.
+    for row in rows:
+        row["headOwner"] = ((row.pop("headRepositoryOwner", None) or {}).get("login") or "").lower()
+    return rows
 
 
 def pull_requests(root, upstream):
-    """Every open pull request as GitHub last listed them, keyed by the ref it is opened from (see `recalled`)."""
-    return recalled(f"pulls:{upstream}", open_pulls, root, upstream) or {}
+    """Every open pull request as GitHub last listed them (see `open_pulls` and `recalled`)."""
+    return recalled(f"pulls:{upstream}", open_pulls, root, upstream) or []
+
+
+def owner_of(url):
+    """The owner of the GitHub repository a remote URL names, lowercased, or None for a URL elsewhere."""
+    match = re.search(r"github\.com[:/]([^/]+)/", url)
+    return match.group(1).lower() if match else None
+
+
+def pull_of(root, ref, requests):
+    """The open pull request a local branch is opened as, or None.
+
+    The one opened from where the branch is pushed - the owner and the branch of its upstream - whatever the branch is
+    called locally. Without an upstream, or with one no pull request is opened from, the one opened from a branch of the
+    same name: from a repository among the remotes of the checkout when there is one, else the only one, since an
+    ambiguous name links to nothing rather than to somebody else's work.
+    """
+    pushed = run(root, "for-each-ref", "--format=%(upstream:remotename)%00%(upstream:remoteref)", f"refs/heads/{ref}")
+    remote, _, merged = pushed.strip().partition("\0")
+    if remote and merged.startswith("refs/heads/"):
+        owner = owner_of(run(root, "remote", "get-url", remote).strip())
+        name = merged.removeprefix("refs/heads/")
+        for row in requests:
+            if (row.get("headOwner"), row["headRefName"]) == (owner, name):
+                return row
+    same = [row for row in requests if row["headRefName"] == ref]
+    owners = {owner_of(url) for url in run(root, "remote", "-v").split()} - {None}
+    ours = [row for row in same if row.get("headOwner") in owners]
+    return ours[0] if len(ours) == 1 else same[0] if len(same) == 1 else None
 
 
 def builds_on(root, lower, upper):
@@ -544,12 +576,12 @@ def decorate(payload):
     """
     root = payload["root"]
     upstream = canonical_repo(root)
-    requests = pull_requests(root, upstream) if upstream else {}
+    requests = pull_requests(root, upstream) if upstream else []
     payload["upstream"] = upstream
     payload["viewer"] = viewer()
     for branch in payload["branches"]:
         if not branch["ref"].startswith("refs/diffdesk/pull/"):
-            branch["pr"] = requests.get(branch["ref"]) or STACKED.get(branch["ref"])
+            branch["pr"] = pull_of(root, branch["ref"], requests) or STACKED.get(branch["ref"])
     before = payload.get("decor")
     said = [upstream, payload["viewer"], *[(branch["ref"], branch["pr"]) for branch in payload["branches"]]]
     payload["decor"] = hashlib.sha1(json.dumps(said, sort_keys=True).encode()).hexdigest()[:16]

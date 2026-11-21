@@ -137,7 +137,7 @@ def test_a_branch_is_collected_while_github_never_answers(repo, monkeypatch):
     # The diff is read from git alone and what GitHub adds only decorates it, from what GitHub last said, so a network
     # that hangs rather than fails costs the collection nothing.
     monkeypatch.setenv("DIFF_DESK_GH", f'{sys.executable} -c "import time; time.sleep(30)"')
-    listing = {"feature": {"number": 33, "url": "u", "title": "t", "headRefName": "feature"}}
+    listing = [{"number": 33, "url": "u", "title": "t", "headRefName": "feature", "headOwner": "someone"}]
     remembered = {
         "viewer": "duburcqa",
         "slug:someone/somewhere": "someone/elsewhere",
@@ -159,6 +159,50 @@ def test_a_branch_is_collected_while_github_never_answers(repo, monkeypatch):
         remembered["viewer"] = "someone"
         assert gen_diff_data.decorate(data) and data["viewer"] == "someone"
     finally:
+        gen_diff_data.run(repo, "remote", "remove", "upstream")
+
+
+def test_a_branch_is_linked_to_the_pull_request_opened_from_where_it_is_pushed(repo, monkeypatch):
+    monkeypatch.setenv("DIFF_DESK_GH", f'{sys.executable} -c "import time; time.sleep(30)"')
+    heads = [
+        (41, "someone", "pushed_as"),
+        (42, "stranger", "feature"),
+        (43, "stranger", "ours"),
+        (44, "someone", "ours"),
+        (45, "stranger", "theirs"),
+        (46, "stranger", "twice"),
+        (47, "other", "twice"),
+    ]
+    listing = [
+        {"number": number, "url": "", "title": "", "headRefName": head, "headOwner": owner}
+        for number, owner, head in heads
+    ]
+    remembered = {
+        "viewer": "someone",
+        "slug:someone/somewhere": "someone/somewhere",
+        "pulls:someone/somewhere": listing,
+    }
+    monkeypatch.setattr(gen_diff_data, "REMEMBERED", remembered)
+    monkeypatch.setattr(gen_diff_data, "ASKING", set())
+    monkeypatch.setattr(gen_diff_data, "WANTED", set())
+    names = ["ours", "theirs", "twice"]
+    gen_diff_data.run(repo, "remote", "add", "upstream", "https://github.com/someone/somewhere.git")
+    for name in names:
+        gen_diff_data.run(repo, "branch", name, "feature")
+    try:
+        # Pushed under another name, a branch is linked to the pull request opened from where it is pushed, and not to
+        # a stranger's opened from a branch that happens to share its local name.
+        gen_diff_data.run(repo, "config", "branch.feature.remote", "upstream")
+        gen_diff_data.run(repo, "config", "branch.feature.merge", "refs/heads/pushed_as")
+        # Without an upstream, the name decides: the pull request opened from a remote of the checkout among several,
+        # the only one there is otherwise, and none where the name is ambiguous.
+        data = gen_diff_data.collect(str(repo), "main", ["feature", *names])
+        linked = {branch["ref"]: (branch["pr"] or {}).get("number") for branch in data["branches"]}
+        assert linked == {"feature": 41, "ours": 44, "theirs": 45, "twice": None}
+    finally:
+        gen_diff_data.run(repo, "config", "--unset", "branch.feature.remote")
+        gen_diff_data.run(repo, "config", "--unset", "branch.feature.merge")
+        gen_diff_data.run(repo, "branch", "-D", *names)
         gen_diff_data.run(repo, "remote", "remove", "upstream")
 
 

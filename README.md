@@ -100,6 +100,8 @@ State is `~/.claude/diff-desk/`, overridden with `DIFF_DESK_HOME`; the port is `
 
 A review is identified by its pull request, not by the ref it is read from. The same work opened from its branch, from the head fetched by number, or from the number typed in is one review: its comments and its reviewed ticks follow it across all three.
 
+A local branch is the pull request opened from where it is pushed, the owner and the branch of its upstream, whatever it is called locally: `git push -u origin HEAD:other-name` is all it takes for a branch to carry its pull request under a name of its own. A branch with no upstream is the pull request opened from a branch of the same name, from one of the checkout's remotes when several share the name, and none when that leaves it ambiguous.
+
 ## Contributing
 
 | file | what it is |
