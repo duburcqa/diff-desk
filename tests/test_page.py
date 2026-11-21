@@ -2403,6 +2403,23 @@ def test_the_log_reaches_a_comment_and_leaves_what_is_settled_out(page, desk):
     assert reached["inView"]
     card.locator("input[type=checkbox]").uncheck()
 
+    # Gone to and scrolled away from at once with the wheel, the page is the reader's: what puts the thread under them
+    # stops rather than pulling them back to it.
+    page.locator("#logopen").click()
+    page.wait_for_selector("#log[data-open='true']")
+    page.locator("#logrows .logrow").filter(has_text=saying).first.click()
+    # Over the diff, which the wheel scrolls, rather than over a box that scrolls on its own.
+    page.mouse.move(page.viewport_size["width"] / 2, page.viewport_size["height"] / 2)
+    page.mouse.wheel(0, 2000)
+    at_rest(page)
+    page.wait_for_timeout(500)
+    off = """(seq) => {
+      const box = document.getElementById(`note-${seq}`).getBoundingClientRect();
+      const covered = document.querySelector('header').getBoundingClientRect().bottom;
+      return box.bottom <= covered || box.top >= window.innerHeight;
+    }"""
+    assert page.evaluate(off, made)
+
     # Settled here, it stays listed, as it stays in the diff.
     desk.post("/resolve", {"seq": [made], "who": "session"})
     page.reload(wait_until="load")
@@ -2428,31 +2445,58 @@ def test_the_log_reaches_a_comment_and_leaves_what_is_settled_out(page, desk):
     assert page.locator("#logrows .logrow").filter(has_text=saying).count() == 0
     page.locator("#logclose").click()
 
-    # Answered since, it is news again: it is back in the diff and the listing until it has been read and scrolled past,
-    # and going then leaves the reader where they were.
-    desk.post("/reply", {"seq": made, "text": "news on a settled thread", "who": "session"})
-    page.evaluate("() => tick()")
+
+def test_a_resolved_thread_with_news_stays_until_read_and_scrolled_past(page, desk):
+    branch = page.evaluate("() => data.branches[0].ref")
+    saying = f"settled, then answered, number {len(desk.get('/comments')) + 1}"
+    made = desk.post(
+        "/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": saying}]
+    )["seq"]
+    desk.post("/resolve", {"seq": [made], "who": "session"})
+    page.reload(wait_until="load")
+    page.wait_for_selector(f"#note-{made} .thread")
     thread = page.locator(f"#note-{made}")
-    thread.wait_for(state="visible")
-    page.locator("#logopen").click()
-    page.wait_for_selector("#log[data-open='true']")
-    assert page.locator("#logrows .logrow").filter(has_text=saying).count() == 1
-    page.locator("#logclose").click()
-    thread.scroll_into_view_if_needed()
-    page.wait_for_function(f"() => (JSON.parse(localStorage.getItem('diffdesk.heard') || '{{}}'))[{made}] === 1")
-    assert thread.is_visible()
-    anchored = page.evaluate(
-        """(seq) => {
-          const box = document.getElementById(`note-${seq}`).getBoundingClientRect();
-          window.scrollBy(0, box.bottom + 200);
-          const covered = document.querySelector('header').getBoundingClientRect().bottom;
-          window.held = document.elementFromPoint(window.innerWidth / 2, covered + 1);
-          return window.held.getBoundingClientRect().top;
-        }""",
-        made,
-    )
-    thread.wait_for(state="hidden")
-    assert abs(page.evaluate("() => window.held.getBoundingClientRect().top") - anchored) < 1
+    # The thread as the page holds it now: drawn again once the comments are read, the one first drawn is gone.
+    shown = "(seq) => document.getElementById(`note-${seq}`).scrollIntoView({ block: 'center' })"
+    page.evaluate(shown, made)
+    heard = f"(answers) => (JSON.parse(localStorage.getItem('diffdesk.heard') || '{{}}'))[{made}] === answers"
+    page.wait_for_function(heard, arg=0)
+    try:
+        # Read, it is hidden with the other resolved threads.
+        page.reload(wait_until="load")
+        page.wait_for_selector("section.file")
+        flip(page, "hideclosed")
+        thread.wait_for(state="hidden")
+
+        # Answered since, it is news again: it is back in the diff and the listing until it has been read and scrolled
+        # past.
+        desk.post("/reply", {"seq": made, "text": "news on a settled thread", "who": "session"})
+        page.evaluate("() => tick()")
+        thread.wait_for(state="visible")
+        page.locator("#logopen").click()
+        page.wait_for_selector("#log[data-open='true']")
+        assert page.locator("#logrows .logrow").filter(has_text=saying).count() == 1
+        page.locator("#logclose").click()
+        page.evaluate(shown, made)
+        page.wait_for_function(heard, arg=1)
+        assert thread.is_visible()
+
+        # Scrolled past, and drawn again the moment it is left, as the poll draws the page for news, it goes, and leaves
+        # the reader where they were.
+        anchored = page.evaluate(
+            """(seq) => {
+              window.scrollBy(0, document.getElementById(`note-${seq}`).getBoundingClientRect().bottom + 200);
+              render();
+              const covered = document.querySelector('header').getBoundingClientRect().bottom;
+              window.held = document.elementFromPoint(window.innerWidth / 2, covered + 1);
+              return window.held.getBoundingClientRect().top;
+            }""",
+            made,
+        )
+        thread.wait_for(state="hidden")
+        assert abs(page.evaluate("() => window.held.getBoundingClientRect().top") - anchored) < 1
+    finally:
+        desk.post("/drop", {"seq": made, "who": "you"})
 
 
 def test_the_log_says_where_every_comment_stands(page, desk):

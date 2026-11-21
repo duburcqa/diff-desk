@@ -2413,6 +2413,9 @@
     }));
   }
 
+  // Counts the landings, so the centring after one stops once the reader takes the page back (see yieldAim).
+  let landings = 0;
+
   function land() {
     // What the aim held off now happens, all of it at once: the files it flew past are settled here rather than under
     // it, which is what kept the page from unfolding as it went.
@@ -2425,7 +2428,9 @@
     if (!aimed) return;
     // Then the thread is put back under the reader, whatever moved it since the aim called it landed: settling those
     // files, and the box itself taking the size the width gives it, which is delivered a frame or two after it lands.
+    const landing = ++landings;
     const centre = (tries) => requestAnimationFrame(() => {
+      if (landing !== landings) return;
       const thread = aimingAt(aimed);
       if (!thread || !thread.isConnected) return;
       const off = missedBy(thread, aimed.seq);
@@ -2434,6 +2439,23 @@
     });
     centre(4);
   }
+
+  // The reader taking the page back - a wheel, a touch, a key that scrolls - ends an aim and the centring after it: where
+  // they scroll to is where they mean to be, and a page still putting a thread back under them would pull them to it.
+  function yieldAim() {
+    landings += 1;
+    if (reaching === null) return;
+    reaching = null;
+    if (owedSettle) {
+      owedSettle = false;
+      settleNear();
+    }
+  }
+  const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
+  for (const kind of ["wheel", "touchmove"]) addEventListener(kind, yieldAim, { passive: true });
+  addEventListener("keydown", (event) => {
+    if (SCROLL_KEYS.has(event.key)) yieldAim();
+  });
 
   const alreadyThere = () => mine().filter((note) => note.github === "posted" && owedThere(note));
 
@@ -2634,34 +2656,47 @@
   // holds is news, and it stays while it is being read: it goes once it has been read and has left the screen, the
   // reader held where they are when it stood above them.
   const keptResolved = new Set();
+  // The kept threads that have been on the screen, by number rather than on the box that showed them: the poll draws
+  // every thread anew, and a box built the moment its thread was left has never been on the screen itself.
+  const keptSeen = new Set();
 
   function stillShown(note) {
     if (unread(note)) keptResolved.add(note.seq);
     return keptResolved.has(note.seq);
   }
 
+  // Lets a kept thread go once it is read and off the screen, the reader held where they are when it stood above them.
+  function letKeptGo(seq) {
+    const note = mine().find((row) => row.seq === seq);
+    const rows = [...els.main.querySelectorAll(`#note-${seq}, .filenote[data-seq="${seq}"]`)];
+    const covered = document.querySelector("header").getBoundingClientRect().bottom;
+    const shown = rows.some((row) => {
+      const box = row.getBoundingClientRect();
+      return box.height > 0 && box.bottom > covered && box.top < window.innerHeight;
+    });
+    if (!note || unread(note) || shown || !keptResolved.has(seq)) return;
+    keptResolved.delete(seq);
+    keptSeen.delete(seq);
+    const anchor = document.elementFromPoint(window.innerWidth / 2, covered + 1);
+    const before = anchor ? anchor.getBoundingClientRect().top : 0;
+    for (const row of rows) row.dataset.done = "true";
+    if (anchor && anchor.isConnected) window.scrollBy(0, anchor.getBoundingClientRect().top - before);
+    sayWhereToStep();
+  }
+
   const passing = new IntersectionObserver((entries) => {
     for (const entry of entries) {
       const seq = Number(entry.target.dataset.kept);
-      const note = mine().find((row) => row.seq === seq);
       // A copy in the comments panel leaves the screen with the panel, which says nothing of the thread in the diff.
-      if (!els.main.contains(entry.target) || !note) {
+      if (!els.main.contains(entry.target) || !keptResolved.has(seq)) {
         passing.unobserve(entry.target);
         continue;
       }
-      // Scrolled past means on the screen and then off it: a thread first heard of off the screen, which a redraw can
-      // report before it has put the reader back where they were, has not been passed.
-      if (entry.isIntersecting) entry.target.dataset.onScreen = "true";
-      if (entry.isIntersecting || !entry.target.dataset.onScreen || unread(note)) continue;
-      passing.unobserve(entry.target);
-      keptResolved.delete(seq);
-      const covered = document.querySelector("header").getBoundingClientRect().bottom;
-      const anchor = document.elementFromPoint(window.innerWidth / 2, covered + 1);
-      const before = anchor ? anchor.getBoundingClientRect().top : 0;
-      for (const row of document.querySelectorAll(`#note-${seq}, .filenote[data-seq="${seq}"]`)) row.dataset.done = "true";
-      if (anchor && anchor.isConnected) window.scrollBy(0, anchor.getBoundingClientRect().top - before);
+      if (entry.isIntersecting) keptSeen.add(seq);
+      // Scrolled past means on the screen and then off it, and still off it a moment later: a redraw reports where a
+      // thread stands before it has put the reader back where they were.
+      else if (keptSeen.has(seq)) window.setTimeout(() => letKeptGo(seq), 300);
     }
-    sayWhereToStep();
   });
 
   function grows(box) {
