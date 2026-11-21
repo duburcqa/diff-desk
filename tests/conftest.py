@@ -1,12 +1,15 @@
 """A repository to review and a desk serving it, both built from scratch so no checkout or network is involved."""
 
+import atexit
 import base64
 import json
 import os
 import pathlib
+import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -20,6 +23,12 @@ sys.path.insert(0, str(ROOT))
 # Git may reach nothing but the disk here, so the fetch a pull request ref asks for fails at once instead of spending
 # the better part of a minute resolving a repository that only the stand-in for gh knows about.
 os.environ["GIT_ALLOW_PROTOCOL"] = "file"
+# The desk's own modules run in this process too, and settle where they keep their files and how they reach GitHub as
+# they are imported. So this process gets a home of its own and no GitHub before any of them is: the reader's desk and
+# their login are never a test's to touch, whatever a background answer lands on.
+os.environ["DIFF_DESK_HOME"] = tempfile.mkdtemp(prefix="diff-desk-tests-")
+atexit.register(shutil.rmtree, os.environ["DIFF_DESK_HOME"], ignore_errors=True)
+os.environ["DIFF_DESK_GH"] = "false"
 
 import gen_diff_data  # noqa: E402  (the package under test lives beside its tests)
 
