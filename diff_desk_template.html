@@ -132,6 +132,20 @@
     border-bottom: 1px solid var(--rule);
   }
 
+  /* Along the foot of the bar while the diffs are collected, filled as far as the collect has got. */
+  #loading {
+    position: absolute;
+    left: 0;
+    bottom: -1px;
+    width: 0;
+    height: 2px;
+    background: var(--accent);
+    opacity: 0;
+    pointer-events: none;
+    transition: width 0.2s ease, opacity 0.3s ease;
+  }
+  #loading[data-on="true"] { opacity: 1; }
+
   .tabs { display: flex; gap: 2px; padding: 2px; background: var(--surface-sunk); border-radius: 7px; }
   .tab {
     appearance: none;
@@ -1289,6 +1303,7 @@
   </span>
   <button class="toggle" id="logopen" data-tip="Every comment recorded, and where each one stands">Comments<i class="dot" id="logdot" aria-hidden="true"></i></button>
   <button class="solid" id="moved" disabled data-tip="Refresh the diffs once the branch has moved on">Refresh</button>
+  <div id="loading" aria-hidden="true"></div>
 </header>
 
 <div class="settings" id="settings" data-open="false">
@@ -1463,7 +1478,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "find", "fgrip", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "fthreads", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
+  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "loading", "goto", "veil", "palette", "pq", "picks", "find", "fgrip", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "fthreads", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -2020,6 +2035,14 @@
     } catch (error) {
       // Nothing is serving, which the comments already say.
     }
+  }
+
+  async function freshen() {
+    // The desk sends the page as it was last built, so it shows at once whatever collecting takes: loading it is still
+    // asking for the diffs as they stand, so it collects them again here when they have moved on since. A page behind
+    // the desk is left to the button, since loading it again brings back the same page.
+    await watchBranch();
+    if (!els.moved.disabled && !behind) await rescan(true);
   }
 
   async function redecorate() {
@@ -4580,13 +4603,25 @@
     // since it was built loads the one in place rather than putting its own back.
     const refs = [...source.picked].map((ref) => (source.bases.has(ref) ? `${source.bases.get(ref)}..${ref}` : ref));
     const order = keep ? {} : { dir: els.srcdir.value, base: els.srcbase.value, refs };
-    const reading = keep ? { ...state } : { branch: 0, scope: "all", current: 0 };
+    // A refresh leaves the reader wherever they have got to while it collected, which is no longer where they pressed it.
+    const reading = keep ? {} : { branch: 0, scope: "all", current: 0 };
     els.srcstatus.textContent = "collecting diffs...";
     // Collecting the diffs takes a moment, so the button says it heard: it reports what it is doing and refuses a
     // second press until it is done.
     els.moved.dataset.busy = "true";
     els.moved.disabled = true;
     let landed = false;
+    // Shown at once, so the press is answered before the desk has said how far it has got.
+    els.loading.dataset.on = "true";
+    els.loading.style.width = "6%";
+    const following = setInterval(async () => {
+      try {
+        const { done, total } = await (await fetch("progress", { cache: "no-store" })).json();
+        if (els.moved.dataset.busy && total) els.loading.style.width = `${Math.max(6, (100 * done) / total)}%`;
+      } catch (error) {
+        // The bar stays where it was: the scan itself says what went wrong.
+      }
+    }, 150);
     try {
       const outcome = await (
         await fetch("scan", {
@@ -4620,6 +4655,13 @@
       // Pressable again when the scan did not land, since the branch has still moved on.
       delete els.moved.dataset.busy;
       els.moved.disabled = landed;
+      clearInterval(following);
+      els.loading.style.width = "100%";
+      els.loading.dataset.on = "false";
+      // Emptied once faded out, so the next collect fills it from the start.
+      setTimeout(() => {
+        if (!els.moved.dataset.busy) els.loading.style.width = "0";
+      }, 300);
     }
   }
 
@@ -6850,4 +6892,5 @@
     // Opened on a comment, the page goes to it: the comments are only known once they have been read.
     if (/^#\d+$/.test(window.location.hash)) goTo(window.location.hash);
   });
+  freshen();
 </script>

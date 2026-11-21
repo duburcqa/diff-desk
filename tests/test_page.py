@@ -3551,6 +3551,46 @@ def test_a_branch_that_has_moved_on_offers_a_refresh_that_keeps_the_place(page, 
         page.wait_for_selector("section.file")
 
 
+def test_a_page_load_shows_at_once_and_brings_the_diffs_up_to_date(page, desk):
+    branch = page.evaluate("() => data.branches[0].ref")
+    gen_diff_data.run(desk.repo, "checkout", "-q", branch)
+    written = desk.repo / "added.py"
+    kept = written.read_text()
+    # The collect is held back for as long as the test likes, standing for a branch that takes long to read.
+    held = []
+    # Playwright takes a handler of its own making only, never a method of a list.
+    page.route("**/scan", lambda route: held.append(route))  # noqa: PLW0108
+    try:
+        written.write_text(kept + "SAID_ON_DISK = 1\n")
+        page.reload(wait_until="load")
+        # Drawn from what the desk last built before anything is collected, with the bar saying a collect is under way.
+        page.wait_for_selector("section.file")
+        page.wait_for_function(
+            "() => { const bar = document.getElementById('loading');"
+            " return bar.dataset.on === 'true' && bar.getBoundingClientRect().width > 0; }"
+        )
+        assert "SAID_ON_DISK" not in page.locator("#main").inner_text()
+        # The browser hands the held request over while it is being driven, which waiting on the page does.
+        for _ in range(100):
+            if held:
+                break
+            page.wait_for_timeout(50)
+
+        # Once collected, the diffs as they now stand are drawn in place, with nothing left to refresh.
+        held[0].continue_()
+        page.wait_for_function("() => document.getElementById('main').innerText.includes('SAID_ON_DISK')")
+        page.wait_for_function("() => document.getElementById('loading').dataset.on === 'false'")
+        assert page.locator("#moved").is_disabled()
+        assert page.evaluate("() => data.branches[state.branch].ref") == branch
+    finally:
+        page.unroute("**/scan")
+        written.write_text(kept)
+        gen_diff_data.run(desk.repo, "checkout", "-q", "main")
+        desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})
+        page.reload(wait_until="load")
+        page.wait_for_selector("section.file")
+
+
 def test_a_comment_waiting_to_be_sent_survives_a_refresh_and_a_reload(page, desk):
     card = sample(page)
     line = card.locator("tr.a[data-line]").first
