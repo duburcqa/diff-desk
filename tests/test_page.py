@@ -1337,9 +1337,21 @@ def test_the_settings_are_grouped_and_each_says_what_it_does_when_pointed_at(pag
     assert told["x"] + told["width"] <= panel["x"] or told["x"] >= panel["x"] + panel["width"]
     assert told["x"] >= 0 and told["x"] + told["width"] <= page.viewport_size["width"]
 
-    # It follows the row pointed at, level with it, and goes once the panel is left.
-    page.locator("#reactnow").hover()
-    page.wait_for_function("() => document.getElementById('settingtip').textContent.includes('reaction')")
+    # It follows the row pointed at, and is justified as every tooltip is, whichever setting it describes.
+    measured = """(tip) => {
+      const range = document.createRange();
+      range.selectNodeContents(tip);
+      return [tip.textContent, [...range.getClientRects()].map((line) => line.width)];
+    }"""
+    for setting in ["semantic", "hidedone", "hideclosed", "onlyunread", "reactnow"]:
+        said = page.locator(f"#{setting} small").text_content()
+        page.locator(f"#{setting}").hover()
+        page.wait_for_function("(said) => document.getElementById('settingtip').textContent === said", arg=said)
+        text, lines = tip.evaluate(measured)
+        assert len(lines) == 1 or (max(lines[:-1]) - min(lines[:-1]) < 1 and 0.4 * lines[0] <= lines[-1] < lines[0]), (
+            text
+        )
+    # Level with the row, and gone once the panel is left.
     row = page.locator("#reactnow").bounding_box()
     told = tip.bounding_box()
     assert abs((told["y"] + told["height"] / 2) - (row["y"] + row["height"] / 2)) < 2
@@ -1365,6 +1377,19 @@ def test_the_controls_answer_the_pointer(page):
     page.mouse.move(5, page.viewport_size["height"] - 5)
     page.wait_for_selector("#tip", state="hidden")
 
+    # A step that leads somewhere takes a dark blue border and a grey fill under the pointer.
+    look = "(button) => [getComputedStyle(button).borderTopColor, getComputedStyle(button).backgroundColor]"
+    rest = page.locator("#pnext").evaluate(look)
+    page.locator("#pnext").hover()
+    page.wait_for_function(
+        """(rest) => {
+          const style = getComputedStyle(document.getElementById('pnext'));
+          return style.borderTopColor !== rest[0] && style.backgroundColor !== rest[1];
+        }""",
+        arg=rest,
+        timeout=1000,
+    )
+
     # A quiet button comes forward under the pointer.
     page.locator("#logopen").click()
     page.wait_for_selector("#log[data-open='true']")
@@ -1374,6 +1399,19 @@ def test_the_controls_answer_the_pointer(page):
     page.wait_for_function(
         "(rest) => getComputedStyle(document.getElementById('logclose')).color !== rest", arg=rest, timeout=1000
     )
+
+    # Words that wrap are justified, every line but the last flush with both edges, and the last one, left as it is,
+    # shorter than them while filling two fifths of the box. One line, where an engine's fonts fit them, stays as is.
+    page.locator("#logorder").hover()
+    page.wait_for_selector("#tip:not([hidden])", timeout=1000)
+    lines = tip.evaluate(
+        """(tip) => {
+          const range = document.createRange();
+          range.selectNodeContents(tip);
+          return [...range.getClientRects()].map((line) => line.width);
+        }"""
+    )
+    assert len(lines) == 1 or (max(lines[:-1]) - min(lines[:-1]) < 1 and 0.4 * lines[0] <= lines[-1] < lines[0])
     close.click()
 
 
