@@ -4667,13 +4667,15 @@
   // How the box is read: in its case, as whole words, as a pattern. Off by default, as the browser's own find.
   const modes = { matchCase: false, wholeWord: false, regex: false };
 
-  // What the box asks for, as a pattern: the text as written, escaped unless it is a pattern already, and kept from
-  // word characters on either side when whole words are asked for. Undefined for a pattern that does not parse.
+  // What the box asks for, as a pattern: the text as written, escaped unless it is a pattern already, and, when whole
+  // words are asked for, kept from running into a word on either side where it begins or ends with a word character.
+  // An edge that is no word character is a boundary already: `get(` finds `get(self`. Undefined for a pattern that
+  // does not parse.
   function wanted() {
     const text = els.fq.value;
     if (!text) return null;
     let source = modes.regex ? text : text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    if (modes.wholeWord) source = `(?<!\\w)(?:${source})(?!\\w)`;
+    if (modes.wholeWord) source = `(?:(?!\\w)|(?<!\\w))(?:${source})(?:(?<!\\w)|(?!\\w))`;
     try {
       return new RegExp(source, modes.matchCase ? "" : "i");
     } catch (error) {

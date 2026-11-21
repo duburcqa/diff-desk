@@ -2974,6 +2974,8 @@ def test_text_is_found_across_the_whole_diff_folded_files_included(page):
             ("#fcase", None, "1/9", "false"),
             ("#fword", "rewrit", "0", "false"),
             (None, "rewritten", "1/9", "false"),
+            # Bounded only where it begins or ends with a word character: the space leading this one is the boundary.
+            (None, " rewritten", "1/9", "false"),
             ("#fword", None, "1/9", "false"),
             ("Alt+KeyR", "re.*ten$", "1/9", "false"),
             (None, "(", "?", "true"),
