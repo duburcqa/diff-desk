@@ -208,9 +208,12 @@
     box-shadow: 0 12px 32px rgb(0 0 0 / 30%);
   }
   #find[hidden] { display: none; }
+  /* The left edge widens the box when dragged, as an editor's find does: lit under the pointer and while held. */
+  #find .grip { position: absolute; top: 0; bottom: 0; left: -3px; width: 6px; border-radius: 3px; cursor: ew-resize; }
+  #find .grip:hover, #find .grip.held { background: color-mix(in srgb, var(--accent) 70%, transparent); }
   #find .search { flex: none; width: 260px; margin: 0; }
   /* How the box is read stands inside it, at its end, as the browser's own find has it. */
-  #find .search input { padding-right: 80px; background: var(--surface); }
+  #find .search input { padding-right: 104px; background: var(--surface); }
   #find .modes { position: absolute; right: 4px; display: flex; gap: 1px; }
   #find .mode {
     font: inherit;
@@ -225,6 +228,8 @@
     cursor: pointer;
   }
   #find .mode:hover { color: var(--ink); background: var(--surface-sunk); }
+  /* Set in its button, out of reach of the rule placing the magnifier of the box. */
+  #find .mode svg { position: static; display: block; width: 12px; height: 12px; }
   #find .mode[aria-pressed="true"] { color: var(--ink); background: color-mix(in srgb, var(--accent) 30%, transparent); }
   /* The arrows and the cross, larger than the toggles: pressed on their own rather than read. */
   #find > .mode { color: var(--ink); font-size: 15px; padding: 4px 7px; }
@@ -543,6 +548,7 @@
     );
   }
   tr.hit td.ln:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+  .thread .text.hit { outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: 2px; border-radius: 3px; }
   ::highlight(found) { background-color: color-mix(in srgb, var(--accent) 28%, transparent); color: var(--ink); }
   ::highlight(found-hit) { background-color: color-mix(in srgb, var(--accent) 70%, transparent); color: var(--ink); }
   tr.h td { background: var(--surface-sunk); color: var(--muted); border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); padding: 3px 8px; }
@@ -1305,6 +1311,7 @@
   <div id="picks" role="listbox" aria-label="Files whose path matches"></div>
 </div>
 <div id="find" hidden>
+  <div class="grip" id="fgrip" data-tip="Drag to widen the box"></div>
   <div class="search">
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2 14 14"/></svg>
     <input id="fq" type="search" placeholder="Find in diff" aria-label="Find text in the diff" spellcheck="false" />
@@ -1312,6 +1319,7 @@
       <button class="mode" id="fcase" aria-pressed="false" data-tip="Match case (Alt+C)">Aa</button>
       <button class="mode" id="fword" aria-pressed="false" data-tip="Match whole word (Alt+W)">ab</button>
       <button class="mode" id="fregex" aria-pressed="false" data-tip="Use regular expression (Alt+R)">.*</button>
+      <button class="mode" id="fthreads" aria-pressed="false" data-tip="Find in comments too (Alt+T)" aria-label="Find in comments too"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg></button>
     </span>
   </div>
   <span class="count" id="fcount"></span>
@@ -1431,7 +1439,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "find", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
+  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "find", "fgrip", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "fthreads", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -3411,7 +3419,10 @@
     const text = document.createElement("span");
     text.className = "said";
     text.append(who);
-    written(text.appendChild(spoke()), note.text);
+    const remark = text.appendChild(spoke());
+    // Numbered as the find numbers what a thread says: the remark, then each reply in the order it was written.
+    remark.dataset.part = "0";
+    written(remark, note.text);
     shown(text, note.images);
     const reactTo = reacting(note, null, note, text);
     head.append(text);
@@ -3612,7 +3623,9 @@
         body.append(kind);
       }
       body.append(from);
-      written(body.appendChild(spoke()), answer.text);
+      const words = body.appendChild(spoke());
+      words.dataset.part = String(index + 1);
+      written(words, answer.text);
       shown(body, answer.images);
       said.append(body);
       const reactTo = reacting(note, index, answer, body);
@@ -4664,8 +4677,9 @@
   // file. This one reads every line of the diff, and brings the reader to the line it finds.
   const finding = { hits: [], byPath: new Map(), at: -1 };
 
-  // How the box is read: in its case, as whole words, as a pattern. Off by default, as the browser's own find.
-  const modes = { matchCase: false, wholeWord: false, regex: false };
+  // How the box is read: in its case, as whole words, as a pattern, and whether what the threads say is read with the
+  // code. Off by default, as the browser's own find.
+  const modes = { matchCase: false, wholeWord: false, regex: false, threads: false };
 
   // What the box asks for, as a pattern: the text as written, escaped unless it is a pattern already, and, when whole
   // words are asked for, kept from running into a word on either side where it begins or ends with a word character.
@@ -4688,19 +4702,38 @@
     const hits = [];
     const bare = document.body.classList.contains("hide-context");
     for (const file of inTreeOrder(view().files)) {
+      const found = [];
       file.lines.forEach((row, order) => {
         if (row[0] === "h" || (bare && row[0] === "c")) return;
         if (!pattern.test(String(row[3]))) return;
         const side = row[0] === "d" ? "old" : "new";
-        hits.push({ path: file.path, order, side, line: side === "old" ? row[1] : row[2] });
+        found.push({ path: file.path, order, side, line: side === "old" ? row[1] : row[2] });
       });
+      // What a thread says is found where the thread hangs, under the last line it is about, each remark and reply a
+      // hit of its own: one about the file as a whole before every line, one whose lines have left the diff after them.
+      for (const note of modes.threads ? mine() : []) {
+        if (note.path !== file.path) continue;
+        const line = note.endLine || note.line;
+        const column = note.side === "old" ? 1 : 2;
+        const other = note.side === "old" ? "a" : "d";
+        const under = file.lines.findIndex((row) => row[0] !== "h" && row[0] !== other && row[column] === line);
+        const order = note.side === "file" ? -1 : (under < 0 ? file.lines.length : under) + 0.5;
+        [note.text, ...(note.replies || []).map((answer) => answer.text)].forEach((said, part) => {
+          if (pattern.test(String(said))) found.push({ path: file.path, order, seq: note.seq, part });
+        });
+      }
+      hits.push(...found.sort((first, second) => first.order - second.order));
     }
     return hits;
   }
 
-  // The row a hit stands on in a built card, or null. The semantic view lines its rows up by statement rather than in
-  // diff order, so a line is found there by its number.
-  function hitRow(card, hit) {
+  // What a hit stands on in a built card, or null: the row of a line, or the words of a remark or a reply. The semantic
+  // view lines its rows up by statement rather than in diff order, so a line is found there by its number.
+  function hitAt(card, hit) {
+    if (hit.seq !== undefined) {
+      const words = `.text[data-part="${hit.part}"]`;
+      return card.querySelector(`#note-${hit.seq} ${words}, .filenote[data-seq="${hit.seq}"] ${words}`);
+    }
     const semantic = card.querySelector(":scope > .body table.aligned");
     return semantic
       ? semantic.querySelector(`tr[data-${hit.side}-no="${hit.line}"]`)
@@ -4720,12 +4753,12 @@
   // The ranges painted in each file, so a file built again as the reader scrolls trades its old ones for new ones.
   const marked = new Map();
 
-  // Every place the pattern matches in the code of a row.
+  // Every place the pattern matches in the code of a row, or in the words of a remark or a reply, which have no side.
   function wordRanges(row, pattern, side) {
     const nodes = [];
     let text = "";
     // A row of the semantic view holds both versions, and the words found are in the one the line belongs to.
-    const cell = row.querySelector(`td.code[data-side="${side}"]`) || row.querySelector("td.code");
+    const cell = side ? row.querySelector(`td.code[data-side="${side}"]`) || row.querySelector("td.code") : row;
     const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       if (node.parentElement.closest("button")) continue;
@@ -4759,7 +4792,7 @@
       if (finds) {
         const ranges = [];
         for (const hit of finding.byPath.get(path) || []) {
-          const row = hitRow(card, hit);
+          const row = hitAt(card, hit);
           if (row) ranges.push(...wordRanges(row, pattern, hit.side));
         }
         for (const range of ranges) foundMarks.add(range);
@@ -4768,7 +4801,7 @@
     }
     // The hit the reader stands on is marked again on the rows built anew, as a redraw for news builds them.
     const hit = finds ? finding.hits[finding.at] : null;
-    const row = hit && hit.path === path ? hitRow(card, hit) : null;
+    const row = hit && hit.path === path ? hitAt(card, hit) : null;
     if (!row || row.classList.contains("hit")) return;
     row.classList.add("hit");
     if (!canMark) return;
@@ -4781,7 +4814,7 @@
   }
 
   function unmarkHit() {
-    for (const old of document.querySelectorAll("tr.hit")) old.classList.remove("hit");
+    for (const old of document.querySelectorAll("tr.hit, .text.hit")) old.classList.remove("hit");
     if (canMark) hitMarks.clear();
   }
 
@@ -4796,7 +4829,7 @@
     const hit = finding.hits[finding.at];
     const pattern = wanted();
     els.fq.dataset.bad = String(pattern === undefined);
-    const none = pattern === undefined ? "?" : pattern ? "0" : "";
+    const none = pattern === undefined ? "?" : pattern ? "0/0" : "";
     els.fcount.textContent = hit ? `${finding.at + 1}/${finding.hits.length}` : none;
     if (!hit) return;
     const card = document.querySelector(`section.file[data-path="${CSS.escape(hit.path)}"]`);
@@ -4808,7 +4841,18 @@
     folds.set(hit.path, { digest: card.dataset.digest, open: true, upTo: latest() });
     const held = drawn.get(card);
     if (held) fillBody(card, held.file, held.index);
-    const row = hitRow(card, hit);
+    let row = hitAt(card, hit);
+    // Words in a thread the page keeps out of sight - folded to its remark, hidden as resolved or by whom it is from -
+    // are reached the way a thread is reached from the comments panel, which shows it and aims at it.
+    const note = hit.seq === undefined ? null : mine().find((one) => one.seq === hit.seq);
+    if (note && !(row && row.getClientRects().length)) {
+      reach(note);
+      const again = document.querySelector(`section.file[data-path="${CSS.escape(hit.path)}"]`);
+      row = again && hitAt(again, hit);
+      if (row) row.classList.add("hit");
+      if (row && canMark) for (const range of wordRanges(row, pattern)) hitMarks.add(range);
+      return;
+    }
     if (!row) return;
     if (row.hidden) openFold(row.closest("tbody"), row.dataset.fold);
     if (row.dataset.deleted) showDeleted(row.closest("tbody"), row.dataset.deleted);
@@ -6174,13 +6218,50 @@
       closeFind();
     }
     // By code rather than by key: the letter under Alt reads as another character on some keyboards.
-    const mode = { KeyC: "fcase", KeyW: "fword", KeyR: "fregex" }[event.code];
+    const mode = { KeyC: "fcase", KeyW: "fword", KeyR: "fregex", KeyT: "fthreads" }[event.code];
     if (event.altKey && mode) {
       event.preventDefault();
       els[mode].click();
     }
   });
-  for (const [id, mode] of [["fcase", "matchCase"], ["fword", "wholeWord"], ["fregex", "regex"]]) {
+  // Dragged by its left edge, the box takes the width it is pulled to, from the width it is drawn at up to all but a
+  // margin of the window, and keeps it for the next time this browser opens the page.
+  const findBox = els.find.querySelector(".search");
+  const narrowest = parseFloat(getComputedStyle(findBox).width);
+  const widenFind = (width) => {
+    const widest = Math.max(narrowest, window.innerWidth - 240);
+    findBox.style.width = `${Math.round(Math.min(widest, Math.max(narrowest, width)))}px`;
+  };
+  try {
+    const kept = Number(localStorage.getItem("diffdesk.findWidth"));
+    if (kept) widenFind(kept);
+  } catch (error) {
+    // Nothing kept, or nowhere to keep it: the box is drawn at its own width.
+  }
+  els.fgrip.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    els.fgrip.setPointerCapture(event.pointerId);
+    els.fgrip.classList.add("held");
+    const from = event.clientX;
+    const start = findBox.getBoundingClientRect().width;
+    const follow = (moved) => widenFind(start + from - moved.clientX);
+    els.fgrip.addEventListener("pointermove", follow);
+    els.fgrip.addEventListener(
+      "pointerup",
+      () => {
+        els.fgrip.removeEventListener("pointermove", follow);
+        els.fgrip.classList.remove("held");
+        try {
+          localStorage.setItem("diffdesk.findWidth", String(parseFloat(findBox.style.width)));
+        } catch (error) {
+          // Kept for this page alone.
+        }
+      },
+      { once: true },
+    );
+  });
+  const MODE_BUTTONS = [["fcase", "matchCase"], ["fword", "wholeWord"], ["fregex", "regex"], ["fthreads", "threads"]];
+  for (const [id, mode] of MODE_BUTTONS) {
     els[id].addEventListener("click", () => {
       modes[mode] = !modes[mode];
       els[id].setAttribute("aria-pressed", String(modes[mode]));

@@ -2970,9 +2970,9 @@ def test_text_is_found_across_the_whole_diff_folded_files_included(page):
         # Each step turns a mode with its button or its key, writes into the box, and reads the count and the box.
         counted = "(want) => document.getElementById('fcount').textContent === want"
         steps = [
-            ("#fcase", "Rewritten", "0", "false"),
+            ("#fcase", "Rewritten", "0/0", "false"),
             ("#fcase", None, "1/9", "false"),
-            ("#fword", "rewrit", "0", "false"),
+            ("#fword", "rewrit", "0/0", "false"),
             (None, "rewritten", "1/9", "false"),
             # Bounded only where it begins or ends with a word character: the space leading this one is the boundary.
             (None, " rewritten", "1/9", "false"),
@@ -3009,6 +3009,77 @@ def test_text_is_found_across_the_whole_diff_folded_files_included(page):
         flip(page, "hidedone")
         page.wait_for_function("() => !document.body.classList.contains('hide-done')")
         card.locator("input[type=checkbox]").uncheck()
+
+
+def test_what_the_threads_say_is_found_when_asked(page, desk):
+    branch = page.evaluate("() => data.branches[0].ref")
+    # Worded after the one line it hangs under, which nothing else in the review says.
+    words = f"line {FIRST_EDIT} rewritten"
+    said = {"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": f"{words}, and why"}
+    made = desk.post("/comments", [said])["seq"]
+    desk.post("/reply", {"seq": made, "text": f"{words} twice over", "who": "session"})
+    page.reload(wait_until="load")
+    page.wait_for_selector(f"#note-{made} .thread")
+    counted = "(want) => document.getElementById('fcount').textContent === want"
+    shown = f"#note-{made} .text.hit"
+    try:
+        # The code alone by default, as the browser's own find reads the page.
+        page.keyboard.press("Control+f")
+        page.locator("#fq").fill(words)
+        page.wait_for_function(counted, arg="1/1")
+
+        # Asked, what the threads say is read too: each remark and reply a hit of its own, found right after the line
+        # its thread hangs under, its words marked where they are said, in a thread the settings hide as well.
+        page.locator("#settingsopen").click()
+        page.locator("#authors .chip", has_text="you").click()
+        page.locator("#settingsopen").click()
+        page.wait_for_function(f"() => document.getElementById('note-{made}').dataset.filtered === 'true'")
+        page.locator("#fthreads").click()
+        page.wait_for_function(counted, arg="1/3")
+        assert page.locator("tr.hit").evaluate("(row) => row.dataset.line") == str(FIRST_EDIT)
+        page.locator("#fq").press("Enter")
+        page.wait_for_function(counted, arg="2/3")
+        assert page.locator(shown).get_attribute("data-part") == "0"
+        assert page.locator(shown).is_visible()
+        page.locator("#fq").press("Enter")
+        assert page.locator(shown).get_attribute("data-part") == "1"
+
+        # Taken back with its key, it reads the code alone again.
+        page.locator("#fq").press("Alt+KeyT")
+        page.wait_for_function(counted, arg="1/1")
+        page.locator("#fq").press("Escape")
+    finally:
+        desk.post("/drop", {"seq": made, "who": "you"})
+
+
+def test_the_find_box_widens_as_its_edge_is_dragged(page):
+    page.keyboard.press("Control+f")
+    page.wait_for_selector("#find:not([hidden])")
+    box = page.locator("#find .search")
+    narrow = box.bounding_box()["width"]
+    # Pulled left by its edge, the box widens by as much, the bar staying where it ends on the right.
+    edge = page.locator("#fgrip").bounding_box()
+    right = page.locator("#find").bounding_box()
+    page.mouse.move(edge["x"] + edge["width"] / 2, edge["y"] + edge["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(edge["x"] + edge["width"] / 2 - 150, edge["y"] + edge["height"] / 2, steps=5)
+    page.mouse.up()
+    assert abs(box.bounding_box()["width"] - (narrow + 150)) < 1
+    bar = page.locator("#find").bounding_box()
+    assert abs(bar["x"] + bar["width"] - (right["x"] + right["width"])) < 1
+    # Kept for the next time the page is opened, and never narrower than it is drawn.
+    page.reload(wait_until="load")
+    page.wait_for_selector("section.file")
+    page.keyboard.press("Control+f")
+    page.wait_for_selector("#find:not([hidden])")
+    assert abs(box.bounding_box()["width"] - (narrow + 150)) < 1
+    edge = page.locator("#fgrip").bounding_box()
+    page.mouse.move(edge["x"] + edge["width"] / 2, edge["y"] + edge["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(edge["x"] + 400, edge["y"] + edge["height"] / 2, steps=5)
+    page.mouse.up()
+    assert abs(box.bounding_box()["width"] - narrow) < 1
+    page.locator("#fq").press("Escape")
 
 
 def test_every_hit_is_marked_and_one_in_sight_keeps_the_view(page):
