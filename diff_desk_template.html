@@ -200,7 +200,7 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 4px 6px;
+    padding: 3px 6px 3px 3px;
     border: 1px solid var(--rule-strong);
     border-radius: 8px;
     /* Lifted off the page: on the page's own surface the bar read as one more black box among the dark ones. */
@@ -271,9 +271,24 @@
      One above the other rather than side by side: the pair then costs a single control's width, in a bar that has none
      to spare, and the two together stand as tall as everything around them. */
   .steps { display: grid; gap: 2px; }
-  .step { flex: none; width: 20px; height: 12px; padding: 0; display: grid; place-items: center; cursor: pointer; }
+  /* White as a browser draws its own small buttons, in either theme and in every engine alike: the browser's button
+     colours resolve differently from one engine to the next. Lit with a dark blue border on a grey fill when pointed at. */
+  .step {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 12px;
+    padding: 0;
+    appearance: none;
+    border: 1px solid #c4c4c4;
+    border-radius: 4px;
+    background: #fdfdfd;
+    color: #1c1c1c;
+    cursor: pointer;
+  }
   .step svg { width: 9px; height: 9px; }
-  .step:disabled { color: var(--faint); cursor: default; }
+  .step:disabled { border-color: transparent; background: #ababab; color: #e2e2e2; cursor: default; }
 
   .totals { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 12px; }
   .totals .plus { color: var(--add-ink); }
@@ -479,7 +494,10 @@
     max-width: min(420px, calc(100vw - 16px));
     padding: 4px 8px;
     border-radius: 5px;
-    background: var(--ink);
+    /* A touch see-through, the page behind it blurred so the words keep their contrast. */
+    background: color-mix(in srgb, var(--ink) 90%, transparent);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
     color: var(--surface);
     font-family: var(--sans);
     font-size: 11.5px;
@@ -488,6 +506,7 @@
     white-space: pre-line;
     overflow-wrap: anywhere;
     pointer-events: none;
+    text-align: justify;
   }
   #tip[hidden] { display: none; }
 
@@ -693,7 +712,7 @@
     background: var(--surface-sunk);
   }
   button.solid:hover:not(:disabled), .toggle[aria-pressed="true"]:hover { filter: brightness(1.15); }
-  .step:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+  .step:hover:not(:disabled) { border-color: #1f3f8f; background: #d6d6d6; }
   .chip:not([aria-pressed="true"]):hover { color: var(--ink); border-color: var(--muted); }
   select:hover, #goto:hover, .search input:hover { border-color: var(--muted); }
   button.solid:disabled, button.ghost:disabled, button.toggle:disabled {
@@ -1120,10 +1139,14 @@
     position: absolute;
     top: 0;
     left: 0;
-    width: 260px;
+    width: max-content;
+    max-width: 300px;
     padding: 6px 9px;
     border-radius: 6px;
-    background: var(--ink);
+    /* A touch see-through, the page behind it blurred so the words keep their contrast. */
+    background: color-mix(in srgb, var(--ink) 90%, transparent);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
     color: var(--surface);
     font-size: 11.5px;
     line-height: 1.4;
@@ -1131,6 +1154,7 @@
     opacity: 0;
     transform: translateY(-50%);
     transition: opacity 90ms ease;
+    text-align: justify;
   }
   /* After a beat, so running the cursor down the panel says nothing. */
   #settingtip[data-on="true"] { opacity: 1; transition-delay: 260ms; }
@@ -1236,12 +1260,12 @@
       <span class="steps">
         <button class="step" id="pback" disabled data-tip="Previous file left to review">
           <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-            <path d="M2.5 7.5 6 4l3.5 3.5" />
+            <path d="M2.5 7.75 6 4.25l3.5 3.5" />
           </svg>
         </button>
         <button class="step" id="pnext" disabled data-tip="Next file left to review">
           <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-            <path d="M2.5 4.5 6 8l3.5-3.5" />
+            <path d="M2.5 4.25 6 7.75l3.5-3.5" />
           </svg>
         </button>
       </span>
@@ -1254,12 +1278,12 @@
   <span class="steps">
     <button class="step" id="cback" disabled data-tip="Previous comment">
       <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-        <path d="M2.5 7.5 6 4l3.5 3.5" />
+        <path d="M2.5 7.75 6 4.25l3.5 3.5" />
       </svg>
     </button>
     <button class="step" id="cnext" disabled data-tip="Next comment">
       <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-        <path d="M2.5 4.5 6 8l3.5-3.5" />
+        <path d="M2.5 4.25 6 7.75l3.5-3.5" />
       </svg>
     </button>
   </span>
@@ -6373,6 +6397,7 @@
     tip.dataset.on = String(Boolean(row));
     if (!row) return;
     tip.textContent = row.querySelector("small").textContent;
+    balance(tip);
     const panel = els.settings.getBoundingClientRect();
     const box = row.getBoundingClientRect();
     tip.style.left = `${panel.left >= tip.offsetWidth + 24 ? -tip.offsetWidth - 18 : panel.width + 18}px`;
@@ -6574,11 +6599,60 @@
   let tipSoon = null;
   let tipLeft = -Infinity;
 
+  // A box of justified words that wraps takes the width, among those keeping it on as few lines as it can take, where its
+  // lines are stretched the least and its last line, which is never stretched, ends short of the edge by a word or more
+  // while still filling two fifths of it where some width allows. The width it is given would leave a lone word on its
+  // last line, and the narrowest width would stretch the lines above a short last one.
+  function balance(box) {
+    // Measured from the left edge, where nothing squeezes it: where the last box it showed was placed may leave it too
+    // little room to take its own width. Measured unjustified, since justified lines all measure the width of the box.
+    box.style.left = "0px";
+    box.style.width = "";
+    box.style.textAlign = "left";
+    const height = box.offsetHeight;
+    // Rounded up from what it measures: the width it takes is fractional, and the whole pixels below it wrap its last word.
+    const widest = Math.ceil(box.getBoundingClientRect().width);
+    let fits = widest;
+    let short = fits / 2;
+    while (fits - short > 1) {
+      const tried = (fits + short) / 2;
+      box.style.width = `${tried}px`;
+      if (box.offsetHeight > height) short = tried;
+      else fits = tried;
+    }
+    const style = getComputedStyle(box);
+    const room = (width) => width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    // A word's worth of margin at the end of the last line: what tells a last line from a stretched one at a glance.
+    const margin = 3 * parseFloat(style.fontSize);
+    // The best width with a last line filling two fifths of the box, and the best one whatever the last line holds.
+    const best = [
+      { width: widest, stretch: Infinity },
+      { width: widest, stretch: Infinity },
+    ];
+    for (let width = Math.ceil(fits); width <= widest; width += 1) {
+      box.style.width = `${width}px`;
+      if (box.offsetHeight > height) continue;
+      const range = document.createRange();
+      range.selectNodeContents(box);
+      const widths = [...range.getClientRects()].map((line) => line.width);
+      if (widths.length < 2) break;
+      const stretch = Math.max(...widths.slice(0, -1).map((line) => room(width) - line));
+      const last = widths[widths.length - 1];
+      if (last > room(width) - margin) continue;
+      for (const [kind, holds] of [[0, last >= 0.4 * room(width)], [1, true]]) {
+        if (holds && stretch < best[kind].stretch) best[kind] = { width, stretch };
+      }
+    }
+    box.style.width = `${best[best[0].stretch < Infinity ? 0 : 1].width}px`;
+    box.style.textAlign = "";
+  }
+
   function showTip() {
     tipSoon = null;
     if (!tipFor || !tipFor.isConnected || !tipFor.dataset.tip) return;
     tip.textContent = tipFor.dataset.tip;
     tip.hidden = false;
+    balance(tip);
     // Under the control, or over it where the window has no room below, and kept inside the window across.
     const box = tipFor.getBoundingClientRect();
     const below = box.bottom + 6 + tip.offsetHeight <= window.innerHeight - 4;
