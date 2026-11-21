@@ -466,28 +466,25 @@
   .icon { position: relative; flex: none; display: grid; place-items: center; width: 22px; height: 20px; padding: 0; color: var(--faint); background: transparent; border: 0; border-radius: 5px; cursor: pointer; }
   .icon svg { width: 13px; height: 13px; }
   .icon:hover { color: var(--accent); background: var(--surface-sunk); }
-  .icon::after {
-    content: attr(data-tip);
-    position: absolute;
-    top: calc(100% + 6px);
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 20;
-    padding: 3px 7px;
+  .copy[data-copied] { color: var(--add-ink); }
+  /* What a control says about itself (see showTip). */
+  #tip {
+    position: fixed;
+    z-index: 100;
+    max-width: min(420px, calc(100vw - 16px));
+    padding: 4px 8px;
     border-radius: 5px;
     background: var(--ink);
     color: var(--surface);
     font-family: var(--sans);
-    font-size: 11px;
+    font-size: 11.5px;
     font-weight: 500;
-    white-space: nowrap;
+    line-height: 1.4;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
     pointer-events: none;
-    opacity: 0;
-    /* After a beat, so passing the cursor over a header says nothing. */
-    transition: opacity 90ms ease 260ms;
   }
-  .icon:hover::after, .icon:focus-visible::after { opacity: 1; }
-  .copy[data-copied] { color: var(--add-ink); }
+  #tip[hidden] { display: none; }
 
   /* The tick stands at the header's own edge, so its hit area takes in the padding around it: a press meant for the
      tick that lands beside it would otherwise fold the file instead. */
@@ -679,6 +676,20 @@
     white-space: nowrap;
   }
   button.ghost { background: transparent; color: var(--muted); border-color: var(--rule-strong); }
+  /* Every control answers the pointer, so the page reads as alive: a quiet control comes forward, a coloured one
+     brightens. */
+  button.solid, button.ghost, .toggle, .step, .chip, select, #goto, .search input {
+    transition: border-color 0.12s, background-color 0.12s, filter 0.12s;
+  }
+  button.ghost:hover:not(:disabled), .toggle:not([aria-pressed="true"]):hover:not(:disabled) {
+    color: var(--ink);
+    border-color: var(--muted);
+    background: var(--surface-sunk);
+  }
+  button.solid:hover:not(:disabled), .toggle[aria-pressed="true"]:hover { filter: brightness(1.15); }
+  .step:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+  .chip:not([aria-pressed="true"]):hover { color: var(--ink); border-color: var(--muted); }
+  select:hover, #goto:hover, .search input:hover { border-color: var(--muted); }
   button.solid:disabled, button.ghost:disabled, button.toggle:disabled {
     opacity: 0.4;
     cursor: not-allowed;
@@ -896,8 +907,26 @@
   .thread.found { outline: 2px solid var(--accent); outline-offset: 1px; }
   body.hide-done .file[data-done="true"][data-reveal="true"] { display: block; }
 
-  .thread .drop { margin-left: auto; border: 0; background: transparent; color: var(--faint); font: inherit; font-size: 15px; line-height: 1; cursor: pointer; }
-  .whisper .drop { margin-left: auto; border: 0; background: transparent; color: var(--faint); font: inherit; font-size: 15px; line-height: 1; cursor: pointer; }
+  /* A button that deletes is drawn in the colour of what is removed, and fills with it under the pointer. */
+  .thread .drop, .whisper .drop {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    margin-left: auto;
+    padding: 0;
+    border: 1px solid color-mix(in srgb, var(--del-ink) 55%, transparent);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--del-ink);
+    font: inherit;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    transition: border-color 0.12s, background-color 0.12s;
+  }
+  .thread .drop:hover, .whisper .drop:hover { border-color: var(--del-ink); background: var(--del-bg); }
 
   .log {
     position: fixed;
@@ -953,8 +982,10 @@
   .logthread table { width: 100%; table-layout: fixed; border-collapse: collapse; }
   .logthread .noterow td { padding: 0; }
   .logrow[data-state="resolved"] { background: var(--add-bg); border-color: color-mix(in srgb, var(--add-ink) 35%, transparent); }
-  /* After the unread and resolved colourings, which weigh the same as it does and would otherwise keep their border. */
+  /* After the unread and resolved colourings, which weigh the same as it does and would otherwise keep their border. A
+     resolved row is lit in its own green rather than in the accent, which reads as another state on a green ground. */
   .logrow:hover { border-color: var(--accent); }
+  .logrow[data-state="resolved"]:hover { border-color: var(--add-ink); }
   .logrow b { flex: none; font-family: var(--mono); font-size: 11px; }
   .logrow .said { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
   .logrow .mark, .thread .mark { flex: none; font-family: var(--mono); font-size: 10.5px; padding: 0 6px; border-radius: 999px; }
@@ -1178,28 +1209,28 @@
 </style>
 
 <header data-built="__BUILD__">
-  <button class="toggle" id="sourceopen" title="Choose the repository, the base and the branches to review">Source</button>
+  <button class="toggle" id="sourceopen" data-tip="Choose the repository, the base and the branches to review">Source</button>
   <div class="tabs" id="tabs" role="tablist" aria-label="Branch"></div>
   <select id="scope" aria-label="Commit"></select>
-  <input id="goto" type="text" inputmode="numeric" placeholder="#" aria-label="Go to comment by number" title="Go to a comment by its number - press # from anywhere" />
+  <input id="goto" type="text" inputmode="numeric" placeholder="#" aria-label="Go to comment by number" data-tip="Go to a comment by its number - press # from anywhere" />
   <label class="search">
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2 14 14"/></svg>
     <input id="q" type="search" placeholder="Go to file" aria-label="Go to file" />
   </label>
-  <button class="toggle" id="settingsopen" aria-pressed="false" title="How the diff is shown" aria-label="Settings">
+  <button class="toggle" id="settingsopen" aria-pressed="false" data-tip="How the diff is shown" aria-label="Settings">
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6"/><circle cx="10" cy="4.5" r="1.5"/><circle cx="6" cy="11.5" r="1.5"/></svg>
   </button>
   <div class="tally">
-    <div class="progress" title="Files marked reviewed">
+    <div class="progress" data-tip="Files marked reviewed">
       <span class="track"><i id="pfill" style="width:0%"></i></span>
       <span class="label num" id="ptext"></span>
       <span class="steps">
-        <button class="step" id="pback" disabled title="The file left to review above this one">
+        <button class="step" id="pback" disabled data-tip="Previous file left to review">
           <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
             <path d="M2.5 7.5 6 4l3.5 3.5" />
           </svg>
         </button>
-        <button class="step" id="pnext" disabled title="The file left to review below this one">
+        <button class="step" id="pnext" disabled data-tip="Next file left to review">
           <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
             <path d="M2.5 4.5 6 8l3.5-3.5" />
           </svg>
@@ -1212,19 +1243,19 @@
     </div>
   </div>
   <span class="steps">
-    <button class="step" id="cback" disabled title="The comment shown above this one">
+    <button class="step" id="cback" disabled data-tip="Previous comment">
       <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
         <path d="M2.5 7.5 6 4l3.5 3.5" />
       </svg>
     </button>
-    <button class="step" id="cnext" disabled title="The comment shown below this one">
+    <button class="step" id="cnext" disabled data-tip="Next comment">
       <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
         <path d="M2.5 4.5 6 8l3.5-3.5" />
       </svg>
     </button>
   </span>
-  <button class="toggle" id="logopen" title="Every comment recorded, and where each one stands">Comments<i class="dot" id="logdot" aria-hidden="true"></i></button>
-  <button class="solid" id="moved" disabled title="Refresh the diffs once the branch has moved on">Refresh</button>
+  <button class="toggle" id="logopen" data-tip="Every comment recorded, and where each one stands">Comments<i class="dot" id="logdot" aria-hidden="true"></i></button>
+  <button class="solid" id="moved" disabled data-tip="Refresh the diffs once the branch has moved on">Refresh</button>
 </header>
 
 <div class="settings" id="settings" data-open="false">
@@ -1275,15 +1306,15 @@
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2 14 14"/></svg>
     <input id="fq" type="search" placeholder="Find in diff" aria-label="Find text in the diff" spellcheck="false" />
     <span class="modes">
-      <button class="mode" id="fcase" aria-pressed="false" title="Match case (Alt+C)">Aa</button>
-      <button class="mode" id="fword" aria-pressed="false" title="Match whole word (Alt+W)">ab</button>
-      <button class="mode" id="fregex" aria-pressed="false" title="Use regular expression (Alt+R)">.*</button>
+      <button class="mode" id="fcase" aria-pressed="false" data-tip="Match case (Alt+C)">Aa</button>
+      <button class="mode" id="fword" aria-pressed="false" data-tip="Match whole word (Alt+W)">ab</button>
+      <button class="mode" id="fregex" aria-pressed="false" data-tip="Use regular expression (Alt+R)">.*</button>
     </span>
   </div>
   <span class="count" id="fcount"></span>
-  <button class="mode" id="fprev" title="Previous match (Shift+Enter)">&#8593;</button>
-  <button class="mode" id="fnext" title="Next match (Enter)">&#8595;</button>
-  <button class="mode" id="fclose" title="Close (Escape)">&#215;</button>
+  <button class="mode" id="fprev" data-tip="Previous match (Shift+Enter)">&#8593;</button>
+  <button class="mode" id="fnext" data-tip="Next match (Enter)">&#8595;</button>
+  <button class="mode" id="fclose" data-tip="Close (Escape)">&#215;</button>
 </div>
 
 <div class="logrow toast" id="toast" data-open="false" role="status" aria-live="polite">
@@ -1301,7 +1332,7 @@
   <div class="head">
     <strong>Comments</strong>
     <span class="status" id="logcount"></span>
-    <label class="seen" id="logorder" title="Read the list by the submission each remark went out in, or by what moved last">
+    <label class="seen" id="logorder" data-tip="Read the list by the submission each remark went out in, or by what moved last">
       <span>Group by</span>
       <select id="logsort">
         <option value="batch">batch</option>
@@ -1312,10 +1343,10 @@
   </div>
   <div class="rows" id="logrows"></div>
   <div class="actions">
-    <button class="solid" id="logretry" title="Post again the comments bound for the pull request whose post did not land">Retry failures</button>
-    <button class="ghost" id="logbind" title="Aim the comments kept local at the pull request, and send them">Send local</button>
-    <button class="ghost" id="logsend" title="Send again every thread the pull request already holds, as each now reads">Sync threads</button>
-    <button class="ghost" id="logsync" title="Bring back the replies, resolutions and comments the pull request holds">Bring back</button>
+    <button class="solid" id="logretry" data-tip="Post again the comments bound for the pull request whose post did not land">Retry failures</button>
+    <button class="ghost" id="logbind" data-tip="Aim the comments kept local at the pull request, and send them">Send local</button>
+    <button class="ghost" id="logsend" data-tip="Send again every thread the pull request already holds, as each now reads">Sync threads</button>
+    <button class="ghost" id="logsync" data-tip="Bring back the replies, resolutions and comments the pull request holds">Bring back</button>
     <span class="status" id="logresult"></span>
   </div>
 </div>
@@ -1337,13 +1368,13 @@
 </div>
 
 <div class="shell">
-  <button class="rail" id="showfiles" title="Show the file list" aria-label="Show the file list">
+  <button class="rail" id="showfiles" data-tip="Show the file list" aria-label="Show the file list">
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg>
   </button>
   <aside>
     <div class="asidehead">
       <h2 class="label">Files</h2>
-      <button class="toggle" id="hidefiles" aria-pressed="false" title="Hide the file list" aria-label="Hide the file list">
+      <button class="toggle" id="hidefiles" aria-pressed="false" data-tip="Hide the file list" aria-label="Hide the file list">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg>
       </button>
     </div>
@@ -1405,7 +1436,7 @@
     // The repository, the base and the moment this page was built are worth having, not worth a line of the bar: they
     // live in the title of the button that chooses them.
     const built = document.querySelector("header").dataset.built;
-    els.sourceopen.title = `Choose the repository, the base and the branches to review \u00b7 ${data.name || ""} on ${data.baseRef} at ${data.base} \u00b7 ${built}`;
+    els.sourceopen.dataset.tip = `Choose the repository, the base and the branches to review \u00b7 ${data.name || ""} on ${data.baseRef} at ${data.base} \u00b7 ${built}`;
     els.srcdir.value = data.root || "";
     els.srcbase.value = data.baseRef || "upstream/main";
   }
@@ -1763,7 +1794,7 @@
       const names = group.by.map(spokenBy);
       const others = group.count - names.length;
       if (others > 0) names.push(names.length ? `${others} more` : `${others} on the pull request`);
-      chip.title = `${names.join(", ")} reacted with ${emoji}${waiting ? ", not on the pull request yet" : ""}`;
+      chip.dataset.tip = `${names.join(", ")} reacted with ${emoji}${waiting ? ", not on the pull request yet" : ""}`;
       chip.disabled = !live;
       chip.addEventListener("click", () => react(content, !mine));
       row.append(chip);
@@ -1773,7 +1804,7 @@
     const add = document.createElement("button");
     add.className = "tiny reactadd";
     add.textContent = "\u{263A}+";
-    add.title = "React";
+    add.dataset.tip = "React";
     add.addEventListener("click", () => {
       // A second press puts the picker away again.
       const open = host.querySelector(":scope > .reacts.picking");
@@ -1792,7 +1823,7 @@
       const shut = document.createElement("button");
       shut.className = "react";
       shut.textContent = "\u00d7";
-      shut.title = "Close";
+      shut.dataset.tip = "Close";
       shut.addEventListener("click", () => picker.remove());
       picker.append(shut);
       host.append(picker);
@@ -1808,7 +1839,7 @@
         player.className = "carries";
         player.controls = true;
         player.src = `media/${image.file}`;
-        player.title = image.name;
+        player.dataset.tip = image.name;
         host.append(player);
         continue;
       }
@@ -1820,7 +1851,7 @@
       shot.className = "carries";
       shot.src = `media/${image.file}`;
       shot.alt = image.alt || image.name;
-      shot.title = image.name;
+      shot.dataset.tip = image.name;
       link.append(shot);
       host.append(link);
     }
@@ -1847,7 +1878,7 @@
         const drop = document.createElement("button");
         drop.className = "drop";
         drop.textContent = "\u00d7";
-        drop.title = `Leave ${image.name} out`;
+        drop.dataset.tip = `Leave ${image.name} out`;
         drop.addEventListener("click", () => {
           carrying.splice(carrying.indexOf(image), 1);
           draw();
@@ -1877,7 +1908,7 @@
     const offer = document.createElement("button");
     offer.className = "ghost";
     offer.textContent = "Attach";
-    offer.title = "Attach an image or a video";
+    offer.dataset.tip = "Attach an image or a video";
     offer.addEventListener("click", () => pick.click());
     controls.append(offer, pick);
     field.addEventListener("paste", (event) => {
@@ -1949,7 +1980,7 @@
       behind = Boolean(desk && data.desk && desk !== data.desk);
       // A desk running older code than the page it served is not something the page can put right, so what the button
       // says is what would: stop it and serve the review again.
-      els.moved.title = stale ? RESTART : behind ? "Reload the page, which the desk has moved on from" : REFRESH_TITLE;
+      els.moved.dataset.tip = stale ? RESTART : behind ? "Reload the page, which the desk has moved on from" : REFRESH_TITLE;
       if (stamp && data.stamp) els.moved.disabled = stamp === data.stamp && !behind;
     } catch (error) {
       // Nothing is serving, which the comments already say.
@@ -1993,7 +2024,7 @@
     if (owed) bits.push(`${owed} waiting for GitHub`);
     bits.push(notes.live ? "watched by Claude" : "kept in this browser");
     if (staleCount) bits.push(`${staleCount} reopened`);
-    els.logopen.title = bits.join(" \u00b7 ");
+    els.logopen.dataset.tip = bits.join(" \u00b7 ");
   }
 
   const span = (note) =>
@@ -2033,7 +2064,7 @@
     const open = document.createElement("button");
     open.className = "tiny";
     open.textContent = "whisper";
-    open.title = "Keep a note here, on this desk";
+    open.dataset.tip = "Keep a note here, on this desk";
     open.dataset.on = on === null ? "" : String(on);
     open.addEventListener("click", () => {
       // One at a time: a second press goes back to the box already open rather than opening another beside it.
@@ -2431,7 +2462,7 @@
       const mark = document.createElement("span");
       mark.className = `mark ${kind}`;
       mark.textContent = label;
-      if (note.error && kind === "failed") mark.title = note.error;
+      if (note.error && kind === "failed") mark.dataset.tip = note.error;
       item.append(mark);
     }
     // The thread sent from its own row, since the panel is where a reader works through what is still owed. A span
@@ -2443,7 +2474,7 @@
       out.setAttribute("role", "button");
       out.tabIndex = 0;
       out.textContent = "sync";
-      out.title = `Send ${owes} to PR #${branch().pr.number}`;
+      out.dataset.tip = `Send ${owes} to PR #${branch().pr.number}`;
       const sending = async (event) => {
         event.stopPropagation();
         await sendThreads([note]);
@@ -2488,7 +2519,7 @@
     els.toastwhere.textContent = where;
     els.toastsaid.textContent = reason;
     els.toastmark.textContent = `${deed} failed`;
-    els.toast.title = reason;
+    els.toast.dataset.tip = reason;
     els.toast.dataset.open = "true";
   }
 
@@ -2672,19 +2703,19 @@
       said.textContent = ` ${outline(draft.text).slice(0, 110)}`;
       const goes = document.createElement("div");
       goes.className = "goes";
-      goes.title = "Go to the lines this was written on";
+      goes.dataset.tip = "Go to the lines this was written on";
       goes.append(where, said);
       if ((draft.images || []).length) {
         const files = document.createElement("b");
         files.textContent = `+${draft.images.length}`;
-        files.title = draft.images.map((image) => image.name).join(", ");
+        files.dataset.tip = draft.images.map((image) => image.name).join(", ");
         goes.append(files);
       }
       goes.addEventListener("click", () => reach(draft));
       const alone = document.createElement("button");
       alone.className = "tiny";
       alone.textContent = "Send";
-      alone.title = "Send this one now and keep the rest pending";
+      alone.dataset.tip = "Send this one now and keep the rest pending";
       alone.addEventListener("click", () => sendAll([draft], ""));
       item.append(goes, alone);
       els.traylist.append(item);
@@ -2737,7 +2768,7 @@
           const row = document.createElement("li");
           const goes = document.createElement("div");
           goes.className = "goes";
-          goes.title = "Go back to where this is being written";
+          goes.dataset.tip = "Go back to where this is being written";
           const where = document.createElement("b");
           where.textContent = `${item.path.split("/").pop()} ${item.where}`;
           const words = document.createElement("span");
@@ -3264,7 +3295,7 @@
       from.className = `by ${note.who ? (isReader(note.who) ? "you" : "them") : "you"}`;
       from.textContent = note.who ? spokenBy(note.who) : "you";
       who.append(document.createTextNode(" "), from);
-      head.title = saidWhen(note.at, note.who);
+      head.dataset.tip = saidWhen(note.at, note.who);
     }
     const text = document.createElement("span");
     text.className = "said";
@@ -3277,7 +3308,7 @@
       const turn = document.createElement("button");
       turn.className = "tiny";
       turn.textContent = settled ? `resolved${answers ? `, ${answers} repl${answers === 1 ? "y" : "ies"}` : ""}` : "fold";
-      turn.title = settled ? "Show the whole thread" : "Fold it away again";
+      turn.dataset.tip = settled ? "Show the whole thread" : "Fold it away again";
       turn.addEventListener("click", () => {
         if (settled) {
           unfolded.add(note.seq);
@@ -3308,7 +3339,7 @@
       const change = document.createElement("button");
       change.className = "tiny";
       change.textContent = "edit";
-      change.title = note.edits && note.edits.length ? `rewritten ${note.edits.length} time(s)` : "Rewrite this comment";
+      change.dataset.tip = note.edits && note.edits.length ? `rewritten ${note.edits.length} time(s)` : "Rewrite this comment";
       change.addEventListener("click", () => {
         const written = document.createElement("textarea");
         written.rows = 2;
@@ -3358,7 +3389,7 @@
       const mark = document.createElement("span");
       mark.className = "mark outdated";
       mark.textContent = "code moved on";
-      mark.title = `${note.path} ${span(note)} is no longer in this diff`;
+      mark.dataset.tip = `${note.path} ${span(note)} is no longer in this diff`;
       head.append(mark);
     }
     if (!note.pending) {
@@ -3367,13 +3398,13 @@
         const mark = document.createElement("span");
         mark.className = `mark ${note.prResolve === "done" ? "posted" : "pending"}`;
         mark.textContent = there;
-        if (note.prResolveError) mark.title = note.prResolveError;
+        if (note.prResolveError) mark.dataset.tip = note.prResolveError;
         head.append(mark);
       }
       const mark = document.createElement(note.github === "posted" || !notes.live ? "span" : "button");
       mark.className = mark.tagName === "BUTTON" ? `mark ${note.github} act` : `mark ${note.github}`;
       mark.textContent = note.github === "none" ? "local only" : GITHUB_MARK[note.github] || note.github;
-      mark.title =
+      mark.dataset.tip =
         note.reviewUrl ||
         note.error ||
         (note.github === "none" ? "Send this one to the pull request" : "Keep this one out of the pull request");
@@ -3392,8 +3423,9 @@
     drop.className = "drop";
     drop.textContent = "\u00d7";
     if (note.pending) {
-      drop.title = "Remove this comment";
+      drop.dataset.tip = "Remove this comment";
       drop.addEventListener("click", () => {
+        if (!window.confirm("Remove this comment? It has not been sent, so nothing else holds it.")) return;
         notes.drafts = notes.drafts.filter((draft) => draft !== note.source);
         drawTray();
         render();
@@ -3401,7 +3433,7 @@
       head.append(drop);
     } else if (notes.live && !note.who) {
       const posted = note.github === "posted";
-      drop.title = posted ? "Delete this comment, here and on the pull request" : "Delete this comment";
+      drop.dataset.tip = posted ? "Delete this comment, here and on the pull request" : "Delete this comment";
       drop.addEventListener("click", async () => {
         const answers = (note.replies || []).length;
         const also = answers ? ` and ${answers} repl${answers === 1 ? "y" : "ies"}` : "";
@@ -3456,7 +3488,7 @@
       from.textContent = spokenBy(answer.who);
       // When it was said and where it stands, kept for the asking: in the line they say little and take the room the
       // reply is read in.
-      from.title = answer.whisper ? `${answer.at}, kept here` : saidWhen(answer.at, answer.who);
+      from.dataset.tip = answer.whisper ? `${answer.at}, kept here` : saidWhen(answer.at, answer.who);
       const body = document.createElement("span");
       body.className = "said";
       // Said once for a run of them: the first note says what the ones under it are, and repeating it on each says
@@ -3465,7 +3497,7 @@
         const kind = document.createElement("span");
         kind.className = "mark aside";
         kind.textContent = "whisper";
-        kind.title = "Kept on this desk, whatever the thread sends";
+        kind.dataset.tip = "Kept on this desk, whatever the thread sends";
         body.append(kind);
       }
       body.append(from);
@@ -3480,7 +3512,7 @@
         const standing = document.createElement("span");
         standing.className = `mark ${answer.github}`;
         standing.textContent = GITHUB_MARK[answer.github] || answer.github;
-        if (answer.error) standing.title = answer.error;
+        if (answer.error) standing.dataset.tip = answer.error;
         said.append(standing);
       }
       // Offered once for everything standing on one thing, at the end of it: on the last note of a reply, or on the
@@ -3492,7 +3524,7 @@
         const change = document.createElement("button");
         change.className = "tiny";
         change.textContent = "edit";
-        change.title = answer.edits && answer.edits.length ? `rewritten ${answer.edits.length} time(s)` : "Rewrite this reply";
+        change.dataset.tip = answer.edits && answer.edits.length ? `rewritten ${answer.edits.length} time(s)` : "Rewrite this reply";
         change.addEventListener("click", () => {
           const written = document.createElement("textarea");
           written.rows = 2;
@@ -3535,7 +3567,7 @@
         const forget = document.createElement("button");
         forget.className = "drop";
         forget.textContent = "\u00d7";
-        forget.title = "Forget this note";
+        forget.dataset.tip = "Forget this note";
         forget.addEventListener("click", async () => {
           if (!window.confirm("Forget this note?")) return;
           const outcome = await post("forget", { seq: note.seq, whisper: index });
@@ -3550,7 +3582,7 @@
         const undo = document.createElement("button");
         undo.className = "drop";
         undo.textContent = "\u00d7";
-        undo.title = note.github === "posted" ? "Delete this reply, here and on the pull request" : "Delete this reply";
+        undo.dataset.tip = note.github === "posted" ? "Delete this reply, here and on the pull request" : "Delete this reply";
         undo.addEventListener("click", async () => {
           if (!window.confirm("Delete the last reply?")) return;
           const outcome = await post("drop", { seq: note.seq, reply: true, who: "you", ...where() });
@@ -3631,7 +3663,7 @@
         const out = document.createElement("button");
         out.className = "ghost";
         out.textContent = "Sync";
-        out.title = `Send ${owes} to PR #${branch().pr.number}`;
+        out.dataset.tip = `Send ${owes} to PR #${branch().pr.number}`;
         out.addEventListener("click", async () => {
           const outcome = await post("publish", { seq: [note.seq], ...where() });
           if (!outcome.ok) announce("sync", `PR #${branch().pr.number}`, outcome.error || "GitHub unreachable");
@@ -3917,7 +3949,7 @@
     const now = document.createElement("button");
     now.className = "solid direct";
     now.textContent = "Send";
-    now.title = "Send this comment on its own";
+    now.dataset.tip = "Send this comment on its own";
     const send = document.createElement("button");
     send.className = "solid";
     send.textContent = "Add to review";
@@ -4169,13 +4201,13 @@
       tab.textContent = entry.blurb;
       tab.setAttribute("aria-selected", String(index === state.branch));
       // A ref read against a base of its own, such as the branch below it in a stack, names that base when hovered.
-      if (entry.baseRef && entry.baseRef !== data.baseRef) tab.title = `against ${entry.baseRef}`;
+      if (entry.baseRef && entry.baseRef !== data.baseRef) tab.dataset.tip = `against ${entry.baseRef}`;
       if (entry.aside) {
         const aside = document.createElement("span");
         aside.className = "aside";
         aside.textContent = "!";
         tab.append(aside);
-        tab.title = `not on ${entry.baseRef}: read from where they forked, so it needs restacking`;
+        tab.dataset.tip = `not on ${entry.baseRef}: read from where they forked, so it needs restacking`;
       }
       // A branch read against the tab before it continues a stack, which the bar draws as one chain.
       if (index && entry.baseRef === data.branches[index - 1].ref) {
@@ -4185,7 +4217,7 @@
         els.tabs.append(sep);
       }
       if (request) {
-        tab.title = [request.title, request.url, tab.title].filter(Boolean).join("\n");
+        tab.dataset.tip = [request.title, request.url, tab.dataset.tip].filter(Boolean).join("\n");
         const away = document.createElement("span");
         away.className = "away";
         away.textContent = "\u2197";
@@ -4251,7 +4283,7 @@
   // at a time. Choosing a base picks the branch too, since a base is only chosen for a branch to be reviewed.
   function baseChoice(ref, box) {
     const choice = document.createElement("select");
-    const say = () => (choice.title = `Read against ${choice.value || els.srcbase.value || "the base"}`);
+    const say = () => (choice.dataset.tip = `Read against ${choice.value || els.srcbase.value || "the base"}`);
     const own = source.bases.get(ref);
     const offered = source.refs.map((row) => row.ref).filter((other) => other !== ref);
     if (own && !offered.includes(own)) offered.unshift(own);
@@ -4291,7 +4323,7 @@
         });
         const name = document.createElement("span");
         name.textContent = row.ref === source.current ? `${row.ref} *` : row.ref;
-        name.title = row.ref;
+        name.dataset.tip = row.ref;
         const ahead = document.createElement("span");
         ahead.className = "ahead";
         ahead.textContent = `${row.ahead} commit${row.ahead === 1 ? "" : "s"}`;
@@ -4323,7 +4355,7 @@
         const what = document.createElement("span");
         what.className = "ahead";
         what.textContent = row.title;
-        label.title = `${row.title} (${row.headRefName})`;
+        label.dataset.tip = `${row.title} (${row.headRefName})`;
         label.append(box, name, what);
         els.srcpulls.append(label);
       }
@@ -4725,7 +4757,7 @@
       ? `${done}/${shown.length} reviewed\n${staleCount} reopened`
       : `${done}/${shown.length} reviewed`;
     els.ptext.dataset.stale = String(Boolean(staleCount));
-    els.ptext.title = staleCount ? `${staleCount} file(s) changed since they were reviewed, and are marked as such` : "Files marked reviewed";
+    els.ptext.dataset.tip = staleCount ? `${staleCount} file(s) changed since they were reviewed, and are marked as such` : "Files marked reviewed";
     els.pfill.style.width = shown.length ? `${Math.round((done / shown.length) * 100)}%` : "0%";
     if (!els.palette.hidden) drawPicks();
     sayWhereToStep();
@@ -5127,7 +5159,7 @@
     const link = document.createElement("button");
     link.className = "sbadge moved";
     link.textContent = label;
-    link.title = `${side === "new" ? "Now at" : "Was at"} ${path}, line ${line}`;
+    link.dataset.tip = `${side === "new" ? "Now at" : "Was at"} ${path}, line ${line}`;
     link.addEventListener("click", (event) => {
       event.stopPropagation();
       reachLine(path, line, side);
@@ -5147,7 +5179,7 @@
       const span = document.createElement("span");
       span.className = `sbadge ${kind}`;
       span.textContent = text;
-      if (title) span.title = title;
+      if (title) span.dataset.tip = title;
       said.push(span);
     };
     if (badge.renamed) {
@@ -5276,7 +5308,7 @@
       const newNo = entry.new;
       const from = entry.from;
       const left = numberCell(oldNo ? String(oldNo) : from ? (from[0] === file.path ? String(from[1]) : `${fileName(from[0])}:${from[1]}`) : "", from && !oldNo ? "ghost" : "");
-      if (from && !oldNo) left.title = `The old version, from ${from[0]}, line ${from[1]}`;
+      if (from && !oldNo) left.dataset.tip = `The old version, from ${from[0]}, line ${from[1]}`;
       const leftCode = oldNo ? alignedCode(file.path, "old", oldNo, false) : from ? alignedCode(from[0], "old", from[1], true) : padCell("old");
       const right = numberCell(newNo ? String(newNo) : "");
       const rightCode = newNo ? alignedCode(file.path, "new", newNo, false) : padCell("new");
@@ -5388,7 +5420,7 @@
     const pin = document.createElement("button");
     pin.className = "pin";
     pin.textContent = "+";
-    pin.title = "Comment on the selected lines";
+    pin.dataset.tip = "Comment on the selected lines";
     pin.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
       event.preventDefault();
@@ -5483,7 +5515,7 @@
             const whole = document.createElement("button");
             whole.className = "expand";
             whole.textContent = room > CONTEXT_STEP ? `all ${room}` : `+${room}`;
-            whole.title = "Show every line between the hunks";
+            whole.dataset.tip = "Show every line between the hunks";
             whole.addEventListener("click", () => fillGap(file, index, spot, true, true));
             cell.append(whole);
           }
@@ -5636,7 +5668,7 @@
       `<i class="d" style="flex:${file.removed}"></i></span><span class="num">${file.added + file.removed}</span></span>`;
     const name = item.querySelector(".name");
     name.textContent = file.path.split("/").pop();
-    name.title = file.path;
+    name.dataset.tip = file.path;
     item.addEventListener("click", () => jump(index));
     return item;
   }
@@ -6316,6 +6348,54 @@
       clearInterval(polling);
     });
   }
+
+  // What a control says about itself, shown a beat after the pointer reaches it, and at once when it moves on from
+  // another control that was just saying something. The browser's own tooltip waits about a second and never shows on a
+  // disabled control, which is where saying where a button leads matters most. Read when shown, so a text that changes
+  // while the control is pointed at is said as it now stands.
+  const tip = document.createElement("div");
+  tip.id = "tip";
+  tip.setAttribute("role", "tooltip");
+  tip.hidden = true;
+  document.body.append(tip);
+  let tipFor = null;
+  let tipSoon = null;
+  let tipLeft = -Infinity;
+
+  function showTip() {
+    tipSoon = null;
+    if (!tipFor || !tipFor.isConnected || !tipFor.dataset.tip) return;
+    tip.textContent = tipFor.dataset.tip;
+    tip.hidden = false;
+    // Under the control, or over it where the window has no room below, and kept inside the window across.
+    const box = tipFor.getBoundingClientRect();
+    const below = box.bottom + 6 + tip.offsetHeight <= window.innerHeight - 4;
+    tip.style.top = `${below ? box.bottom + 6 : box.top - 6 - tip.offsetHeight}px`;
+    const across = box.left + box.width / 2 - tip.offsetWidth / 2;
+    tip.style.left = `${Math.max(4, Math.min(across, window.innerWidth - tip.offsetWidth - 4))}px`;
+  }
+
+  function hideTip() {
+    window.clearTimeout(tipSoon);
+    tipSoon = null;
+    if (!tip.hidden) tipLeft = performance.now();
+    tip.hidden = true;
+    tipFor = null;
+  }
+
+  // Pointer events rather than mouse events, which a disabled control never receives.
+  document.addEventListener("pointerover", (event) => {
+    const told = event.target.closest("[data-tip]");
+    if (told === tipFor) return;
+    hideTip();
+    if (!told) return;
+    tipFor = told;
+    tipSoon = window.setTimeout(showTip, performance.now() - tipLeft < 500 ? 0 : 250);
+  });
+  document.addEventListener("pointerout", (event) => {
+    if (tipFor && !(event.relatedTarget && tipFor.contains(event.relatedTarget))) hideTip();
+  });
+  for (const ending of ["pointerdown", "keydown", "scroll"]) document.addEventListener(ending, hideTip, true);
 
   const measureHead = () => {
     const box = document.querySelector("header").getBoundingClientRect();

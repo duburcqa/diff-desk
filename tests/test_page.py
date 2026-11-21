@@ -189,6 +189,21 @@ def aim(page, text):
     return line
 
 
+def colour(page, token):
+    """The colour a CSS custom property of the page resolves to, as the engine computes colours."""
+    return page.evaluate(
+        """(token) => {
+          const probe = document.createElement('span');
+          probe.style.color = `var(${token})`;
+          document.body.append(probe);
+          const color = getComputedStyle(probe).color;
+          probe.remove();
+          return color;
+        }""",
+        token,
+    )
+
+
 def submit_alone(page, text):
     """Send one comment straight from the box, without it waiting in the review tray.
 
@@ -1333,6 +1348,35 @@ def test_the_settings_are_grouped_and_each_says_what_it_does_when_pointed_at(pag
     page.locator("#settingsopen").click()
 
 
+def test_the_controls_answer_the_pointer(page):
+    tip = page.locator("#tip")
+    # A control says what it does a beat after the pointer reaches it, a disabled one included, under it and inside the
+    # window.
+    assert page.locator("#moved").is_disabled()
+    page.locator("#moved").hover(force=True)
+    page.wait_for_selector("#tip:not([hidden])", timeout=1000)
+    assert tip.inner_text() == "Refresh the diffs once the branch has moved on"
+    told, refresh = tip.bounding_box(), page.locator("#moved").bounding_box()
+    assert told["y"] >= refresh["y"] + refresh["height"]
+    assert told["x"] >= 0 and told["x"] + told["width"] <= page.viewport_size["width"]
+    # Moving on to the next control, it says the next thing at once, and nothing once the pointer leaves them.
+    page.locator("#cnext").hover(force=True)
+    page.wait_for_function("() => document.getElementById('tip').textContent === 'Next comment'", timeout=200)
+    page.mouse.move(5, page.viewport_size["height"] - 5)
+    page.wait_for_selector("#tip", state="hidden")
+
+    # A quiet button comes forward under the pointer.
+    page.locator("#logopen").click()
+    page.wait_for_selector("#log[data-open='true']")
+    close = page.locator("#logclose")
+    rest = close.evaluate("(button) => getComputedStyle(button).color")
+    close.hover()
+    page.wait_for_function(
+        "(rest) => getComputedStyle(document.getElementById('logclose')).color !== rest", arg=rest, timeout=1000
+    )
+    close.click()
+
+
 def test_comments_are_filtered_by_their_author_and_stepped_through(page, desk):
     ours = desk.post(
         "/comments",
@@ -2018,21 +2062,10 @@ def test_a_thread_with_nowhere_to_go_is_read_in_the_panel(page, desk):
     page.locator("#logopen").click()
     page.wait_for_selector("#log[data-open='true']")
     row = page.locator(f"#logrows .logrow[data-seq='{seq}']")
-    # Hovered, a resolved row takes the accent at its border like any other row: what a press would land on is shown.
+    # Hovered, a resolved row is lit at its border in its own green, which is how it reads: the accent would read as
+    # another state on a green ground.
     row.hover()
-    hovered = page.evaluate(
-        """(seq) => {
-          const row = document.querySelector(`#logrows .logrow[data-seq='${seq}']`);
-          const probe = document.createElement('span');
-          probe.style.color = 'var(--accent)';
-          document.body.append(probe);
-          const wanted = getComputedStyle(probe).color;
-          probe.remove();
-          return { got: getComputedStyle(row).borderColor, wanted };
-        }""",
-        seq,
-    )
-    assert hovered["got"] == hovered["wanted"]
+    assert row.evaluate("(row) => getComputedStyle(row).borderTopColor") == colour(page, "--add-ink")
     row.click()
     # The thread opens where it is, so what was said in it can still be read.
     thread = page.locator(".logthread")
@@ -2318,7 +2351,7 @@ def test_the_log_says_where_every_comment_stands(page, desk):
     assert page.locator("#logretry").is_enabled()
     # Said by the dot and by what the button holds, since the label itself never changes width.
     assert page.locator("#logdot").get_attribute("data-on") == "true"
-    said = page.locator("#logopen").get_attribute("title")
+    said = page.locator("#logopen").get_attribute("data-tip")
     assert "waiting for GitHub" in said
     # A native tooltip carries no markup, so the count reads as a number rather than as tags around one.
     assert re.match(r"\d+ comments?, \d+ resolved\b", said)
@@ -2630,8 +2663,8 @@ def test_a_branch_with_a_pull_request_says_which_and_opens_it(page, desk):
         page.wait_for_selector(".tab")
         tab = page.locator(".tab").first
         # Hovering says what the pull request is; the mark shows that the chosen tab now leads to it.
-        assert "A tidy change" in tab.get_attribute("title")
-        assert "https://github.com/someone/somewhere/pull/7" in tab.get_attribute("title")
+        assert "A tidy change" in tab.get_attribute("data-tip")
+        assert "https://github.com/someone/somewhere/pull/7" in tab.get_attribute("data-tip")
         assert tab.get_attribute("aria-selected") == "true"
         assert tab.locator(".away").count() == 1
 
@@ -2685,8 +2718,8 @@ def test_a_branch_is_read_against_a_base_of_its_own_chosen_in_the_source_panel(p
         # The tab says what the branch is read against when hovered, and the panel opens on the base chosen.
         page.reload(wait_until="load")
         page.wait_for_selector(".tab")
-        assert "against" not in (page.locator(".tab").nth(0).get_attribute("title") or "")
-        assert f"against {branch}" in page.locator(".tab").nth(1).get_attribute("title")
+        assert "against" not in (page.locator(".tab").nth(0).get_attribute("data-tip") or "")
+        assert f"against {branch}" in page.locator(".tab").nth(1).get_attribute("data-tip")
         # A branch read against the tab before it continues a stack, drawn as one chain.
         assert page.locator("#tabs .tabsep").count() == 1
         page.locator("#sourceopen").click()
@@ -2713,7 +2746,7 @@ def test_a_branch_is_read_against_a_base_of_its_own_chosen_in_the_source_panel(p
         assert desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [f"upper..{branch}"]})["ok"]
         page.reload(wait_until="load")
         page.wait_for_selector(".tab .aside")
-        assert "not on upper" in page.locator(".tab").first.get_attribute("title")
+        assert "not on upper" in page.locator(".tab").first.get_attribute("data-tip")
     finally:
         desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": [branch]})
         gen_diff_data.run(desk.repo, "worktree", "remove", "--force", str(tmp_path / "upper"))
@@ -2776,7 +2809,7 @@ def test_a_file_changed_since_it_was_reviewed_says_so_where_the_count_is(page, d
     reads = page.locator("#ptext").inner_text().lower()
     assert "1 reopened" in reads
     assert page.locator("#ptext").get_attribute("data-stale") == "true"
-    assert "changed since they were reviewed" in page.locator("#ptext").get_attribute("title")
+    assert "changed since they were reviewed" in page.locator("#ptext").get_attribute("data-tip")
     # The tick is kept, so the file still shows it was read once and says the diff has moved since - and it survives the
     # next render rather than being cleared by the very act of noticing it.
     page.evaluate("() => render()")
@@ -3033,7 +3066,7 @@ def test_a_reply_can_be_rewritten_and_a_comment_and_its_last_reply_deleted_from_
     thread = page.locator(f"#note-{made}")
 
     # Only the last reply carries a way out, and taking it leaves the comment and what was said before it.
-    page.on("dialog", lambda dialog: dialog.accept())
+    page.on("dialog", accept := lambda dialog: dialog.accept())
     assert thread.locator(".line.reply button.drop").count() == 1
     thread.locator(".line.reply button.drop").click()
     page.wait_for_function("(seq) => document.querySelectorAll(`#note-${seq} .line.reply`).length === 1", arg=made)
@@ -3055,14 +3088,38 @@ def test_a_reply_can_be_rewritten_and_a_comment_and_its_last_reply_deleted_from_
     # The remark it answers is left as it was written: the two are rewritten apart.
     assert reworded["text"] == saying
 
+    # A button that deletes reads as one: drawn in the colour of what is removed, and filling with it when pointed at.
+    remove = thread.locator(".thread > .line button.drop").first
+    assert remove.evaluate("(button) => getComputedStyle(button).color") == colour(page, "--del-ink")
+    rest = remove.evaluate("(button) => getComputedStyle(button).backgroundColor")
+    remove.hover()
+    page.wait_for_function(
+        "([seq, rest]) => getComputedStyle(document.querySelector(`#note-${seq} .thread > .line button.drop`))"
+        ".backgroundColor !== rest",
+        arg=[made, rest],
+    )
+
     # Dropping the comment itself takes it off the page and out of the panel, and the log says it is gone.
-    thread.locator(".thread > .line button.drop").first.click()
+    remove.click()
     page.wait_for_function("(seq) => !document.getElementById(`note-${seq}`)", arg=made)
     assert {row["seq"]: row for row in desk.get("/comments")}[made]["state"] == "deleted"
     page.locator("#logopen").click()
     page.wait_for_selector("#log[data-open='true']")
     assert page.locator("#logrows .logrow").filter(has_text=saying).count() == 0
     page.locator("#logclose").click()
+
+    # A comment not sent yet is removed only once the reader says so, since nothing else holds what it says.
+    page.remove_listener("dialog", accept)
+    aim(page, "pending, then removed")
+    page.locator("tr[data-composer='true'] .solid:not(.direct)").click()
+    page.wait_for_function("() => notes.drafts.length === 1")
+    pending = page.locator(".thread.draft", has_text="pending, then removed").locator("button.drop")
+    page.once("dialog", lambda dialog: dialog.dismiss())
+    pending.click()
+    assert page.evaluate("() => notes.drafts.length") == 1
+    page.once("dialog", lambda dialog: dialog.accept())
+    pending.click()
+    page.wait_for_function("() => notes.drafts.length === 0")
 
 
 def test_a_comment_does_not_shift_the_columns_of_the_diff_it_hangs_under(page, desk):
@@ -3654,7 +3711,7 @@ def test_a_sync_that_could_not_happen_says_so_where_the_reader_is(page, desk):
         assert page.locator("#toastmark").inner_text() == "sync failed"
         assert "401" in page.locator("#toastsaid").inner_text()
         # Said on one line, so the whole of the reason is held on the row for a window too narrow to show it.
-        assert "401" in page.locator("#toast").get_attribute("title")
+        assert "401" in page.locator("#toast").get_attribute("data-tip")
         assert page.locator("#toast").bounding_box()["height"] < 40
 
         # It stays until dismissed, since a reason worth reading is worth reading at leisure.
@@ -3766,7 +3823,7 @@ def test_a_comment_written_on_the_pull_request_shows_whose_it_is_and_is_answered
         assert head.locator(".who .seq").inner_text() == f"[{seq}]"
         # Whose remark it is stands in the line; when it was said and where it stands are what hovering says.
         assert head.locator(".who .by").inner_text() == "Milotrince"
-        assert head.get_attribute("title") == "2026-08-22 09:00, submitted on the pull request"
+        assert head.get_attribute("data-tip") == "2026-08-22 09:00, submitted on the pull request"
         assert head.locator("button.tiny").filter(has_text="Edit").count() == 0
         assert head.locator("button.drop").count() == 0
         assert page.locator(f"#note-{seq} .actions button.ghost").filter(has_text="Reply").count() == 1
@@ -3820,7 +3877,7 @@ def test_a_thread_says_what_it_owes_the_pull_request_and_sends_it_when_asked(pag
 
         # What pressing it would do is what it says, so the reader sends a thread knowing what leaves this desk.
         sending = page.locator(f"#note-{made} .actions button.ghost").filter(has_text="Sync").first
-        assert "the remark and 1 reply" in sending.get_attribute("title")
+        assert "the remark and 1 reply" in sending.get_attribute("data-tip")
 
         landed = {
             "id": "T_page",
@@ -3942,7 +3999,7 @@ def test_the_comments_panel_sends_one_thread_from_its_row_and_every_thread_the_p
         # One thread out of its own row, saying what pressing it would carry.
         row = page.locator(f".logrow:has-text('{texts[0]}')").first
         sending = row.locator(".mark.act").first
-        assert "1 reply" in sending.get_attribute("title")
+        assert "1 reply" in sending.get_attribute("data-tip")
         desk.github_answers(rules=answering)
         sending.click()
         page.wait_for_function(
@@ -4138,10 +4195,10 @@ def test_a_remark_and_a_reply_both_say_when_they_were_said_and_where_they_were_w
 
     # Written here and answered here, so both say so, each with the time it was said.
     head = page.locator(f"#note-{made} .thread > .line").first
-    assert head.get_attribute("title").endswith(", submitted here")
+    assert head.get_attribute("data-tip").endswith(", submitted here")
     answer = page.locator(f"#note-{made} .line.reply .who").first
-    assert answer.get_attribute("title").endswith(", submitted here")
-    assert re.match(r"^[0-9]", answer.get_attribute("title"))
+    assert answer.get_attribute("data-tip").endswith(", submitted here")
+    assert re.match(r"^[0-9]", answer.get_attribute("data-tip"))
 
     # Where it was written stands whatever becomes of it: sending it to the pull request is what the mark on the right
     # of the line is for, and a remark written here reads as written here for as long as it exists.
@@ -4154,8 +4211,8 @@ def test_a_remark_and_a_reply_both_say_when_they_were_said_and_where_they_were_w
         }""",
         made,
     )
-    assert page.locator(f"#note-{made} .thread > .line").first.get_attribute("title").endswith(", submitted here")
-    assert page.locator(f"#note-{made} .line.reply .who").first.get_attribute("title").endswith(", submitted here")
+    assert page.locator(f"#note-{made} .thread > .line").first.get_attribute("data-tip").endswith(", submitted here")
+    assert page.locator(f"#note-{made} .line.reply .who").first.get_attribute("data-tip").endswith(", submitted here")
 
 
 def test_a_reply_says_whose_it_is_in_its_own_voice(page, desk):
@@ -4314,10 +4371,10 @@ def test_a_remark_and_a_reply_are_reacted_to_from_the_page(page, desk):
 
 
 def test_the_file_list_follows_the_file_scrolled_onto(page):
-    current = "() => document.querySelector('.fileitem[data-current=\"true\"] .name')?.title"
+    current = "() => document.querySelector('.fileitem[data-current=\"true\"] .name')?.dataset.tip"
     # The diff reads down in the order the list does, each folder's folders before its own files.
     listed = page.evaluate(
-        "() => [...document.querySelectorAll('#filelist .fileitem .name')].map((name) => name.title)"
+        "() => [...document.querySelectorAll('#filelist .fileitem .name')].map((name) => name.dataset.tip)"
     )
     assert listed == page.evaluate(
         "() => [...document.querySelectorAll('section.file')].map((card) => card.dataset.path)"
@@ -4335,7 +4392,7 @@ def test_the_file_list_follows_the_file_scrolled_onto(page):
           const card = document.querySelector(`section.file[data-path="${path}"]`);
           const covered = document.querySelector('header').getBoundingClientRect().bottom;
           window.scrollBy(0, card.getBoundingClientRect().top - covered);
-          return document.querySelector('.fileitem[data-current="true"] .name')?.title === path;
+          return document.querySelector('.fileitem[data-current="true"] .name')?.dataset.tip === path;
         }""",
         arg=second,
         polling=100,
@@ -4356,7 +4413,7 @@ def test_the_file_list_follows_the_file_scrolled_onto(page):
               const card = document.querySelector(`section.file[data-path="${path}"]`);
               const covered = document.querySelector('header').getBoundingClientRect().bottom;
               window.scrollBy(0, card.getBoundingClientRect().top - covered);
-              return document.querySelector('.fileitem[data-current="true"] .name')?.title === path;
+              return document.querySelector('.fileitem[data-current="true"] .name')?.dataset.tip === path;
             }""",
             arg=third,
             polling=100,
