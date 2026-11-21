@@ -1048,7 +1048,12 @@
     border-radius: 10px;
     box-shadow: var(--shadow);
   }
+  /* The settings fall into groups, each under its name and set off from the one above by a rule. */
+  .settings .group { display: flex; flex-direction: column; }
+  .settings .group + .group { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--rule); }
+  .settings .group h3 { margin: 4px 8px 2px; color: var(--faint); font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
   .setting {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 12px;
@@ -1067,8 +1072,28 @@
   .setting.sub { margin-left: 18px; }
   .setting:disabled { color: var(--faint); cursor: default; background: transparent; }
   .setting .what { flex: 1; display: flex; flex-direction: column; gap: 2px; }
-  .setting small { color: var(--muted); font-size: 11px; }
-  .setting:disabled small { color: var(--faint); }
+  /* What a setting does is said beside the panel, for the row pointed at or holding the keyboard, so the panel itself
+     lists names alone. The words stay in the row, out of sight, as part of its name for assistive technology. */
+  .setting small { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  /* Hung on the panel rather than in a row: the rows scroll inside the panel's body, which clips what stands outside. */
+  #settingtip {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 260px;
+    padding: 6px 9px;
+    border-radius: 6px;
+    background: var(--ink);
+    color: var(--surface);
+    font-size: 11.5px;
+    line-height: 1.4;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(-50%);
+    transition: opacity 90ms ease;
+  }
+  /* After a beat, so running the cursor down the panel says nothing. */
+  #settingtip[data-on="true"] { opacity: 1; transition-delay: 260ms; }
   .setting .switch { flex: none; position: relative; width: 26px; height: 15px; border-radius: 8px; background: var(--rule-strong); transition: background 0.12s; }
   .setting .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: var(--surface); transition: transform 0.12s; }
   .setting[aria-pressed="true"] .switch { background: var(--accent); }
@@ -1204,16 +1229,23 @@
 
 <div class="settings" id="settings" data-open="false">
   <div class="body">
-    <button class="setting" id="ctx" aria-pressed="false"><span class="what">Changes only<small>Show only the added and removed lines</small></span><i class="switch" aria-hidden="true"></i></button>
-    <button class="setting" id="semantic" aria-pressed="false"><span class="what">Semantic view<small>Python files side by side, lined up by statement, moved code shown beside its old version</small></span><i class="switch" aria-hidden="true"></i></button>
-    <button class="setting sub" id="hidedeleted" aria-pressed="false" disabled><span class="what">Fold deleted code<small>Every block of deleted code behind a bar, to read what the branch keeps</small></span><i class="switch" aria-hidden="true"></i></button>
-    <button class="setting" id="hidedone" aria-pressed="false"><span class="what">Hide reviewed files<small>The files marked reviewed leave the page</small></span><i class="switch" aria-hidden="true"></i></button>
-    <button class="setting" id="hideclosed" aria-pressed="false"><span class="what">Hide resolved comments<small>The threads already resolved leave the page</small></span><i class="switch" aria-hidden="true"></i></button>
-    <div class="setting authors" id="authorsrow" hidden><span class="what">Comments by<small>The threads opened by an author left unpicked leave the page and the comment steps</small><span class="chips" id="authors"></span></span></div>
-    <div class="setting authors"><span class="what">Pull request<small>The threads kept by where they stand: sent to the pull request, or still only on this desk</small><span class="chips" id="sentfilter"><button class="chip" type="button" data-sent="all" aria-pressed="true">All</button><button class="chip" type="button" data-sent="sent" aria-pressed="false">Sent</button><button class="chip" type="button" data-sent="local" aria-pressed="false">Local</button></span></span></div>
-    <button class="setting" id="reactnow" aria-pressed="true"><span class="what">Sync reactions automatically<small>A reaction given or taken back on a comment already on the pull request goes there at the press. Off, it waits for the thread's next send, as a reply does</small></span><i class="switch" aria-hidden="true"></i></button>
-    <button class="setting" id="onlyunread" aria-pressed="false"><span class="what">Unread comments only<small>The threads already read leave the page and the comment steps. One read since this was switched on stays until it is switched off</small></span><i class="switch" aria-hidden="true"></i></button>
+    <section class="group"><h3>Diff</h3>
+      <button class="setting" id="ctx" aria-pressed="false"><span class="what">Changes only<small>Show only the added and removed lines</small></span><i class="switch" aria-hidden="true"></i></button>
+      <button class="setting" id="semantic" aria-pressed="false"><span class="what">Semantic view<small>Python files side by side, lined up by statement, moved code shown beside its old version</small></span><i class="switch" aria-hidden="true"></i></button>
+      <button class="setting sub" id="hidedeleted" aria-pressed="false" disabled><span class="what">Fold deleted code<small>Every block of deleted code behind a bar, to read what the branch keeps</small></span><i class="switch" aria-hidden="true"></i></button>
+      <button class="setting" id="hidedone" aria-pressed="false"><span class="what">Hide reviewed files<small>The files marked reviewed leave the page</small></span><i class="switch" aria-hidden="true"></i></button>
+    </section>
+    <section class="group"><h3>Comments</h3>
+      <button class="setting" id="hideclosed" aria-pressed="false"><span class="what">Hide resolved comments<small>The threads already resolved leave the page</small></span><i class="switch" aria-hidden="true"></i></button>
+      <button class="setting" id="onlyunread" aria-pressed="false"><span class="what">Unread comments only<small>The threads already read leave the page and the comment steps. One read since this was switched on stays until it is switched off</small></span><i class="switch" aria-hidden="true"></i></button>
+      <div class="setting authors" id="authorsrow" hidden><span class="what">Comments by<small>The threads opened by an author left unpicked leave the page and the comment steps</small><span class="chips" id="authors"></span></span></div>
+      <div class="setting authors"><span class="what">Sent to the pull request<small>The threads kept by where they stand: sent to the pull request, or still only on this desk</small><span class="chips" id="sentfilter"><button class="chip" type="button" data-sent="all" aria-pressed="true">All</button><button class="chip" type="button" data-sent="sent" aria-pressed="false">Sent</button><button class="chip" type="button" data-sent="local" aria-pressed="false">Local</button></span></span></div>
+    </section>
+    <section class="group"><h3>GitHub</h3>
+      <button class="setting" id="reactnow" aria-pressed="true"><span class="what">Sync reactions automatically<small>A reaction given or taken back on a comment already on the pull request goes there at the press. Off, it waits for the thread's next send, as a reply does</small></span><i class="switch" aria-hidden="true"></i></button>
+    </section>
   </div>
+  <div id="settingtip" role="tooltip" data-on="false"></div>
 </div>
 
 <div class="source" id="source" data-open="false">
@@ -1365,7 +1397,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "find", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
+  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "find", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -6091,6 +6123,23 @@
     els.settings.style.left = `${Math.max(8, Math.min(box.left, window.innerWidth - els.settings.firstElementChild.offsetWidth - 8))}px`;
   }
   els.settingsopen.addEventListener("click", () => openSettings(els.settings.dataset.open !== "true"));
+  // Says what the setting of a row does, beside the panel on whichever side has room for it, or nothing without a row.
+  function tellSetting(row) {
+    const tip = els.settingtip;
+    tip.dataset.on = String(Boolean(row));
+    if (!row) return;
+    tip.textContent = row.querySelector("small").textContent;
+    const panel = els.settings.getBoundingClientRect();
+    const box = row.getBoundingClientRect();
+    tip.style.left = `${panel.left >= tip.offsetWidth + 24 ? -tip.offsetWidth - 18 : panel.width + 18}px`;
+    tip.style.top = `${box.top - panel.top + box.height / 2}px`;
+  }
+  els.settings.addEventListener("pointerover", (event) => tellSetting(event.target.closest(".setting")));
+  els.settings.addEventListener("pointerleave", () => tellSetting(null));
+  els.settings.addEventListener("focusin", (event) => {
+    if (event.target.matches(":focus-visible")) tellSetting(event.target.closest(".setting"));
+  });
+  els.settings.addEventListener("focusout", () => tellSetting(null));
   document.addEventListener("pointerdown", (event) => {
     if (els.settings.dataset.open === "true" && !els.settings.contains(event.target) && !els.settingsopen.contains(event.target)) {
       openSettings(false);

@@ -1287,6 +1287,52 @@ def test_a_file_pressed_in_the_list_is_taken_through_a_redraw_of_it(page):
     assert page.evaluate(NEAREST) == wanted
 
 
+def test_the_settings_are_grouped_and_each_says_what_it_does_when_pointed_at(page):
+    page.locator("#settingsopen").click()
+    page.wait_for_selector("#settings[data-open='true']")
+    groups = page.locator("#settings .group")
+    assert groups.locator("h3").all_text_contents() == ["Diff", "Comments", "GitHub"]
+    held = groups.evaluate_all(
+        "(all) => all.map((group) => [...group.querySelectorAll('.setting[id]')].map((row) => row.id))"
+    )
+    assert held == [
+        ["ctx", "semantic", "hidedeleted", "hidedone"],
+        ["hideclosed", "onlyunread", "authorsrow"],
+        ["reactnow"],
+    ]
+
+    # The panel lists names alone: what a setting does is said beside it once its row is pointed at, in sight, clear of
+    # every control the panel holds and inside the window.
+    tip = page.locator("#settingtip")
+    shown = "() => getComputedStyle(document.getElementById('settingtip')).opacity === '1'"
+    assert not page.evaluate(shown)
+    page.locator("#ctx").hover()
+    page.wait_for_function(shown)
+    assert "added and removed lines" in tip.inner_text()
+    seen = """(tip) => {
+      const box = tip.getBoundingClientRect();
+      tip.style.pointerEvents = 'auto';
+      const at = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      tip.style.pointerEvents = '';
+      return at === tip;
+    }"""
+    assert tip.evaluate(seen)
+    told = tip.bounding_box()
+    panel = page.locator("#settings .body").bounding_box()
+    assert told["x"] + told["width"] <= panel["x"] or told["x"] >= panel["x"] + panel["width"]
+    assert told["x"] >= 0 and told["x"] + told["width"] <= page.viewport_size["width"]
+
+    # It follows the row pointed at, level with it, and goes once the panel is left.
+    page.locator("#reactnow").hover()
+    page.wait_for_function("() => document.getElementById('settingtip').textContent.includes('reaction')")
+    row = page.locator("#reactnow").bounding_box()
+    told = tip.bounding_box()
+    assert abs((told["y"] + told["height"] / 2) - (row["y"] + row["height"] / 2)) < 2
+    page.mouse.move(0, page.viewport_size["height"] - 1)
+    page.wait_for_function(f"() => !({shown})()")
+    page.locator("#settingsopen").click()
+
+
 def test_comments_are_filtered_by_their_author_and_stepped_through(page, desk):
     ours = desk.post(
         "/comments",
