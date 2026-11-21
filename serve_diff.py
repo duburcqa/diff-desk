@@ -852,6 +852,38 @@ class Reconciled(NamedTuple):
     given: tuple | None
 
 
+def deleted_there(node):
+    """Whether GitHub says the comment it knows under this node id no longer exists.
+
+    Asked of the comment itself rather than read off a listing it is missing from: any answer but GitHub saying so,
+    an empty or unreadable one included, leaves the comment where it stands.
+    """
+    document = "query($id: ID!) { node(id: $id) { id } }"
+    done = gen_diff_data.gh("api", "graphql", "-f", f"query={document}", "-f", f"id={node}", repeatable=True)
+    try:
+        answer = json.loads(done.stdout)
+    except json.JSONDecodeError:
+        return False
+    if any(error.get("type") == "NOT_FOUND" for error in answer.get("errors") or []):
+        return True
+    return not answer.get("errors") and "node" in (answer.get("data") or {}) and answer["data"]["node"] is None
+
+
+def local_again(row):
+    """Make a thread the pull request no longer holds this desk's alone again: local only, with its replies.
+
+    Linked to nothing there any more, and resolved, if at all, here alone.
+    """
+    row["github"], row["prResolve"] = "none", "none"
+    for key in ("reviewUrl", "prThread", "prNode", "prComment", "prResolveError", "error"):
+        row.pop(key, None)
+    for answer in row.get("replies") or []:
+        if answer.get("github") == "posted":
+            answer["github"] = "none"
+            answer.pop("prComment", None)
+            answer.pop("prNode", None)
+
+
 def heard_from(row, thread):
     """What one comment learns from its thread: which of its replies are on it, what it holds that this desk has not,
     and whether it is resolved there.
@@ -2030,8 +2062,9 @@ class Handler(BaseHTTPRequestHandler):
         """Bring this desk and the pull request to the same state.
 
         A sync only listens: replies come back, a thread resolved there is closed here since the pull request is the
-        copy everyone else reads, and threads written there arrive as comments of their own. What this desk holds goes
-        out when the reader sends that thread, never as a consequence of a sync. Threads are matched by `thread_of`.
+        copy everyone else reads, threads written there arrive as comments of their own, and a thread deleted there is
+        this desk's alone again, local only with its replies. What this desk holds goes out when the reader sends that
+        thread, never as a consequence of a sync. Threads are matched by `thread_of`.
         """
         order = self._body()
         reviewed, trouble = review_threads(order["repo"], order["pr"])
@@ -2058,12 +2091,24 @@ class Handler(BaseHTTPRequestHandler):
             and thread["comments"]["nodes"][0]["body"] not in known
         ]
         threads = {seq: thread_of(reviewed.threads, row) for seq, row in posted.items()}
-        brought, closed = 0, 0
+        # A thread missing from those read is asked about by the remark that opened it, and made local again only on
+        # GitHub's word that the remark is gone (see `deleted_there`). Asked before the log is held, as GitHub is.
+        deleted = {
+            seq
+            for seq, row in posted.items()
+            if threads[seq] is None and row.get("prNode") and deleted_there(row["prNode"])
+        }
+        brought, closed, gone = 0, 0, 0
         with changing() as fresh:
             for row in fresh:
                 if row["seq"] not in posted:
                     continue
                 thread = threads[row["seq"]]
+                if row["seq"] in deleted:
+                    local_again(row)
+                    touched(fresh, row, "you")
+                    gone += 1
+                    continue
                 if thread is not None:
                     heard_again(row, thread)
                 step = heard_from(row, thread)
@@ -2085,12 +2130,15 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         row.pop("prResolveError", None)
             taken = take_in(fresh, arriving, order, reviewed.ref)
-        told = f"brought {brought} reply(ies) back, took {len(taken)} comment(s) in, closed {closed} here"
+        told = (
+            f"brought {brought} reply(ies) back, took {len(taken)} comment(s) in, closed {closed} here, "
+            f"{gone} deleted there"
+        )
         print(f"SYNC {told}", flush=True)
         for note in taken:
             where = "the file" if note["side"] == "file" else f"L{note['endLine']}"
             print(f"  FROM THE PULL REQUEST [{note['seq']}] {note['who']} on {note['path']} {where}", flush=True)
-        self._json({"ok": True, "brought": brought, "took": len(taken), "closed": closed})
+        self._json({"ok": True, "brought": brought, "took": len(taken), "closed": closed, "gone": gone})
 
     def log_message(self, *args):
         pass

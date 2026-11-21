@@ -2127,7 +2127,7 @@ def test_syncing_takes_in_the_comments_written_on_the_pull_request(desk):
     assert len([row for row in desk.get("/comments") if row["text"] == "could we document this?"]) == 1
 
 
-def test_a_sync_follows_what_is_edited_and_held_back_on_the_pull_request(desk):
+def test_a_sync_follows_what_is_edited_held_back_and_deleted_on_the_pull_request(desk):
     thread = {
         "id": "T_edited",
         "isResolved": False,
@@ -2139,7 +2139,13 @@ def test_a_sync_follows_what_is_edited_and_held_back_on_the_pull_request(desk):
         "diffSide": "RIGHT",
         "comments": {
             "nodes": [
-                {"databaseId": 1101, "body": "a bot's report", "path": "sample.py", "author": {"login": "some-bot"}},
+                {
+                    "id": "PRRC_report",
+                    "databaseId": 1101,
+                    "body": "a bot's report",
+                    "path": "sample.py",
+                    "author": {"login": "some-bot"},
+                },
                 {"databaseId": 1102, "body": "agreed", "path": "sample.py", "author": {"login": "someone-else"}},
             ]
         },
@@ -2183,6 +2189,27 @@ def test_a_sync_follows_what_is_edited_and_held_back_on_the_pull_request(desk):
     assert desk.post("/sync", {"repo": "someone/somewhere", "pr": 15})["brought"] == 0
     row = {row["seq"]: row for row in desk.get("/comments")}[seq]
     assert [(reply["github"], reply.get("error")) for reply in row["replies"]] == [("posted", None), ("posted", None)]
+
+    # Missing from what the pull request answers, it is asked about by itself, and stays as it is on any answer but
+    # GitHub saying it is gone.
+    threads["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"] = []
+    desk.github_answers(rules=[{"match": "reviewThreads", "out": json.dumps(threads)}])
+    assert desk.post("/sync", {"repo": "someone/somewhere", "pr": 15})["gone"] == 0
+    assert {row["seq"]: row for row in desk.get("/comments")}[seq]["github"] == "posted"
+
+    # Deleted there, the thread is this desk's alone again: local only, its replies with it, and linked to nothing.
+    gone = {"data": {"node": None}, "errors": [{"type": "NOT_FOUND", "message": "Could not resolve to a node"}]}
+    desk.github_answers(
+        rules=[
+            {"match": "reviewThreads", "out": json.dumps(threads)},
+            {"match": "PRRC_report", "code": 1, "out": json.dumps(gone)},
+        ]
+    )
+    assert desk.post("/sync", {"repo": "someone/somewhere", "pr": 15})["gone"] == 1
+    row = {row["seq"]: row for row in desk.get("/comments")}[seq]
+    assert (row["github"], row.get("reviewUrl"), row.get("prThread")) == ("none", None, None)
+    assert [reply["github"] for reply in row["replies"]] == ["none", "none"]
+    assert [reply["text"] for reply in row["replies"]] == ["agreed, twice", "fixed now"]
 
 
 def test_a_whisper_stays_on_the_desk_whatever_the_thread_sends(desk):
