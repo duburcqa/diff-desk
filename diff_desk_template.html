@@ -3997,8 +3997,10 @@
     }
     // The keyboard goes back where it was, or to the one box left when the press that redrew took it away with the
     // button pressed: Escape and Cmd/Ctrl + Enter are aimed at a box, and a page that holds one should hear them.
+    // Where the keyboard stands outside what was redrawn, in the bar or the find bar, it is left there.
     const held = boxes.map(({ box }) => box).filter((box) => box.isConnected);
-    const field = held.find((box) => box.contains(focused)) || (held.length === 1 ? held[0] : null);
+    const lost = !focused || focused === document.body || !focused.isConnected;
+    const field = held.find((box) => box.contains(focused)) || (lost && held.length === 1 ? held[0] : null);
     if (field) field.querySelector("textarea").focus({ preventScroll: true });
   }
 
@@ -4534,19 +4536,30 @@
   // Paints every hit among the rows a card has built, and nothing once the find bar is closed. Called whenever the
   // rows of a card are built or let go of, since the ranges over the old ones paint nothing.
   function markFile(card) {
-    if (!canMark) return;
     const path = card.dataset.path;
-    for (const range of marked.get(path) || []) foundMarks.delete(range);
-    marked.delete(path);
     const pattern = wanted();
-    if (els.find.hidden || !pattern) return;
-    const ranges = [];
-    for (const hit of finding.byPath.get(path) || []) {
-      const row = hitRow(card, hit);
-      if (row) ranges.push(...wordRanges(row, pattern, hit.side));
+    const finds = !els.find.hidden && Boolean(pattern);
+    if (canMark) {
+      for (const range of marked.get(path) || []) foundMarks.delete(range);
+      marked.delete(path);
+      if (finds) {
+        const ranges = [];
+        for (const hit of finding.byPath.get(path) || []) {
+          const row = hitRow(card, hit);
+          if (row) ranges.push(...wordRanges(row, pattern, hit.side));
+        }
+        for (const range of ranges) foundMarks.add(range);
+        marked.set(path, ranges);
+      }
     }
-    for (const range of ranges) foundMarks.add(range);
-    marked.set(path, ranges);
+    // The hit the reader stands on is marked again on the rows built anew, as a redraw for news builds them.
+    const hit = finds ? finding.hits[finding.at] : null;
+    const row = hit && hit.path === path ? hitRow(card, hit) : null;
+    if (!row || row.classList.contains("hit")) return;
+    row.classList.add("hit");
+    if (!canMark) return;
+    hitMarks.clear();
+    for (const range of wordRanges(row, pattern, hit.side)) hitMarks.add(range);
   }
 
   function markAll() {
@@ -4585,8 +4598,11 @@
     if (!row) return;
     if (row.hidden) openFold(row.closest("tbody"), row.dataset.fold);
     if (row.dataset.deleted) showDeleted(row.closest("tbody"), row.dataset.deleted);
-    row.classList.add("hit");
-    if (canMark) for (const range of wordRanges(row, pattern, hit.side)) hitMarks.add(range);
+    // Marked already where building its rows above marked it.
+    if (!row.classList.contains("hit")) {
+      row.classList.add("hit");
+      if (canMark) for (const range of wordRanges(row, pattern, hit.side)) hitMarks.add(range);
+    }
     // The view moves only for a line out of sight: hits already on screen stay where the reader is following them.
     const box = row.getBoundingClientRect();
     if (box.top < viewTop() || box.bottom > window.innerHeight) row.scrollIntoView({ block: "center" });
@@ -6199,14 +6215,29 @@
   // What the comments said when the page last drew them for a round, so a round that hears nothing new draws nothing.
   let drawnFor = null;
 
+  // Whether the page can be drawn again without taking the keyboard from the reader. A redraw builds every thread and
+  // the panel anew: the boxes it lifts and hangs back keep the keyboard, a reply typed in a thread keeps its words but
+  // loses it, and the fields of the bar and the find bar stand outside what is redrawn.
+  function quiet() {
+    const typing = document.activeElement;
+    if (!typing || !typing.matches("textarea")) return true;
+    return els.main.contains(typing) && Boolean(typing.closest("tr[data-composer], .filenote.writing, .line.actions.aside"));
+  }
+
+  // What the comments say, as far as drawing them goes. Reactions are news too, though they move no event: a sync brings
+  // them back without anybody saying anything.
+  function newsOf() {
+    const reacted = (note) =>
+      [note, ...(note.replies || [])].map((item) => JSON.stringify([item.reactions, item.reactOwed])).join("");
+    return notes.sent.map((note) => `${note.seq}:${note.event || 0}:${note.state}:${reacted(note)}`).join(",");
+  }
+
   function drawNews() {
     // Redrawn for news alone. Rebuilding every card each round replaces the node under a press, so a click that
     // straddles the round lands on nothing, and a review of any size is rebuilt for no reason.
-    // Reactions are news too, though they move no event: a sync brings them back without anybody saying anything.
-    const reacted = (note) =>
-      [note, ...(note.replies || [])].map((item) => JSON.stringify([item.reactions, item.reactOwed])).join("");
-    const said = notes.sent.map((note) => `${note.seq}:${note.event || 0}:${note.state}:${reacted(note)}`).join(",");
-    if (said === drawnFor) return;
+    const said = newsOf();
+    // News heard while a reply is being typed is left unmarked as drawn, so the first round after it is drawn there.
+    if (said === drawnFor || !quiet()) return;
     drawnFor = said;
     drawLog();
     render();
@@ -6218,15 +6249,14 @@
     // would have opened the comment box is delivered to a node that is no longer in the page.
     if (drag.on || leaving) return;
     await watchBranch();
-    // Every box a comment is written in, whichever it is: a redraw rebuilds the card and takes the box with it. A desk
-    // that stopped answering is asked again each round, so one that comes back is noticed.
-    if (document.querySelector("tr[data-composer], .filenote.writing") || notes.drafts.length) return;
-    // A box being typed into is rebuilt by a redraw, which takes the focus with it even when the words are kept.
-    if (document.activeElement && document.activeElement.matches("textarea, input:not([type=checkbox])")) return;
+    // Read every round, whatever the reader is doing: a box open, comments pending in the tray or the keyboard in a
+    // field holding the comments back left a reply unseen for as long as the reader kept writing. A desk that stopped
+    // answering is asked again each round, so one that comes back is noticed.
     await loadNotes();
     drawNews();
-    // A post that could not be made is retried on its own, as long as the browser believes it is connected.
-    if (navigator.onLine) {
+    // A post that could not be made is retried on its own, as long as the browser believes it is connected. Whatever
+    // it lands is drawn at once, so it waits for the same quiet the news does.
+    if (navigator.onLine && quiet()) {
       await retryFailed();
       await syncThere(false);
     }
@@ -6268,6 +6298,8 @@
   loadNotes().then(() => {
     drawLog();
     render();
+    // Drawn with what was heard, so the first round redraws only for what it hears after.
+    drawnFor = newsOf();
     // Opened on a comment, the page goes to it: the comments are only known once they have been read.
     if (/^#\d+$/.test(window.location.hash)) goTo(window.location.hash);
   });

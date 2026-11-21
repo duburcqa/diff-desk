@@ -3243,6 +3243,35 @@ def test_a_reply_being_written_survives_the_page_redrawing_itself(page, desk):
     assert not page.evaluate(standing)
     assert "said from elsewhere meanwhile" in thread.inner_text()
 
+    # A reviewer mid-review: a remark open in a box, another pending in the tray, and the keyboard in the find bar. None
+    # of it is drawn again by the round, so none of it holds back the reply it hears.
+    aim(page, "pending in the tray")
+    page.locator("tr[data-composer='true'] .solid:not(.direct)").click()
+    page.wait_for_function("() => notes.drafts.length === 1")
+    aim(page, "still being written")
+    page.keyboard.press("ControlOrMeta+f")
+    page.locator("#fq").fill("def")
+    try:
+        desk.post("/reply", {"seq": made, "text": "heard mid-review", "who": "session"})
+        page.evaluate("() => tick()")
+        assert "heard mid-review" in thread.inner_text()
+        assert page.locator("tr[data-composer='true'] textarea").input_value() == "still being written"
+        assert page.evaluate("() => document.activeElement.id") == "fq"
+
+        # A reply typed in a thread is built anew by a redraw, which would take the keyboard from it: what is heard
+        # meanwhile is drawn by the first round after the keyboard has left it.
+        page.locator(f"#note-{made} .line.actions:not(.aside) textarea").first.focus()
+        desk.post("/reply", {"seq": made, "text": "heard while typing", "who": "session"})
+        page.evaluate("() => tick()")
+        assert "heard while typing" not in thread.inner_text()
+        page.evaluate("() => document.activeElement.blur()")
+        page.evaluate("() => tick()")
+        assert "heard while typing" in thread.inner_text()
+    finally:
+        page.evaluate("() => closeFind()")
+        page.locator("tr[data-composer='true'] button.ghost", has_text="Cancel").first.click()
+        page.locator("#traydrop").click()
+
 
 def test_a_box_takes_the_height_of_what_is_written_into_it(page, desk):
     card = sample(page)
