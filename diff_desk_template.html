@@ -1024,6 +1024,12 @@
   .tray li .goes { flex: 1; display: flex; align-items: baseline; gap: 6px; overflow: hidden; cursor: pointer; }
   .tray li .goes:hover b, .tray li .goes:hover .said { color: var(--accent); }
   .tray .actions { display: flex; gap: 8px; }
+  /* Words written into a box the reader has scrolled away from, listed so they can be gone back to. With no review
+     pending, they are all the tray holds. */
+  .tray[data-pending="false"] > :not(#unsent) { display: none; }
+  #unsent { display: flex; flex-direction: column; gap: 8px; }
+  #unsent[hidden] { display: none; }
+  .tray[data-pending="true"] #unsent:not([hidden]) { padding-bottom: 8px; border-bottom: 1px solid var(--rule); }
 
   /* The choices of how the diff is shown, one switch each, a choice that only applies under another set beneath it. */
   #settingsopen { display: grid; place-items: center; width: 30px; height: 28px; padding: 0; color: var(--muted); }
@@ -1282,7 +1288,11 @@
   </div>
 </div>
 
-<div class="tray" id="tray" data-open="false">
+<div class="tray" id="tray" data-open="false" data-pending="false">
+  <div id="unsent" hidden>
+    <div class="head"><strong id="unsentcount"></strong><span class="status">written out of sight, not sent yet</span></div>
+    <ol id="unsentlist"></ol>
+  </div>
   <div class="head"><strong id="traycount"></strong><span class="status">not sent yet</span></div>
   <ol id="traylist"></ol>
   <textarea id="traynote" placeholder="Overall note (optional)"></textarea>
@@ -1355,7 +1365,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "find", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
+  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "find", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -2618,7 +2628,7 @@
     const request = branch().pr;
     els.tograb.hidden = !(request && notes.live);
     els.ghlabel.textContent = request ? `Also post to PR #${request.number}` : "";
-    els.tray.dataset.open = String(notes.drafts.length > 0);
+    els.tray.dataset.pending = String(notes.drafts.length > 0);
     els.traycount.textContent = `${notes.drafts.length} comment${notes.drafts.length === 1 ? "" : "s"} pending`;
     els.traylist.innerHTML = "";
     for (const draft of notes.drafts) {
@@ -2647,6 +2657,95 @@
       item.append(goes, alone);
       els.traylist.append(item);
     }
+    drawUnsent();
+  }
+
+  // What the list of words written out of sight was last drawn from, so a scroll that changes nothing draws nothing.
+  let unsentFor = null;
+
+  // Lists every box holding words not sent yet that stands out of sight - a remark, a whisper, or a reply typed into a
+  // thread - so that scrolling away from one never loses it. A reply is kept by its thread even when the lines it
+  // hangs among are let go of, so it is listed from what is kept rather than from the page.
+  function drawUnsent() {
+    const covered = document.querySelector("header").getBoundingClientRect().bottom;
+    const away = (field) => {
+      const box = field ? field.getBoundingClientRect() : null;
+      return !box || !box.height || box.bottom <= covered || box.top >= window.innerHeight;
+    };
+    const items = [];
+    for (const box of els.main.querySelectorAll("tr[data-composer], .filenote.writing, .line.actions.aside")) {
+      const field = box.querySelector("textarea");
+      if (!field.value.trim() || !away(field)) continue;
+      const path = box.closest("section.file").dataset.path;
+      let where = "the file";
+      if (box.matches(".aside")) {
+        const thread = box.closest(".filenote[data-seq], .noterow");
+        where = `[${thread.dataset.seq || thread.id.slice("note-".length)}] whisper`;
+      } else if (box.matches("tr")) {
+        let under = box.previousElementSibling;
+        while (under && !under.dataset.line) under = under.previousElementSibling;
+        if (under) where = `L${under.dataset.line}`;
+      }
+      items.push({ path, where, text: field.value, field });
+    }
+    for (const [seq, text] of writing) {
+      const note = notes.sent.find((row) => row.seq === seq);
+      if (!note || !text.trim()) continue;
+      const field = document.querySelector(
+        `#note-${seq} .line.actions:not(.aside) textarea, .filenote[data-seq="${seq}"] .line.actions:not(.aside) textarea`
+      );
+      if (away(field)) items.push({ path: note.path, where: `[${seq}] reply`, text, note });
+    }
+    const said = items.map((item) => `${item.path}|${item.where}|${item.text}`).join("\n");
+    if (said !== unsentFor) {
+      unsentFor = said;
+      els.unsentcount.textContent = `${items.length} comment${items.length === 1 ? "" : "s"} being written`;
+      els.unsentlist.replaceChildren(
+        ...items.map((item) => {
+          const row = document.createElement("li");
+          const goes = document.createElement("div");
+          goes.className = "goes";
+          goes.title = "Go back to where this is being written";
+          const where = document.createElement("b");
+          where.textContent = `${item.path.split("/").pop()} ${item.where}`;
+          const words = document.createElement("span");
+          words.className = "said";
+          words.textContent = ` ${outline(item.text).slice(0, 110)}`;
+          goes.append(where, words);
+          goes.addEventListener("click", () => {
+            if (item.note) reach(item.note);
+            else item.field.scrollIntoView({ block: "center" });
+            // Found again rather than held: reaching a thread may build it anew.
+            const field = item.field && item.field.isConnected ? item.field : document.querySelector(
+              `#note-${item.note.seq} .line.actions:not(.aside) textarea, .filenote[data-seq="${item.note.seq}"] .line.actions:not(.aside) textarea`
+            );
+            if (field) field.focus({ preventScroll: true });
+            drawUnsent();
+          });
+          row.append(goes);
+          return row;
+        })
+      );
+    }
+    els.unsent.hidden = !items.length;
+    els.tray.dataset.open = String(notes.drafts.length > 0 || items.length > 0);
+  }
+
+  // Looked at again whenever what is in sight, or what is written, may have changed: once a frame at most.
+  let unsentSoon = false;
+  for (const [target, kind] of [[window, "scroll"], [window, "resize"], [document, "input"], [document, "click"], [document, "keyup"]]) {
+    target.addEventListener(
+      kind,
+      () => {
+        if (unsentSoon) return;
+        unsentSoon = true;
+        requestAnimationFrame(() => {
+          unsentSoon = false;
+          drawUnsent();
+        });
+      },
+      { passive: true }
+    );
   }
 
   async function sendAll(drafts, summary, files) {
@@ -5472,7 +5571,7 @@
     // the place themselves; scrolling for it by hand walks the page a line at a time as each settle nudges the next.
     // A card is never let go of while something is being written in it: its lines are what the box hangs among, so
     // letting them go takes the words with them, however far the reader has scrolled from where they wrote them.
-    const writing = wrap.querySelector("tr[data-composer], .filenote.writing");
+    const writing = wrap.querySelector("tr[data-composer], .filenote.writing, .line.actions.aside");
     const wanted = nearReader(wrap) || (reaching !== null && wrap.dataset.path === reaching.path) || writing !== null;
     if (wrap.dataset.open === "true" && wanted) fillBody(wrap, held.file, held.index);
     else releaseBody(wrap);
