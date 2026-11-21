@@ -10,35 +10,58 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  # The suite builds its own repository, so git needs an identity to commit with.
+  GIT_AUTHOR_NAME: desk
+  GIT_AUTHOR_EMAIL: desk@example.com
+  GIT_COMMITTER_NAME: desk
+  GIT_COMMITTER_EMAIL: desk@example.com
+
 jobs:
-  tests:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Install
-        run: |
-          python -m pip install --upgrade pip
-          # Pinned: a newer ruff changes both the rules in force and the formatting it expects.
-          pip install pytest playwright "ruff==0.15.7"
-
-      - name: Install browser engines
-        run: playwright install --with-deps chromium firefox webkit
-
-      - name: Lint
-        run: |
+      # Pinned: a newer ruff changes both the rules in force and the formatting it expects.
+      - run: pip install "ruff==0.15.7"
+      - run: |
           ruff check .
           ruff format --diff .
 
-      - name: Test
-        run: python -m pytest -p no:randomly
-        env:
-          # The suite builds its own repository, so git needs an identity to commit with.
-          GIT_AUTHOR_NAME: desk
-          GIT_AUTHOR_EMAIL: desk@example.com
-          GIT_COMMITTER_NAME: desk
-          GIT_COMMITTER_EMAIL: desk@example.com
+  # Everything but the page, which needs no browser.
+  desk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest playwright
+      - run: python -m pytest -p no:randomly --ignore=tests/test_page.py
+
+  # The page, one engine per runner: each installs and drives its own browser alone, so the three run side by side.
+  page:
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [chromium, webkit, firefox]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest playwright
+      - run: playwright install --with-deps ${{ matrix.engine }}
+      - run: python -m pytest -p no:randomly tests/test_page.py -k ${{ matrix.engine }}
+
+  # The one check the branch rules ask for, standing for all of the above.
+  tests:
+    if: always()
+    needs: [lint, desk, page]
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}" = false
