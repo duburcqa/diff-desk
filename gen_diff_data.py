@@ -41,8 +41,15 @@ def write_whole(path, content):
 
 
 def run(root, *args):
-    """Ask git something. A command that fails answers with nothing, which every caller reads as absence."""
-    return subprocess.run(["git", *args], capture_output=True, text=True, cwd=root, check=False).stdout
+    """Ask git something. A command that fails answers with nothing, which every caller reads as absence.
+
+    A checkout removed from under a desk still serving it fails too: git is never started in a directory that is gone,
+    and a desk asked about it in the background, as when GitHub answers, has nobody to raise to.
+    """
+    try:
+        return subprocess.run(["git", *args], capture_output=True, text=True, cwd=root, check=False).stdout
+    except (FileNotFoundError, NotADirectoryError):
+        return ""
 
 
 # What gh says when the call never left this machine: nothing resolved, nothing connected, no handshake made. GitHub

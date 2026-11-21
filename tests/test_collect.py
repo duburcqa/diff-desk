@@ -1,5 +1,6 @@
 """What the collector makes of a range: the rows, the numbers they carry, and what a page is handed."""
 
+import shutil
 import sys
 import time
 
@@ -206,10 +207,17 @@ def test_a_branch_is_linked_to_the_pull_request_opened_from_where_it_is_pushed(r
         gen_diff_data.run(repo, "remote", "remove", "upstream")
 
 
-def test_a_repository_without_a_remote_claims_no_upstream(repo, payload):
+def test_a_repository_without_a_remote_claims_no_upstream(repo, payload, tmp_path):
     assert gen_diff_data.canonical_repo(str(repo)) == ""
     assert payload["upstream"] == ""
     assert payload["branches"][0]["pr"] is None
+    # Nor does one removed from under the desk serving it, which decorates its payload again when GitHub answers.
+    gone = tmp_path / "gone"
+    shutil.copytree(repo, gone)
+    served = gen_diff_data.collect(str(gone), "main", ["feature"])
+    shutil.rmtree(gone)
+    gen_diff_data.decorate(served)
+    assert served["upstream"] == ""
 
 
 def test_the_range_is_described_for_the_page(repo, payload):
