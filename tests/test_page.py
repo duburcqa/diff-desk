@@ -1204,7 +1204,7 @@ def test_the_review_key_folds_file(page):
     page.wait_for_selector("section.file[data-done='false'][data-open='true']")
 
 
-def test_the_path_filter_lists_what_it_matches_for_picking_by_name(page):
+def test_the_path_box_lists_what_it_matches_for_picking_by_name(page):
     page.set_viewport_size({"width": 1200, "height": 600})
     page.locator("#q").click()
     page.wait_for_selector("#palette:not([hidden])")
@@ -1218,28 +1218,29 @@ def test_the_path_filter_lists_what_it_matches_for_picking_by_name(page):
     # The name stands on its own and the directory beside it, which is how a file is recognised in a list of many.
     assert listed.first.locator("b").inner_text() == paths[0].split("/")[-1]
 
-    # Typing narrows the list to what it matches, and the first match is the one waiting to be taken.
+    # Typing narrows the list to what it matches, and the first match is the one waiting to be taken. The diff behind
+    # it keeps every file: the list is what is being searched.
     page.locator("#pq").fill("deep")
-    # Read the moment the letters land: the diff behind the list is not rebuilt for a keystroke - a redraw is the most
-    # expensive thing the page does - and it follows once the typing has settled.
-    assert page.locator("section.file").count() == len(paths)
     page.wait_for_function("() => document.querySelectorAll('#picks .pick').length === 1")
     assert listed.first.get_attribute("data-on") == "true"
     assert "pkg/sub" in listed.first.locator(".where").inner_text()
-    page.wait_for_function("(whole) => document.querySelectorAll('section.file').length < whole", arg=len(paths))
+    assert page.locator("section.file").count() == len(paths)
 
-    # Taken with the keyboard: the list closes and the file it named is what the reader is brought to.
+    # Taken with the keyboard: the list closes and the file it named is what the reader is brought to, with every
+    # other file still around it.
     page.locator("#pq").press("Enter")
     page.wait_for_selector("#palette", state="hidden")
     reached(page, "pkg/sub/deep.py")
     assert page.evaluate(NEAREST) == "pkg/sub/deep.py"
+    assert page.locator("section.file").count() == len(paths)
 
-    # Reopened with the shortcut, stepped through with the arrows, and taken by a press on the row itself.
+    # Reopened with the shortcut, the name typed for the pick is gone: the list starts whole. Stepped through with the
+    # arrows, and taken by a press on the row itself.
     keys_reach(page)
     page.keyboard.press("/")
     page.wait_for_selector("#palette:not([hidden])")
-    page.locator("#pq").fill("")
-    page.wait_for_function("() => document.querySelectorAll('#picks .pick').length > 2")
+    assert page.locator("#pq").input_value() == ""
+    assert listed.count() == len(paths)
     page.locator("#pq").press("ArrowDown")
     assert listed.nth(1).get_attribute("data-on") == "true"
     page.locator("#pq").press("ArrowUp")
@@ -1250,26 +1251,23 @@ def test_the_path_filter_lists_what_it_matches_for_picking_by_name(page):
     reached(page, wanted)
     assert page.evaluate(NEAREST) == wanted
 
-    # Emptying the filter through the cross of the box asks for nothing else: the filter goes, and no panel opens
-    # behind it for the reader to dismiss.
+    # Escape closes the list and leaves the review as it was, and what was typed is offered again, selected, when it
+    # reopens. Closed, the keyboard is the page's again: a caret left in the box that has just gone swallows every
+    # shortcut, and the next '/' would be typed into something the reader cannot see.
     page.keyboard.press("/")
     page.wait_for_selector("#palette:not([hidden])")
     page.locator("#pq").fill("deep")
-    page.keyboard.press("Escape")
-    page.wait_for_selector("#palette", state="hidden")
-    assert page.locator("#q").input_value() == "deep"
-    page.locator("#qx").click()
-    page.wait_for_function("() => document.querySelector('#q').value === ''")
-    assert page.locator("#palette").get_attribute("hidden") is not None
-    assert page.evaluate("() => state.query") == ""
-
-    # Escape closes the list and leaves the review as it was.
-    keys_reach(page)
-    page.keyboard.press("/")
-    page.wait_for_selector("#palette:not([hidden])")
     page.locator("#pq").press("Escape")
     page.wait_for_selector("#palette", state="hidden")
+    assert page.evaluate("() => document.activeElement.id") != "pq"
     assert page.locator("section.file").count() == len(paths)
+    page.keyboard.press("/")
+    page.wait_for_selector("#palette:not([hidden])")
+    box = page.locator("#pq")
+    assert page.evaluate("() => document.activeElement.id") == "pq"
+    assert box.evaluate("(box) => box.value.slice(box.selectionStart, box.selectionEnd)") == "deep"
+    page.locator("#pq").press("Escape")
+    page.wait_for_selector("#palette", state="hidden")
 
 
 def test_a_file_pressed_in_the_list_is_taken_through_a_redraw_of_it(page):
@@ -2872,39 +2870,6 @@ def test_every_hit_is_marked_and_one_in_sight_keeps_the_view(page):
     page.wait_for_selector("#find", state="hidden")
 
 
-def test_the_progress_counts_the_files_the_filter_leaves(page):
-    total = page.evaluate("() => view().files.length")
-    assert f"/{total} reviewed" in page.locator("#ptext").inner_text().lower()
-
-    # Filtered down to one file, the header describes that file rather than a set the reader cannot reach, and says
-    # how many it is holding back.
-    page.keyboard.press("/")
-    page.wait_for_selector("#palette:not([hidden])")
-    page.locator("#pq").fill("sample.py")
-    page.keyboard.press("Escape")
-    page.wait_for_selector("#palette", state="hidden")
-    # Closed, the keyboard is the page's again: a caret left in the box that has just gone swallows every shortcut,
-    # and the next '/' would be typed into something the reader cannot see rather than opening the picker.
-    assert page.evaluate("() => document.activeElement.id") != "pq"
-    page.wait_for_function("() => document.querySelectorAll('#filelist .fileitem').length === 1")
-    assert "0/1 reviewed" in page.locator("#ptext").inner_text().lower()
-    assert f"{total - 1} more the filter is holding back" in page.locator("#ptext").get_attribute("title")
-
-    page.keyboard.press("/")
-    page.wait_for_selector("#palette:not([hidden])")
-    page.locator("#pq").fill("nothing matches this")
-    page.keyboard.press("Escape")
-    page.wait_for_selector("#palette", state="hidden")
-    page.wait_for_function("() => document.querySelectorAll('section.file').length === 0")
-    assert "0/0 reviewed" in page.locator("#ptext").inner_text().lower()
-
-    # Cleared the way a reader clears it, by the cross the box carries.
-    page.locator("#qx").click()
-    page.wait_for_function("() => document.querySelector('#q').value === ''")
-    assert f"/{total} reviewed" in page.locator("#ptext").inner_text().lower()
-    assert "holding back" not in page.locator("#ptext").get_attribute("title")
-
-
 def test_a_box_that_grows_to_fit_shows_no_bar_to_drag(page, desk):
     line = sample(page).locator("tr.a[data-line]").first
     line.locator("td.code").first.hover()
@@ -4126,38 +4091,6 @@ def test_a_reply_pressed_twice_while_it_is_out_is_said_once(page, desk):
         "said once under a slow server",
         "said once by two callers",
     ]
-
-
-def test_a_thread_is_reached_from_the_panel_even_when_its_file_is_filtered_away(page, desk):
-    branch = page.evaluate("() => data.branches[0].ref")
-    saying = f"reached through a filter, number {len(desk.get('/comments')) + 1}"
-    made = desk.post(
-        "/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": saying}]
-    )["seq"]
-    page.reload(wait_until="load")
-    page.wait_for_selector(f"#note-{made}")
-
-    # A filter naming another file takes sample.py off the page, so nothing of the thread is on screen.
-    page.evaluate("() => { state.query = 'nothing-matches-this'; filtering.now(); }")
-    page.wait_for_function("() => document.querySelectorAll('section.file').length === 0")
-
-    page.locator("#logopen").click()
-    page.wait_for_selector("#log[data-open='true']")
-    page.locator("#log .logrow").filter(has_text=saying[:24]).first.click()
-
-    # Pressing it asks to be taken there, so the filter gives way and the thread is on screen where it was written.
-    page.wait_for_selector(f"#note-{made}")
-    assert page.evaluate("() => state.query") == ""
-    # The whole diff comes back at once when the filter goes, so where the thread ends up settles over a few frames.
-    page.wait_for_function(
-        f"""() => {{
-          const note = document.getElementById('note-{made}');
-          if (!note) return false;
-          const box = note.getBoundingClientRect();
-          const covered = document.querySelector('header').getBoundingClientRect().bottom;
-          return box.top >= covered - 2 && box.top < window.innerHeight;
-        }}"""
-    )
 
 
 def test_the_semantic_view_faces_both_versions_and_comments_on_the_line_shown(page, desk):

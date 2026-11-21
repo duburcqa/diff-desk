@@ -163,31 +163,15 @@
     padding: 6px 9px;
   }
   select { max-width: 44ch; }
-  /* The filter takes what the rest does not need, and gives it back first. */
+  /* The box takes what the rest does not need, and gives it back first. */
   .search { position: relative; display: flex; align-items: center; flex: 1 1 12ch; min-width: 8ch; margin-right: auto; }
   .search input { width: 100%; min-width: 0; padding-left: 26px; }
   .search svg { position: absolute; left: 8px; width: 13px; height: 13px; color: var(--faint); }
   .search input::-webkit-search-cancel-button { display: none; }
-  #qx {
-    position: absolute;
-    right: 6px;
-    padding: 0 4px;
-    border: 0;
-    background: none;
-    color: var(--faint);
-    font-size: 15px;
-    line-height: 1;
-    cursor: pointer;
-  }
-  #qx:hover { color: var(--ink); }
-  body.picking #qx { display: none; }
-  /* What the filter matches, listed under it for picking by name: a review of seventy files is steered by name sooner
-     than by scrolling. The list floats rather than the box growing, since a box that grew would move every control
-     beside it in the bar. */
+  /* The files whose path holds what is typed, listed for picking by name: a review of seventy files is steered by name
+     sooner than by scrolling. The list floats rather than the box growing, since a box that grew would move every
+     control beside it in the bar. */
   #veil { position: fixed; inset: 0; z-index: 44; background: rgb(0 0 0 / 30%); }
-  /* The bar stays under the veil: while the list is open, the box being typed in is the one inside the overlay, so the
-     one in the bar is dimmed with everything else it belongs to. */
-  body.picking #q { color: transparent; text-shadow: none; }
   #palette {
     position: fixed;
     z-index: 45;
@@ -1169,8 +1153,7 @@
   <input id="goto" type="text" inputmode="numeric" placeholder="#" aria-label="Go to comment by number" title="Go to a comment by its number - press # from anywhere" />
   <label class="search">
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2 14 14"/></svg>
-    <input id="q" type="search" placeholder="Filter paths" aria-label="Filter paths" />
-    <button id="qx" type="button" aria-label="Clear path filter" hidden>&#215;</button>
+    <input id="q" type="search" placeholder="Go to file" aria-label="Go to file" />
   </label>
   <button class="toggle" id="settingsopen" aria-pressed="false" title="How the diff is shown" aria-label="Settings">
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6"/><circle cx="10" cy="4.5" r="1.5"/><circle cx="6" cy="11.5" r="1.5"/></svg>
@@ -1245,9 +1228,9 @@
 <div id="palette" hidden>
   <label class="search">
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2 14 14"/></svg>
-    <input id="pq" type="search" placeholder="Filter paths" aria-label="Filter paths" />
+    <input id="pq" type="search" placeholder="Go to file" aria-label="Go to file" />
   </label>
-  <div id="picks" role="listbox" aria-label="Files matching the filter"></div>
+  <div id="picks" role="listbox" aria-label="Files whose path matches"></div>
 </div>
 <div id="find" hidden>
   <div class="search">
@@ -1337,7 +1320,7 @@
 <script>__HIGHLIGHT__</script>
 <script>
   let data = JSON.parse(document.getElementById("data").textContent);
-  const state = { branch: 0, scope: "all", query: "", current: 0, reached: null };
+  const state = { branch: 0, scope: "all", current: 0, reached: null };
   const notes = { sent: [], drafts: [], live: false };
   // A selection is a span of rendered rows, held as the row order within the file rather than as line numbers on one
   // side, which is what lets one range cover removed and added lines together.
@@ -1372,7 +1355,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "qx", "ctx", "settingsopen", "settings", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "find", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
+  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "goto", "veil", "palette", "pq", "picks", "find", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -2441,27 +2424,6 @@
         goes();
         return;
       }
-      // The file holding it is in the diff but filtered off the page. Pressing a thread asks to be taken to it, so the
-      // filter gives way rather than the press answering with nothing, which reads as broken. Going waits for the page
-      // to hold the file again: every other file comes back at the same moment, and aiming while that is still landing
-      // aims at where the thread was rather than where it ends up.
-      if (view().files.some((file) => file.path === note.path)) {
-        els.q.value = "";
-        els.pq.value = "";
-        state.query = "";
-        state.current = 0;
-        showClear();
-        filtering.now();
-        const settling = (tries) => {
-          if (carded()) {
-            goes();
-          } else if (tries) {
-            requestAnimationFrame(() => settling(tries - 1));
-          }
-        };
-        settling(20);
-        return;
-      }
       // A thread stands on a change: one written on a change since undone has nowhere to be gone to, and a row that
       // answers a press with nothing reads as broken. It opens here instead.
       unmoored = unmoored === note.seq ? null : note.seq;
@@ -2584,34 +2546,6 @@
     });
     shown.observe(box);
   }
-
-  function whenSettled(work, wait = 150) {
-    // Typing is a stream of keystrokes and a redraw is the most expensive thing this page does, so what is typed into a
-    // filter is answered once the reader stops rather than once per letter. Each letter drops the redraw the one before
-    // it asked for, so a word costs one, and the last letter is the one the page answers. `now` is for the presses that
-    // cannot wait for it: what a reader picks by name is looked for among the cards, and those have to be the ones the
-    // filter leaves.
-    let waiting = null;
-    const drop = () => {
-      if (waiting === null) return;
-      window.clearTimeout(waiting);
-      waiting = null;
-    };
-    const soon = () => {
-      drop();
-      waiting = window.setTimeout(() => {
-        waiting = null;
-        work();
-      }, wait);
-    };
-    soon.now = () => {
-      drop();
-      work();
-    };
-    return soon;
-  }
-
-  const filtering = whenSettled(render);
 
   function keepDrafts() {
     // Written wherever the tray changes: a comment waiting to be sent is work that has been done, and a reload, a
@@ -4332,12 +4266,6 @@
 
   const view = () => (state.scope === "all" ? { files: branch().files, commit: null } : { files: branch().commits[Number(state.scope)].files, commit: branch().commits[Number(state.scope)] });
 
-  function visible(files) {
-    const query = state.query.trim().toLowerCase();
-    const ordered = inTreeOrder(files);
-    return query ? ordered.filter((file) => file.path.toLowerCase().includes(query)) : ordered;
-  }
-
   // The files in the order the file list draws them, each folder's folders before its own files, so the diff reads
   // down in the order the list does. Kept per list of files, since every step and every redraw asks for it.
   const treeOrders = new WeakMap();
@@ -4364,7 +4292,8 @@
   let picked = 0;
 
   function drawPicks() {
-    const shown = visible(view().files);
+    const query = els.pq.value.trim().toLowerCase();
+    const shown = inTreeOrder(view().files).filter((file) => file.path.toLowerCase().includes(query));
     picked = Math.min(picked, Math.max(0, shown.length - 1));
     // The rows a reader is pressing stay the rows they press: a list naming the same files is redrawn in place, so a
     // press that a redraw lands in the middle of - the diff answering a filter, a pointer moving onto a row - still ends
@@ -4412,16 +4341,10 @@
     if (on) on.scrollIntoView({ block: "nearest" });
   }
 
-  // The cross stands only while there is a filter to drop.
-  function showClear() {
-    els.qx.hidden = els.q.value === "";
-  }
-
   function openPicker() {
     // The overlay carries the box being typed in, so what the reader looks at while picking is one panel rather than a
-    // list hanging off the bar. The filter already typed comes with it, and goes back to the bar when it closes.
+    // list hanging off the bar. What was typed before the list was let go of without a pick comes back, selected.
     if (!els.palette.hidden) return;
-    els.pq.value = els.q.value;
     els.veil.hidden = false;
     els.palette.hidden = false;
     document.body.classList.add("picking");
@@ -4440,8 +4363,6 @@
     els.veil.hidden = true;
     els.palette.hidden = true;
     document.body.classList.remove("picking");
-    els.q.value = els.pq.value;
-    showClear();
   }
 
   /* ---------- finding text in the diff ---------- */
@@ -4471,7 +4392,7 @@
     if (!pattern) return [];
     const hits = [];
     const bare = document.body.classList.contains("hide-context");
-    for (const file of visible(view().files)) {
+    for (const file of inTreeOrder(view().files)) {
       file.lines.forEach((row, order) => {
         if (row[0] === "h" || (bare && row[0] === "c")) return;
         if (!pattern.test(String(row[3]))) return;
@@ -4632,13 +4553,12 @@
   }
 
   function takePick(order) {
-    // The card a pick is looked for in is one the filter leaves, so a draw still waiting is taken now.
-    filtering.now();
-    const shown = visible(view().files);
-    const file = shown[order === undefined ? picked : order];
+    const file = els.picks.querySelectorAll(".pick")[order === undefined ? picked : order];
     if (!file) return;
+    // The name typed has done its work once a file is taken from it, so the next search starts from nothing.
+    els.pq.value = "";
     closePicker();
-    const card = document.querySelector(`section.file[data-path="${CSS.escape(file.path)}"]`);
+    const card = document.querySelector(`section.file[data-path="${CSS.escape(file.dataset.path)}"]`);
     if (card) jump(Number(card.id.slice(1)));
   }
 
@@ -4647,23 +4567,18 @@
 
   function render() {
     const { files, commit } = view();
-    // Counted over what the filter leaves, so the header describes the files the reader can actually reach; how many
-    // it holds back is said in the tooltip, which is the only place a hidden file can still be accounted for.
-    const shown = visible(files);
+    const shown = inTreeOrder(files);
     const staleCount = countStale(shown);
     const added = shown.reduce((sum, file) => sum + file.added, 0);
     const removed = shown.reduce((sum, file) => sum + file.removed, 0);
     const done = shown.filter((file) => seenState(file) === "done").length;
-    const held = files.length - shown.length;
     els.tplus.textContent = `+${added.toLocaleString()}`;
     els.tminus.textContent = `−${removed.toLocaleString()}`;
     els.ptext.textContent = staleCount
       ? `${done}/${shown.length} reviewed\n${staleCount} reopened`
       : `${done}/${shown.length} reviewed`;
     els.ptext.dataset.stale = String(Boolean(staleCount));
-    const reads = [staleCount ? `${staleCount} file(s) changed since they were reviewed, and are marked as such` : "Files marked reviewed"];
-    if (held) reads.push(`${held} more the filter is holding back`);
-    els.ptext.title = reads.join(" · ");
+    els.ptext.title = staleCount ? `${staleCount} file(s) changed since they were reviewed, and are marked as such` : "Files marked reviewed";
     els.pfill.style.width = shown.length ? `${Math.round((done / shown.length) * 100)}%` : "0%";
     if (!els.palette.hidden) drawPicks();
     sayWhereToStep();
@@ -4696,7 +4611,7 @@
     if (!shown.length) {
       const empty = document.createElement("div");
       empty.className = "empty";
-      empty.textContent = state.query ? `No file matches “${state.query}”.` : "No changes in this view.";
+      empty.textContent = "No changes in this view.";
       els.main.append(empty);
       return;
     }
@@ -4828,7 +4743,7 @@
   // Ticks or clears one file, from its box or from the keyboard, and folds or opens it to match.
   function markReviewed(file, done) {
     // The card itself stays put unless it is about to be hidden, in which case the one after it takes its place.
-    const shown = visible(view().files);
+    const shown = inTreeOrder(view().files);
     const following = shown[shown.indexOf(file) + 1];
     const anchor = done && document.body.classList.contains("hide-done") ? following : file;
     holdPlace(anchor && anchor.path, () => {
@@ -5657,7 +5572,7 @@
     box.checked = done;
     box.indeterminate = some && !done;
     box.addEventListener("change", () => {
-      const shown = visible(view().files);
+      const shown = inTreeOrder(view().files);
       const last = shown.indexOf(files[files.length - 1]);
       const anchor = box.checked && document.body.classList.contains("hide-done") ? shown[last + 1] : files[0];
       holdPlace(anchor && anchor.path, () => {
@@ -5766,7 +5681,7 @@
 
   function refilter(change) {
     // Marked on the threads already built rather than drawn again, and the reader's place held as it changes.
-    const staying = visible(view().files)[0];
+    const staying = inTreeOrder(view().files)[0];
     holdPlace(staying && staying.path, () => {
       letGo();
       change();
@@ -5909,36 +5824,14 @@
     state.current = 0;
     render();
   });
-  els.q.addEventListener("input", (event) => {
-    state.query = event.target.value;
-    state.current = 0;
-    showClear();
-    filtering();
-  });
-  // Emptying the filter is all the cross asks for: pressing the box is what asks for the overlay, so the press on the
-  // cross must not reach it.
-  els.qx.addEventListener("pointerdown", (event) => event.preventDefault());
-  els.qx.addEventListener("click", () => {
-    els.q.value = "";
-    els.pq.value = "";
-    state.query = "";
-    state.current = 0;
-    showClear();
-    filtering.now();
-  });
   // Pressing the box in the bar is what asks for the overlay; the caret belongs to the box inside it.
   els.q.addEventListener("focus", () => {
     openPicker();
     els.q.blur();
   });
-  els.pq.addEventListener("input", (event) => {
-    state.query = event.target.value;
-    state.current = 0;
+  els.pq.addEventListener("input", () => {
     picked = 0;
-    // The names are what the reader is watching while they type, so the list answers each letter; the diff behind it
-    // waits for them to stop.
     drawPicks();
-    filtering();
   });
   els.pq.addEventListener("keydown", (event) => {
     if (els.palette.hidden) return;
@@ -5952,7 +5845,7 @@
     }
     if (event.key === "Escape") {
       // Stopped here, or the page's own Escape would take the box's focus away before the list closed. Refused as
-      // well, since a search box empties itself on Escape and would leave the bar showing a filter that was dropped.
+      // well, since a search box empties itself on Escape, and what was typed is offered again when the list reopens.
       event.preventDefault();
       event.stopPropagation();
       closePicker();
@@ -5995,7 +5888,7 @@
   });
   els.semantic.addEventListener("click", () => {
     const on = els.semantic.getAttribute("aria-pressed") !== "true";
-    const staying = visible(view().files)[0];
+    const staying = inTreeOrder(view().files)[0];
     holdPlace(staying && staying.path, () => {
       els.semantic.setAttribute("aria-pressed", String(on));
       document.body.classList.toggle("semantic", on);
@@ -6006,7 +5899,7 @@
   });
   els.hidedeleted.addEventListener("click", () => {
     const on = els.hidedeleted.getAttribute("aria-pressed") !== "true";
-    const staying = visible(view().files)[0];
+    const staying = inTreeOrder(view().files)[0];
     holdPlace(staying && staying.path, () => {
       els.hidedeleted.setAttribute("aria-pressed", String(on));
       document.body.classList.toggle("hide-deleted", on);
@@ -6018,7 +5911,7 @@
   els.hidedone.addEventListener("click", () => {
     const on = els.hidedone.getAttribute("aria-pressed") !== "true";
     // Anchored on the first file still shown, so hiding what is done does not scroll the rest out from under the reader.
-    const staying = visible(view().files).find((file) => seenState(file) !== "done");
+    const staying = inTreeOrder(view().files).find((file) => seenState(file) !== "done");
     holdPlace(staying && staying.path, () => {
       letGo();
       els.hidedone.setAttribute("aria-pressed", String(on));
@@ -6028,7 +5921,7 @@
   });
   els.hideclosed.addEventListener("click", () => {
     const on = els.hideclosed.getAttribute("aria-pressed") !== "true";
-    const staying = visible(view().files)[0];
+    const staying = inTreeOrder(view().files)[0];
     holdPlace(staying && staying.path, () => {
       letGo();
       els.hideclosed.setAttribute("aria-pressed", String(on));
@@ -6186,7 +6079,7 @@
       composeSel();
     }
     if (event.key === "r") {
-      const file = visible(view().files)[state.current];
+      const file = inTreeOrder(view().files)[state.current];
       if (file) markReviewed(file, seenState(file) !== "done");
     }
     if (event.key === "Escape") {
