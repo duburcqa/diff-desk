@@ -1873,6 +1873,44 @@ def test_marking_a_file_reviewed_from_above_it_leaves_the_view_alone(page):
     card.locator("input[type=checkbox]").uncheck()
 
 
+def test_what_changes_above_the_reader_leaves_them_where_they_are(page, desk):
+    # A line read in the middle of the view, whole files above it: what grows above it, on its own or drawn anew as the
+    # poll draws the page for news, grows out of the reader's sight, in an engine that keeps their place itself or not.
+    line = f"section.file[data-path='sample.py'] tr[data-line='{FIRST_EDIT}'][data-side='new']"
+    page.locator(line).evaluate("(row) => row.scrollIntoView({ block: 'center' })")
+    at_rest(page)
+    top = "(line) => document.querySelector(line).getBoundingClientRect().top"
+    grown = """(line) => {
+      const before = document.querySelector(line).getBoundingClientRect().top;
+      const covered = document.querySelector('header').getBoundingClientRect().bottom;
+      const cards = [...document.querySelectorAll('section.file')];
+      const more = document.createElement('div');
+      more.style.height = '300px';
+      cards.find((card) => card.getBoundingClientRect().bottom < covered).append(more);
+      return before;
+    }"""
+    before = page.evaluate(grown, line)
+    at_rest(page)
+    assert abs(page.evaluate(top, line) - before) < 1
+
+    # A thread written above, then answered, each heard by the poll.
+    branch = page.evaluate("() => data.branches[0].ref")
+    made = desk.post(
+        "/comments", [{"branch": branch, "path": "pkg/sub/deep.py", "line": 2, "side": "new", "text": "above"}]
+    )["seq"]
+    try:
+        for said in (None, "and answered\nat length\nover lines"):
+            if said:
+                desk.post("/reply", {"seq": made, "text": said, "who": "session"})
+            before = page.evaluate(top, line)
+            page.evaluate("() => tick()")
+            page.wait_for_selector(f"#note-{made}", state="attached")
+            at_rest(page)
+            assert abs(page.evaluate(top, line) - before) < 1
+    finally:
+        desk.post("/drop", {"seq": made, "who": "you"})
+
+
 def test_a_redraw_leaves_the_reader_where_they_were(page, desk):
     line = sample(page).locator("tr.a[data-line]").first
     line.locator("td.code").first.hover()
