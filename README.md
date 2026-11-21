@@ -116,7 +116,7 @@ A local branch is the pull request opened from where it is pushed, the owner and
     pip install pytest pytest-xdist playwright && playwright install chromium firefox webkit
     python3 -m pytest
 
-The workflow lints and formats before it tests, with a pinned ruff, so run the same on every commit:
+The workflow lints and formats with a pinned ruff, and tests each engine on a runner of its own beside the rest of the suite, so run the same lint on every commit:
 
     pip install pre-commit && pre-commit install
 
