@@ -531,10 +531,11 @@
   .seen { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); cursor: pointer; user-select: none; white-space: nowrap; padding: 8px 12px; margin: -8px -12px -8px 0; }
   .seen input { accent-color: var(--add-ink); width: 14px; height: 14px; }
 
-  .chip { font-size: 10px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 6px; border-radius: 4px; background: var(--surface-sunk); color: var(--muted); }
-  .chip.added { background: var(--add-bg); color: var(--add-ink); }
-  .chip.deleted { background: var(--del-bg); color: var(--del-ink); }
-  .chip.stale { background: var(--stale-bg); color: var(--stale); }
+  /* What a file is, said beside its path: a label, so it keeps one look under the pointer, unlike a pressable chip. */
+  .badge { font-size: 10px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 6px; border-radius: 4px; background: var(--surface-sunk); color: var(--muted); }
+  .badge.added { background: var(--add-bg); color: var(--add-ink); }
+  .badge.deleted { background: var(--del-bg); color: var(--del-ink); }
+  .badge.stale { background: var(--stale-bg); color: var(--stale); }
 
   .body { overflow-x: auto; border-radius: 0 0 7px 7px; scrollbar-width: thin; scrollbar-color: var(--rule-strong) var(--surface-sunk); }
   /* Drawn in the page's own colours, so the bar stands whatever the system does with its own: an overlay bar fades out
@@ -1035,9 +1036,10 @@
   .mark.failed { color: var(--del-ink); background: var(--del-bg); }
   .mark.posted, .mark.resolved { color: var(--add-ink); background: var(--add-bg); }
   .mark.outdated { color: var(--stale); background: var(--stale-bg); }
-  .mark.open, .mark.none { color: var(--muted); background: var(--surface); border: 1px solid var(--rule); }
-  button.mark { font: inherit; font-size: 10.5px; cursor: pointer; border: 1px solid transparent; }
-  button.mark.none { border-color: var(--rule); }
+  .mark.open, .mark.none { color: var(--muted); background: var(--surface-sunk); }
+  /* A border is what a mark that can be pressed carries, so where a thread stands never reads as something to press. */
+  button.mark, .mark.act { font: inherit; font-size: 10.5px; cursor: pointer; border: 1px solid var(--rule); }
+  .mark.none.act { background: var(--surface); }
 
   /* News from GitHub reaches the reader wherever they are, since the panel it happened in may well be closed. Read as
      one of that panel's rows, so what it adds is only what makes it float, what says it went wrong, and a press
@@ -3612,21 +3614,23 @@
         if (note.prResolveError) mark.dataset.tip = note.prResolveError;
         head.append(mark);
       }
-      const mark = document.createElement(note.github === "posted" || !notes.live ? "span" : "button");
-      mark.className = mark.tagName === "BUTTON" ? `mark ${note.github} act` : `mark ${note.github}`;
+      // Where the thread stands, said as a label. Only a thread aimed at the pull request and not on it can be taken
+      // back from there by pressing it: sending goes through Sync alone, so a press on what reads as a standing never
+      // puts anything on the pull request.
+      const back = notes.live && !["posted", "none"].includes(note.github);
+      const mark = document.createElement(back ? "button" : "span");
+      mark.className = back ? `mark ${note.github} act` : `mark ${note.github}`;
       mark.textContent = note.github === "none" ? "local only" : GITHUB_MARK[note.github] || note.github;
-      mark.dataset.tip =
-        note.reviewUrl ||
-        note.error ||
-        (note.github === "none" ? "Send this one to the pull request" : "Keep this one out of the pull request");
-      if (mark.tagName === "BUTTON") {
+      if (back) {
+        mark.dataset.tip = note.error || "Keep this one out of the pull request";
         mark.addEventListener("click", async () => {
-          await post("bind", { seq: [note.seq], github: note.github === "none", ...where() });
+          await post("bind", { seq: [note.seq], github: false, ...where() });
           await loadNotes();
-          if (note.github === "none") await sendWaiting(false);
           drawLog();
           render();
         });
+      } else if (note.reviewUrl) {
+        mark.dataset.tip = note.reviewUrl;
       }
       head.append(mark);
     }
@@ -5349,13 +5353,13 @@
     grow.querySelector(".path").textContent = file.path;
     if (file.state) {
       const chip = document.createElement("span");
-      chip.className = `chip ${file.state}`;
+      chip.className = `badge ${file.state}`;
       chip.textContent = file.state;
       grow.append(chip);
     }
     if (status === "stale") {
       const chip = document.createElement("span");
-      chip.className = "chip stale";
+      chip.className = "badge stale";
       chip.textContent = "changed since review";
       grow.append(chip);
     }
