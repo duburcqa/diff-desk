@@ -2387,6 +2387,32 @@ def test_the_log_reaches_a_comment_and_leaves_what_is_settled_out(page, desk):
     assert page.locator("#logrows .logrow").filter(has_text=saying).count() == 0
     page.locator("#logclose").click()
 
+    # Answered since, it is news again: it is back in the diff and the listing until it has been read and scrolled past,
+    # and going then leaves the reader where they were.
+    desk.post("/reply", {"seq": made, "text": "news on a settled thread", "who": "session"})
+    page.evaluate("() => tick()")
+    thread = page.locator(f"#note-{made}")
+    thread.wait_for(state="visible")
+    page.locator("#logopen").click()
+    page.wait_for_selector("#log[data-open='true']")
+    assert page.locator("#logrows .logrow").filter(has_text=saying).count() == 1
+    page.locator("#logclose").click()
+    thread.scroll_into_view_if_needed()
+    page.wait_for_function(f"() => (JSON.parse(localStorage.getItem('diffdesk.heard') || '{{}}'))[{made}] === 1")
+    assert thread.is_visible()
+    anchored = page.evaluate(
+        """(seq) => {
+          const box = document.getElementById(`note-${seq}`).getBoundingClientRect();
+          window.scrollBy(0, box.bottom + 200);
+          const covered = document.querySelector('header').getBoundingClientRect().bottom;
+          window.held = document.elementFromPoint(window.innerWidth / 2, covered + 1);
+          return window.held.getBoundingClientRect().top;
+        }""",
+        made,
+    )
+    thread.wait_for(state="hidden")
+    assert abs(page.evaluate("() => window.held.getBoundingClientRect().top") - anchored) < 1
+
 
 def test_the_log_says_where_every_comment_stands(page, desk):
     branch = page.evaluate("() => data.branches[0].ref")
@@ -3445,11 +3471,10 @@ def test_a_box_takes_the_height_of_what_is_written_into_it(page, desk):
     page.keyboard.press("Escape")
 
     # A box built out of sight, in a thread the header hides, is the size of a line once the thread is shown: measured
-    # while hidden it would be a sliver.
-    branch = page.evaluate("() => data.branches[0].ref")
-    made = desk.post(
-        "/comments", {"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": "built hidden"}
-    )["seq"]
+    # while hidden it would be a sliver. Written here, the remark is one its author has read, so settled it is hidden.
+    aim(page, "built hidden")
+    submit(page, "built hidden")
+    made = desk.get("/comments")[-1]["seq"]
     desk.post("/resolve", {"seq": [made], "who": "session"})
     flip(page, "hideclosed")
     page.evaluate("() => loadNotes().then(render)")

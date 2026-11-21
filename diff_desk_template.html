@@ -1270,7 +1270,7 @@
       <button class="setting" id="hidedone" aria-pressed="false"><span class="what">Hide reviewed files<small>The files marked reviewed leave the page</small></span><i class="switch" aria-hidden="true"></i></button>
     </section>
     <section class="group"><h3>Comments</h3>
-      <button class="setting" id="hideclosed" aria-pressed="false"><span class="what">Hide resolved comments<small>The threads already resolved leave the page</small></span><i class="switch" aria-hidden="true"></i></button>
+      <button class="setting" id="hideclosed" aria-pressed="false"><span class="what">Hide resolved comments<small>The threads already resolved leave the page. One holding something unread stays until it has been read and scrolled past</small></span><i class="switch" aria-hidden="true"></i></button>
       <button class="setting" id="onlyunread" aria-pressed="false"><span class="what">Unread comments only<small>The threads already read leave the page and the comment steps. One read since this was switched on stays until it is switched off</small></span><i class="switch" aria-hidden="true"></i></button>
       <div class="setting authors" id="authorsrow" hidden><span class="what">Comments by<small>The threads opened by an author left unpicked leave the page and the comment steps</small><span class="chips" id="authors"></span></span></div>
       <div class="setting authors"><span class="what">Sent to the pull request<small>The threads kept by where they stand: sent to the pull request, or still only on this desk</small><span class="chips" id="sentfilter"><button class="chip" type="button" data-sent="all" aria-pressed="true">All</button><button class="chip" type="button" data-sent="sent" aria-pressed="false">Sent</button><button class="chip" type="button" data-sent="local" aria-pressed="false">Local</button></span></span></div>
@@ -2197,7 +2197,9 @@
   function drawLog() {
     const all = mine();
     // The thread open in the panel stays listed whatever the settings hide: the press on its row asked to read it.
-    const shown = withResolved() ? all : all.filter((note) => note.state !== "resolved" || note.seq === unmoored);
+    const shown = withResolved()
+      ? all
+      : all.filter((note) => note.state !== "resolved" || note.seq === unmoored || stillShown(note));
     const rows = shown.filter((note) => !readOut(note));
     const owed = rows.filter((note) => OWED.includes(note.github));
     const counted = [
@@ -2595,6 +2597,40 @@
     },
     { threshold: Array.from({ length: 101 }, (_, i) => i / 100) },
   );
+
+  // A resolved thread holding something unread stays on the page whatever "Hide resolved comments" says, since what it
+  // holds is news, and it stays while it is being read: it goes once it has been read and has left the screen, the
+  // reader held where they are when it stood above them.
+  const keptResolved = new Set();
+
+  function stillShown(note) {
+    if (unread(note)) keptResolved.add(note.seq);
+    return keptResolved.has(note.seq);
+  }
+
+  const passing = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      const seq = Number(entry.target.dataset.kept);
+      const note = mine().find((row) => row.seq === seq);
+      // A copy in the comments panel leaves the screen with the panel, which says nothing of the thread in the diff.
+      if (!els.main.contains(entry.target) || !note) {
+        passing.unobserve(entry.target);
+        continue;
+      }
+      // Scrolled past means on the screen and then off it: a thread first heard of off the screen, which a redraw can
+      // report before it has put the reader back where they were, has not been passed.
+      if (entry.isIntersecting) entry.target.dataset.onScreen = "true";
+      if (entry.isIntersecting || !entry.target.dataset.onScreen || unread(note)) continue;
+      passing.unobserve(entry.target);
+      keptResolved.delete(seq);
+      const covered = document.querySelector("header").getBoundingClientRect().bottom;
+      const anchor = document.elementFromPoint(window.innerWidth / 2, covered + 1);
+      const before = anchor ? anchor.getBoundingClientRect().top : 0;
+      for (const row of document.querySelectorAll(`#note-${seq}, .filenote[data-seq="${seq}"]`)) row.dataset.done = "true";
+      if (anchor && anchor.isConnected) window.scrollBy(0, anchor.getBoundingClientRect().top - before);
+    }
+    sayWhereToStep();
+  });
 
   function grows(box) {
     // A box the size of what has been written into it: measured after it is in the page, since a box not yet there has
@@ -3342,7 +3378,11 @@
     }
     if (note.outdated) box.classList.add("stale");
     if (settled) box.classList.add("folded");
-    if (note.state === "resolved") row.dataset.done = "true";
+    if (note.state === "resolved" && !stillShown(note)) row.dataset.done = "true";
+    if (note.state === "resolved" && keptResolved.has(note.seq)) {
+      box.dataset.kept = note.seq;
+      passing.observe(box);
+    }
     if (!note.pending) row.dataset.filtered = String(filteredOut(note));
 
     const head = document.createElement("div");
@@ -5907,7 +5947,7 @@
     const middle = (covered + window.innerHeight) / 2;
     const placed = [];
     for (const note of mine()) {
-      if (filteredOut(note) || (hidingClosed && note.state === "resolved")) continue;
+      if (filteredOut(note) || (hidingClosed && note.state === "resolved" && !stillShown(note))) continue;
       const card = document.querySelector(`section.file[data-path="${CSS.escape(note.path)}"]`);
       if (!card || !card.getClientRects().length) continue;
       const thread =
