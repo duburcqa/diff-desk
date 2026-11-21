@@ -722,11 +722,14 @@ def test_a_local_comment_can_be_turned_towards_the_pull_request(page, desk):
         page.reload(wait_until="load")
         page.wait_for_selector("section.file")
         thread = page.locator(f"#note-{made['seq']}")
-        standing = thread.locator("button.mark").first
-        assert standing.inner_text() == "local only"
+        # Where it stands is said, not offered: pressing it sends nothing, and Sync is the one way out.
+        standing = thread.locator(".mark", has_text="local only").first
+        assert standing.evaluate("(it) => it.tagName") == "SPAN"
+        standing.click()
+        assert {row["seq"]: row for row in desk.get("/comments")}[made["seq"]]["github"] == "none"
         # The decision is changeable after the fact, so a comment written before deciding does not have to be
         # rewritten.
-        standing.click()
+        thread.locator(".actions button.ghost", has_text="Sync").first.click()
         # A draw replaces the mark rather than rewriting it, so what is waited for is the text of whichever is there.
         page.wait_for_function(
             "(seq) => { const mark = document.querySelector(`#note-${seq} button.mark`);"
@@ -741,10 +744,15 @@ def test_a_local_comment_can_be_turned_towards_the_pull_request(page, desk):
         assert back.inner_text() != "local only"
         back.click()
         page.wait_for_function(
-            "(seq) => document.querySelector(`#note-${seq} button.mark`)?.textContent.trim() === 'local only'",
+            "(seq) => [...document.querySelectorAll(`#note-${seq} .mark`)]"
+            ".some((it) => it.textContent.trim() === 'local only')",
             arg=made["seq"],
         )
         assert {row["seq"]: row for row in desk.get("/comments")}[made["seq"]]["github"] == "none"
+        assert (
+            page.locator(f"#note-{made['seq']} .mark", has_text="local only").first.evaluate("(it) => it.tagName")
+            == "SPAN"
+        )
     finally:
         gen_diff_data.run(desk.repo, "remote", "remove", "origin")
         desk.github_answers(code=1, err="gh: Not Found (HTTP 404)")
@@ -1790,6 +1798,14 @@ def test_a_file_changed_since_it_was_reviewed_opens_itself(page, desk):
         again = page.locator("section.file[data-path='added.py']")
         assert again.get_attribute("data-open") == "true"
         assert "changed since review" in again.locator(".filehead").inner_text().lower()
+        # Said as a label, which looks the same under the pointer: only what can be pressed on its own lights up.
+        label = again.locator(".filehead", has_text="changed since review").first.get_by_text("changed since review")
+        look = (
+            "(it) => { const style = getComputedStyle(it); return [style.color, style.borderColor, style.background]; }"
+        )
+        before = label.evaluate(look)
+        label.hover()
+        assert label.evaluate(look) == before
 
         # Folded by hand on this diff, it stays folded through the redraws.
         again.locator(".filehead").first.click()
