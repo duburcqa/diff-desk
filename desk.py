@@ -183,7 +183,7 @@ def stop_at(event, desk=None, branches=()):
     held = json.loads(kept.read_text()) if kept.exists() else {}
     held[watched_key(branches)] = event
     held["desk"] = desk if desk is not None else held.get("desk")
-    kept.write_text(json.dumps(held))
+    gen_diff_data.write_whole(kept, json.dumps(held))
 
 
 def serving():
@@ -290,9 +290,9 @@ def serve(args):
     if not payload["branches"]:
         sys.exit(f"nothing ahead of {args.base} in {args.dir}")
     home = gen_diff_data.home()
-    (home / "diff_data.json").write_text(json.dumps(payload, separators=(",", ":")))
+    gen_diff_data.write_whole(home / "diff_data.json", json.dumps(payload, separators=(",", ":")))
     template = (HERE / "diff_desk_template.html").read_text()
-    (home / "diff_desk.html").write_text(gen_diff_data.render_page(template, payload))
+    gen_diff_data.write_whole(home / "diff_desk.html", gen_diff_data.render_page(template, payload))
     _said(payload)
     serve_diff.main(serve_diff.Source(args.dir, args.base, args.refs), started_by=args.owner or None)
 

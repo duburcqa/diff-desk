@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -14,6 +15,7 @@ import urllib.request
 import pytest
 
 import gen_diff_data
+import serve_diff
 from conftest import FILE_LINES, FIRST_EDIT, ROOT, SECOND_EDIT, free_port, until
 from desk import one_ref
 from serve_diff import is_refusal
@@ -33,6 +35,31 @@ def test_the_page_and_its_payload_are_served(desk):
     assert status == 200
     assert b"<title>" in body and b"__DIFF_DATA__" not in body
     assert desk.get("/data")["branches"][0]["ref"] == "feature"
+
+
+def test_the_payload_reads_whole_while_it_is_written_anew(payload, tmp_path, monkeypatch):
+    # Every page load writes the payload anew while the page and the desk's own requests read it, so a reader must find
+    # the one before or the one after, and never a file being written.
+    for name, file in (("DATA", "diff_data.json"), ("PAGE", "diff_desk.html"), ("PULLS", "pulls.json")):
+        monkeypatch.setattr(serve_diff, name, tmp_path / file)
+    serve_diff.serve_payload(payload)
+    written = threading.Event()
+
+    def write():
+        for _ in range(200):
+            serve_diff.serve_payload(payload)
+        written.set()
+
+    writer = threading.Thread(target=write)
+    writer.start()
+    torn = 0
+    while not written.is_set():
+        try:
+            json.loads(serve_diff.DATA.read_bytes())
+        except json.JSONDecodeError:
+            torn += 1
+    writer.join()
+    assert torn == 0
 
 
 def test_an_unknown_route_is_refused(desk):

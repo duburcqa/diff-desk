@@ -10,6 +10,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import tokenize
@@ -25,6 +26,18 @@ def home():
     where = pathlib.Path(os.environ.get("DIFF_DESK_HOME", pathlib.Path.home() / ".claude" / "diff-desk"))
     where.mkdir(parents=True, exist_ok=True)
     return where
+
+
+def write_whole(path, content):
+    """Replace a file in one step, text or bytes, so a reader finds what it held before or what it holds now.
+
+    Written beside it under a name of its own and moved over it: a file truncated and then written is read empty or
+    cut short meanwhile, and two writers sharing one spare name would each move the other's half-written spare.
+    """
+    handle, spare = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".writing")
+    with os.fdopen(handle, "wb" if isinstance(content, bytes) else "w") as out:
+        out.write(content)
+    os.replace(spare, path)
 
 
 def run(root, *args):
@@ -676,9 +689,9 @@ def collect(root, base, refs):
 if __name__ == "__main__":
     payload = collect(os.environ.get("DIFF_ROOT", "."), os.environ.get("DIFF_BASE", "upstream/main"), sys.argv[1:])
     out = home() / "diff_data.json"
-    out.write_text(json.dumps(payload, separators=(",", ":")))
+    write_whole(out, json.dumps(payload, separators=(",", ":")))
     template = pathlib.Path(__file__).parent / "diff_desk_template.html"
-    (home() / "diff_desk.html").write_text(render_page(template.read_text(), payload))
+    write_whole(home() / "diff_desk.html", render_page(template.read_text(), payload))
     print(f"{sum(len(b['files']) for b in payload['branches'])} file diffs, ", end="")
     print(f"{sum(len(b['commits']) for b in payload['branches'])} commits, upstream {payload['upstream'] or '(none)'}")
     print("bytes:", out.stat().st_size)

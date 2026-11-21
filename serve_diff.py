@@ -197,9 +197,7 @@ def attached(name, raw):
         return None, f"{name} is {len(raw) // (1024 * 1024)}MB, and GitHub takes {cap // (1024 * 1024)}MB of that kind"
     file = hashlib.sha256(raw).hexdigest()[:16] + suffix
     MEDIA.mkdir(parents=True, exist_ok=True)
-    spare = MEDIA / f"{file}.writing"
-    spare.write_bytes(raw)
-    os.replace(spare, MEDIA / file)
+    gen_diff_data.write_whole(MEDIA / file, raw)
     # The words that stand in for an image are its own name, as the web uploader has them: the extension goes and the
     # dots left in what remains read as spaces.
     return {"file": file, "name": name, "kind": kind, "alt": pathlib.Path(name).stem.replace(".", " ")}, ""
@@ -794,9 +792,9 @@ def serve_payload(payload):
     """Make this payload the served one: the numbers it names are remembered, then it and the page are written."""
     remembered_pulls(payload["branches"])
     Serving.decor = payload["decor"]
-    DATA.write_text(json.dumps(payload, separators=(",", ":")))
+    gen_diff_data.write_whole(DATA, json.dumps(payload, separators=(",", ":")))
     if TEMPLATE.exists():
-        PAGE.write_text(gen_diff_data.render_page(TEMPLATE.read_text(), payload))
+        gen_diff_data.write_whole(PAGE, gen_diff_data.render_page(TEMPLATE.read_text(), payload))
 
 
 def redecorate(key):
@@ -1135,10 +1133,7 @@ def read_ticks():
 
 
 def write_ticks(marks):
-    """Replace the ticks in one step, so a reader never sees them half-written."""
-    spare = TICKS.with_suffix(".writing")
-    spare.write_text(json.dumps(marks, indent=1, sort_keys=True))
-    os.replace(spare, TICKS)
+    gen_diff_data.write_whole(TICKS, json.dumps(marks, indent=1, sort_keys=True))
 
 
 def stands_on(said, index):
@@ -1170,16 +1165,11 @@ def remembered_pulls(branches):
         elif branch["ref"] in known:
             branch["pr"] = known[branch["ref"]]
     if learnt != known:
-        spare = PULLS.with_suffix(".writing")
-        spare.write_text(json.dumps(learnt, indent=1, sort_keys=True))
-        os.replace(spare, PULLS)
+        gen_diff_data.write_whole(PULLS, json.dumps(learnt, indent=1, sort_keys=True))
 
 
 def write_notes(rows):
-    """Replace the log in one step, so a reader never sees it half-written."""
-    spare = NOTES.with_suffix(".writing")
-    spare.write_text("".join(json.dumps(row) + "\n" for row in rows))
-    os.replace(spare, NOTES)
+    gen_diff_data.write_whole(NOTES, "".join(json.dumps(row) + "\n" for row in rows))
 
 
 # The desk answers requests on several threads, and every change to the log is a read of the whole of it followed by a
