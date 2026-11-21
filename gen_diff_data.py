@@ -1,5 +1,6 @@
 """Collect a git range as reviewable data: whole branch and per commit, for any repository and any base."""
 
+import functools
 import hashlib
 import io
 import itertools
@@ -45,9 +46,14 @@ def run(root, *args):
 
     A checkout removed from under a desk still serving it fails too: git is never started in a directory that is gone,
     and a desk asked about it in the background, as when GitHub answers, has nobody to raise to.
+
+    Asked without the locks git takes only to save work for later: `git status` otherwise locks the index to refresh
+    it, and a desk reading the branch whenever a page asks would make the reader's own `git checkout` or `git commit`
+    fail on that lock.
     """
     try:
-        return subprocess.run(["git", *args], capture_output=True, text=True, cwd=root, check=False).stdout
+        command = ["git", "--no-optional-locks", *args]
+        return subprocess.run(command, capture_output=True, text=True, cwd=root, check=False).stdout
     except (FileNotFoundError, NotADirectoryError):
         return ""
 
@@ -337,28 +343,88 @@ def string_opening(text, line_no):
     """
     if line_no < 1:
         return ""
-    opened = None
+    spans, broken = string_spans(text)
+    if broken is not None and line_no > broken:
+        return ""
+    # The innermost string holding the line, which is the one opened last: a string inside an f-string is read as such.
+    inside = max((span for span in spans if span[0] < line_no <= span[1]), default=None)
+    return inside[2] if inside else ""
+
+
+@functools.lru_cache(maxsize=256)
+def string_spans(text):
+    """The strings of a Python file, each as the line it opens on, the line it closes on and its opening delimiter.
+
+    Also the line the file stops reading as Python at, or None for a file that reads whole: past it no line is said to
+    stand inside anything, and an f-string still open there is taken to run up to it. Read once per text, since every
+    hunk of a file asks about the same one.
+    """
+    spans = []
+    opened = []
+    broken = None
     try:
         for token in tokenize.generate_tokens(io.StringIO(text).readline):
-            if token.start[0] >= line_no:
-                break
-            if token.type == tokenize.STRING and line_no <= token.end[0]:
-                return re.match(r"[rRbBuUfF]*(\"\"\"|'''|\"|')", token.string).group(0)
-            if token.type == tokenize.FSTRING_START:
-                opened = token.string
-            elif token.type == tokenize.FSTRING_END:
-                opened = None
-    except (tokenize.TokenError, SyntaxError):
-        return ""
-    return opened or ""
+            if token.type == tokenize.STRING:
+                delimiter = re.match(r"[rRbBuUfF]*(\"\"\"|'''|\"|')", token.string).group(0)
+                spans.append((token.start[0], token.end[0], delimiter))
+            elif token.type == tokenize.FSTRING_START:
+                opened.append((token.start[0], token.string))
+            elif token.type == tokenize.FSTRING_END and opened:
+                start, delimiter = opened.pop()
+                spans.append((start, token.end[0], delimiter))
+    # Tokenizing stops at the first line it cannot read, which is where the file stops reading as Python.
+    except tokenize.TokenError as error:
+        broken = error.args[1][0]
+    except SyntaxError as error:
+        broken = error.lineno or 1
+    spans.extend((start, broken, delimiter) for start, delimiter in opened)
+    return tuple(spans), broken
 
 
 def file_text(root, rev, path):
     """What a file reads as at a revision, the working tree standing for an empty revision, or "" where it has none."""
-    if rev:
-        return run(root, "show", f"{rev}:{path}")
-    file = pathlib.Path(root) / path
-    return file.read_text(errors="replace") if file.is_file() else ""
+    return file_texts(root, [(rev, path)])[(rev, path)]
+
+
+def file_texts(root, wanted):
+    """What files read as at revisions, each wanted as a (revision, path) pair, asked of git all at once.
+
+    The working tree stands for an empty revision, and a file a revision has none of reads as "".
+    """
+    texts = {}
+    asked = []
+    for rev, path in dict.fromkeys(wanted):
+        if rev:
+            asked.append((rev, path))
+        else:
+            file = pathlib.Path(root) / path
+            texts[(rev, path)] = file.read_text(errors="replace") if file.is_file() else ""
+    if not asked:
+        return texts
+    try:
+        out = subprocess.run(
+            ["git", "cat-file", "--batch=%(objectsize)"],
+            input="".join(f"{rev}:{path}\n" for rev, path in asked).encode(),
+            capture_output=True,
+            cwd=root,
+            check=False,
+        ).stdout
+    except (FileNotFoundError, NotADirectoryError):
+        out = b""
+    # Each answer is a line holding the size of what was found, then that content and a newline. One naming nothing is
+    # a line saying it is missing, and an answer cut short by git failing leaves the rest unanswered.
+    at = 0
+    for spec in asked:
+        end = out.find(b"\n", at)
+        header = out[at:end] if end >= 0 else b""
+        if header.isdigit():
+            size = int(header)
+            texts[spec] = out[end + 1 : end + 1 + size].decode(errors="replace")
+            at = end + 1 + size + 1
+        else:
+            texts[spec] = ""
+            at = end + 1 if end >= 0 else len(out)
+    return texts
 
 
 def mark_strings(root, files, old_rev, new_rev):
@@ -366,19 +432,13 @@ def mark_strings(root, files, old_rev, new_rev):
 
     The note is a fifth member of the hunk header row (see 'string_opening' for what it holds and why).
     """
-    for entry in files:
-        if entry["binary"] or not entry["path"].endswith(".py"):
-            continue
-        texts = [None, None]
+    marked = [entry for entry in files if not entry["binary"] and entry["path"].endswith(".py")]
+    texts = file_texts(root, [(rev, entry["path"]) for entry in marked for rev in (old_rev, new_rev)])
+    for entry in marked:
         for row in entry["lines"]:
-            if row[0] != "h":
-                continue
-            opens = []
-            for side, rev in enumerate((old_rev, new_rev)):
-                if texts[side] is None:
-                    texts[side] = file_text(root, rev, entry["path"])
-                opens.append(string_opening(texts[side], row[1 + side]))
-            row.append(opens)
+            if row[0] == "h":
+                sides = [texts[(rev, entry["path"])] for rev in (old_rev, new_rev)]
+                row.append([string_opening(text, line_no) for text, line_no in zip(sides, row[1:3], strict=True)])
 
 
 def parse(diff):
@@ -608,6 +668,15 @@ def decorate(payload):
     return payload["decor"] != before
 
 
+# What each commit changes, by checkout and full commit name, read once: a commit never changes, and reading every
+# commit of a long branch again is most of what collecting it would cost. Only the commits the last collect of a
+# checkout read are kept, so a desk serving review after review holds no more than the one it shows.
+COMMITS = {}
+# How far the collect under way has got: one step per commit read and one per ref read whole. A page waiting on it shows
+# this rather than nothing. The steps are counted as they become known, so the total grows as each ref is reached.
+COLLECTING = {"done": 0, "total": 0}
+
+
 def collect(root, base, refs):
     """The whole reviewable payload: one entry per ref, each with its per-commit breakdown.
 
@@ -628,6 +697,8 @@ def collect(root, base, refs):
     # The process collecting, which is what the state a page polls answers with: the tool on disk may have moved on from
     # it, and a page carrying that would read as behind the very desk that served it, reloading at every refresh.
     data["desk"] = RUNNING
+    COLLECTING.update(done=0, total=len(refs))
+    read = set()
     for wanted in refs:
         against, asked = own_base(wanted, base)
         number = pull_number(asked)
@@ -637,12 +708,17 @@ def collect(root, base, refs):
             ref, request = fetch_pull(root, upstream, number)
             head = LOCAL_HEADS[number] = local_head(root, ref, request)
         commits = []
-        log = run(root, "log", "--format=%h%x1f%s", f"{against}..{head}").strip().split("\n")
-        for row in reversed([line for line in log if line]):
-            sha, subject = row.split("\x1f")
-            files = parse(run(root, "show", "--format=", "--unified=3", sha))
-            mark_strings(root, files, f"{sha}^", sha)
-            commits.append({"sha": sha, "subject": subject, "files": files})
+        log = run(root, "log", "--format=%h%x1f%H%x1f%s", f"{against}..{head}").strip().split("\n")
+        rows = [row.split("\x1f") for row in reversed(log) if row]
+        COLLECTING["total"] += sum((root, full) not in COMMITS for _, full, _ in rows)
+        for sha, full, subject in rows:
+            if (root, full) not in COMMITS:
+                files = parse(run(root, "show", "--format=", "--unified=3", full))
+                mark_strings(root, files, f"{full}^", full)
+                COMMITS[(root, full)] = files
+                COLLECTING["done"] += 1
+            commits.append({"sha": sha, "subject": subject, "files": COMMITS[(root, full)]})
+            read.add((root, full))
         fork = run(root, "merge-base", against, head).strip()
         # What the ref has committed, read from the ref rather than from disk, so work saved there says nothing about
         # where the base stands.
@@ -666,6 +742,7 @@ def collect(root, base, refs):
             revs = (start, "" if head == current else head)
         files = parse(whole)
         mark_strings(root, files, *revs)
+        COLLECTING["done"] += 1
         # A ref read against a base of its own that it does not build on, such as a stack not restacked since the branch
         # below it moved, shows everything since they forked.
         aside = against != base and not builds_on(root, against, head)
@@ -689,6 +766,8 @@ def collect(root, base, refs):
                 "dirty": head == current,
             }
         )
+    for key in [key for key in COMMITS if key[0] == root and key not in read]:
+        del COMMITS[key]
     decorate(data)
     return data
 

@@ -815,28 +815,6 @@ def redecorate(key):
 gen_diff_data.LISTENERS.append(redecorate)
 
 
-def rebuild():
-    """Collect the served diffs again and rewrite the page around them, keeping the last good pair on any failure.
-
-    One at a time, since two page loads at once would write the same two files: what a caller gets is either the diffs
-    as they now stand, or exactly what was being served before.
-    """
-    source = Serving.source
-    if source is None:
-        return None
-    with BUILDING:
-        try:
-            payload = gen_diff_data.collect(source.root, source.base, source.refs)
-        except Exception as error:  # noqa: BLE001 - a page must still be served, so this is reported and set aside
-            print(f"REBUILD FAILED {type(error).__name__}: {error}", flush=True)
-            return None
-        if not payload["branches"]:
-            print(f"REBUILD FAILED nothing ahead of {source.base} in {source.root}", flush=True)
-            return None
-        serve_payload(payload)
-        return payload
-
-
 def delete_comment(repo, comment):
     """Delete one review comment from a pull request, and say why it did not go when it did not."""
     done = gen_diff_data.gh("api", "-X", "DELETE", f"/repos/{repo}/pulls/comments/{comment}", repeatable=True)
@@ -1222,12 +1200,17 @@ class Handler(BaseHTTPRequestHandler):
         path = route.path.rstrip("/")
         # What the desk holds and nothing else, answered as it is asked for: which run of the desk is answering, since
         # a watch armed against one that has been restarted is reading a page and a wording that no longer exist, and
-        # which files have been read, since a tick outlives the browser it was made in.
-        held = {"/serving": lambda: {"desk": SERVING}, "/reviewed": lambda: {"marks": read_ticks()}}
+        # which files have been read, since a tick outlives the browser it was made in, and how far the diffs being
+        # collected have got, which a page waiting on them shows.
+        held = {
+            "/serving": lambda: {"desk": SERVING},
+            "/reviewed": lambda: {"marks": read_ticks()},
+            "/progress": lambda: dict(gen_diff_data.COLLECTING),
+        }
         if path in ("", "/index.html"):
             print(f"PAGE served to {self.headers.get('User-Agent', '?')}", flush=True)
-            # Loading the page is asking for the diffs as they stand, so they are collected again before it goes out.
-            rebuild()
+            # Sent as it was last built, at once: collecting a long branch takes seconds, and a page held back that
+            # long shows nothing at all. The page then brings itself up to date (see 'freshen' in the template).
             self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
         elif path in held:
             self._json(held[path]())

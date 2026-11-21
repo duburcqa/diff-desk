@@ -1747,7 +1747,7 @@ def test_a_deletion_refused_by_github_leaves_the_comment_exactly_as_it_was(desk)
     assert still["github"] == "posted"
 
 
-def test_loading_the_page_collects_the_diffs_as_they_now_stand(desk):
+def test_the_desk_says_when_the_diffs_have_moved_on_and_serves_what_it_collected(desk):
     gen_diff_data.run(desk.repo, "checkout", "-q", "feature")
     written = desk.repo / "added.py"
     kept = written.read_text()
@@ -1765,11 +1765,17 @@ def test_loading_the_page_collects_the_diffs_as_they_now_stand(desk):
         assert desk.get("/data")["stamp"] == was
         assert "SAID_ON_DISK" not in json.dumps(desk.get("/data"))
 
-        # Loading the page is that request, so what it is built from holds the new line and stands at the new stamp.
-        assert "SAID_ON_DISK" in desk.page()
+        # The page is sent as it was built, at once, whatever collecting would take: the page itself asks for more.
+        assert "SAID_ON_DISK" not in desk.page()
+        assert desk.get("/data")["stamp"] == was
+
+        # Asking for more collects the diffs as they now stand, and says how far that went, step by step.
+        desk.post("/scan", {})
         fresh = desk.get("/data")
         assert fresh["stamp"] == moved
         assert "SAID_ON_DISK" in json.dumps(fresh)
+        progress = desk.get("/progress")
+        assert progress["done"] == progress["total"] > 0
 
         # What the desk itself is, said beside what the review is: a page holds the script it was rendered with, and
         # nothing about the branch says whether the desk has been published over since.
