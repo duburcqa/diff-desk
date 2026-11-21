@@ -2413,8 +2413,10 @@
     }));
   }
 
-  // Counts the landings, so the centring after one stops once the reader takes the page back (see yieldAim).
+  // Counts the landings, so the centring after one stops once the reader takes the page back (see yieldAim), and says
+  // while one is centring, which is the page putting a thread under the reader (see holding).
   let landings = 0;
+  let centring = false;
 
   function land() {
     // What the aim held off now happens, all of it at once: the files it flew past are settled here rather than under
@@ -2429,13 +2431,17 @@
     // Then the thread is put back under the reader, whatever moved it since the aim called it landed: settling those
     // files, and the box itself taking the size the width gives it, which is delivered a frame or two after it lands.
     const landing = ++landings;
+    centring = true;
     const centre = (tries) => requestAnimationFrame(() => {
-      if (landing !== landings) return;
-      const thread = aimingAt(aimed);
-      if (!thread || !thread.isConnected) return;
+      const thread = landing === landings ? aimingAt(aimed) : null;
+      if (!thread || !thread.isConnected) {
+        centring = false;
+        return;
+      }
       const off = missedBy(thread, aimed.seq);
       if (Math.abs(off) >= LANDED) window.scrollTo({ top: Math.max(0, window.scrollY + off), behavior: "auto" });
       if (tries > 0) centre(tries - 1);
+      else centring = false;
     });
     centre(4);
   }
@@ -4316,6 +4322,7 @@
     old.replaceWith(fresh);
     settleBody(fresh);
     nearby.observe(fresh);
+    holding.observe(fresh);
     hangWriting(lifted);
     const picked = ends.map((row) => same(row, fresh));
     if (picked.length && picked.every(Boolean)) {
@@ -5013,6 +5020,9 @@
       if (body) heights.set(wrap.dataset.path, body.getBoundingClientRect().height);
     }
     const scrolled = window.scrollY;
+    // Taken as the page stands before it is built again, a scroll the reader made the moment before included (see
+    // holding).
+    takeReadingLine();
     els.main.innerHTML = "";
     if (commit) {
       const note = document.createElement("div");
@@ -5032,12 +5042,19 @@
     nearby.disconnect();
     shown.forEach((file, index) => els.main.append(card(file, index)));
     settleNear();
-    for (const wrap of els.main.querySelectorAll("section.file")) nearby.observe(wrap);
+    for (const wrap of els.main.querySelectorAll("section.file")) {
+      nearby.observe(wrap);
+      holding.observe(wrap);
+    }
     hangWriting(lifted);
     fitNotes();
     markCurrent();
     paintSel();
-    if (!reaching) window.scrollTo(0, scrolled);
+    if (!reaching) {
+      window.scrollTo(0, scrolled);
+      // Followed once the cards just observed are laid out (see holding), which always reports them.
+      redrawn = true;
+    }
   }
 
   // Written before the page is painted: the observer below only hears about a body a frame later, and a comment left
@@ -5094,6 +5111,90 @@
     const answers = (note.replies || []).reduce((sum, answer) => sum + lines(answer.text) + 1, 0);
     return (lines(note.text) + answers + 2) * roomPerRow() + 18;
   }
+
+  // The page keeps the reader's place: the line at the top of the view is taken as the reader scrolls, under the head
+  // pinned there, and when a card changes height and that line has moved with no scroll, the scroll follows it, so what
+  // changes above the screen grows or shrinks out of the reader's sight while what changes on it moves what is below. Safari keeps no place at all and the other
+  // engines none for a file growing above the reader, while a place one of them kept, or the page held by hand, has not
+  // moved. A line drawn anew, as the poll draws the page for news, is found again by what it is. What the page does in
+  // answer to the reader - the frames after a press or a key that does not scroll, an aim and the centring after it -
+  // is meant to move what it moves, so the line is taken again rather than followed.
+  let readingLine = null;
+  let answering = 0;
+
+  // What a line is, so it is found again once drawn anew: a line of a file by its number and side, a thread by its
+  // number, anything else by the file holding it.
+  function lineKey(node) {
+    const card = node.closest("section.file");
+    const row = node.closest("tr[data-line][data-side]");
+    const file = card ? `section.file[data-path="${CSS.escape(card.dataset.path)}"]` : null;
+    if (row && file) return `${file} tr[data-line="${row.dataset.line}"][data-side="${row.dataset.side}"]`;
+    const thread = node.closest("tr.noterow[id^='note-'], .filenote[data-seq]");
+    if (thread) return thread.id ? `#${thread.id}` : `.filenote[data-seq="${thread.dataset.seq}"]`;
+    return file;
+  }
+
+  function takeReadingLine() {
+    const covered = document.querySelector("header").getBoundingClientRect().bottom;
+    const main = els.main.getBoundingClientRect();
+    const heads = [...els.main.querySelectorAll("section.file > .filehead")];
+    const pinned = heads.find((head) => Math.abs(head.getBoundingClientRect().top - covered) < 1);
+    const top = (pinned ? pinned.getBoundingClientRect().bottom : covered) + 2;
+    let node = document.elementFromPoint(main.left + main.width / 2, top);
+    // Between two files, or past the last, the line is the next file down.
+    if (!node || node === els.main || !els.main.contains(node)) {
+      node = [...els.main.querySelectorAll("section.file")].find((card) => card.getBoundingClientRect().bottom > top);
+    }
+    // Measured on what the key names, so the line found again after a redraw is the very thing measured before it.
+    const key = node && lineKey(node);
+    const named = key && els.main.querySelector(key);
+    readingLine = named ? { node: named, key, top: named.getBoundingClientRect().top, at: window.scrollY } : null;
+  }
+
+  // A redraw puts the scroll back itself, which an engine may deliver as a scroll event before the cards it built are
+  // heard changing size: that scroll is the redraw's rather than the reader's, so the line is kept rather than taken
+  // again where the redraw left it, and followed once the cards are laid out.
+  let redrawn = false;
+
+  // Follows the line where the page moved it, then takes it again. Where it moved by as much as the page was scrolled
+  // since, the page moved nothing: the scroll did, and an engine may report a scroll asked for a frame after a card it
+  // heard changing size, so it is taken again rather than followed back.
+  function keepReadingLine() {
+    if (readingLine && !answering && reaching === null && !centring) {
+      const node = readingLine.node.isConnected ? readingLine.node : els.main.querySelector(readingLine.key);
+      if (node && node.getClientRects().length) {
+        const moved = node.getBoundingClientRect().top - readingLine.top;
+        const shifted = moved + window.scrollY - readingLine.at;
+        if (Math.abs(moved) >= 0.5 && Math.abs(shifted) >= 0.5) window.scrollBy(0, moved);
+      }
+    }
+    redrawn = false;
+    takeReadingLine();
+  }
+  const holding = new ResizeObserver(keepReadingLine);
+  window.addEventListener(
+    "scroll",
+    () => {
+      if (!redrawn) takeReadingLine();
+    },
+    { passive: true },
+  );
+  // The page answering the reader: the frames after a press or a key that does not scroll, counted in frames rather
+  // than in time so a slow machine answers as fully as a fast one.
+  const answered = () => {
+    if (!answering) {
+      const count = () => {
+        answering -= 1;
+        if (answering) requestAnimationFrame(count);
+      };
+      requestAnimationFrame(count);
+    }
+    answering = 3;
+  };
+  for (const kind of ["pointerdown", "click", "input"]) addEventListener(kind, answered, { capture: true, passive: true });
+  addEventListener("keydown", (event) => {
+    if (!SCROLL_KEYS.has(event.key)) answered();
+  }, { capture: true });
 
   const nearby = new IntersectionObserver((entries) => {
     // A file built stands at what its lines measure rather than at what was reserved for them, which moves everything
@@ -5866,8 +5967,8 @@
     const held = drawn.get(wrap);
     if (!held) return;
     // A card let go stands at what its lines measured, and one built stands at what they measure, so what a settle
-    // does above the reader is a change of nothing at all. Where an estimate turns out to be off, the browsers hold
-    // the place themselves; scrolling for it by hand walks the page a line at a time as each settle nudges the next.
+    // does above the reader is a change of nothing at all. Where an estimate turns out to be off, the page holds the
+    // place (see holding); scrolling for it here walks the page a line at a time as each settle nudges the next.
     // A card is never let go of while something is being written in it: its lines are what the box hangs among, so
     // letting them go takes the words with them, however far the reader has scrolled from where they wrote them.
     const writing = wrap.querySelector("tr[data-composer], .filenote.writing, .line.actions.aside");
