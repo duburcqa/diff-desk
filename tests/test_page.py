@@ -3150,9 +3150,27 @@ def test_a_reply_can_be_rewritten_and_a_comment_and_its_last_reply_deleted_from_
     # The remark it answers is left as it was written: the two are rewritten apart.
     assert reworded["text"] == saying
 
-    # A button that deletes reads as one: drawn in the colour of what is removed, and filling with it when pointed at.
+    # A button that deletes reads as one: a pill shaped as the ones beside it, its cross at its centre, drawn in the
+    # colour of what is removed, and filling with it when pointed at.
     remove = thread.locator(".thread > .line button.drop").first
-    assert remove.evaluate("(button) => getComputedStyle(button).color") == colour(page, "--del-ink")
+    drawn = remove.evaluate(
+        """(button) => {
+          const pill = button.closest('.line').querySelector('button.tiny:not(.drop):not(.reactadd)');
+          const box = button.getBoundingClientRect();
+          const mark = button.querySelector('svg').getBoundingClientRect();
+          const off = Math.max(
+            Math.abs(mark.x + mark.width / 2 - (box.x + box.width / 2)),
+            Math.abs(mark.y + mark.height / 2 - (box.y + box.height / 2)),
+          );
+          return {
+            color: getComputedStyle(button).color,
+            height: box.height === pill.getBoundingClientRect().height,
+            round: getComputedStyle(button).borderRadius === getComputedStyle(pill).borderRadius,
+            centred: off < 0.5,
+          };
+        }"""
+    )
+    assert drawn == {"color": colour(page, "--del-ink"), "height": True, "round": True, "centred": True}
     rest = remove.evaluate("(button) => getComputedStyle(button).backgroundColor")
     remove.hover()
     page.wait_for_function(

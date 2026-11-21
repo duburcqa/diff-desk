@@ -887,6 +887,7 @@
     background: var(--surface);
     border: 1px solid var(--rule-strong);
     border-radius: 999px;
+    line-height: 12px;
     cursor: pointer;
   }
   button.tiny:hover { color: var(--accent); border-color: var(--accent); }
@@ -914,26 +915,21 @@
   .thread.found { outline: 2px solid var(--accent); outline-offset: 1px; }
   body.hide-done .file[data-done="true"][data-reveal="true"] { display: block; }
 
-  /* A button that deletes is drawn in the colour of what is removed, and fills with it under the pointer. */
-  .thread .drop, .whisper .drop {
-    flex: none;
-    display: grid;
+  /* A button that deletes is a pill of the height of the ones beside it, drawn in the colour of what is removed, its
+     cross drawn rather than typed so that it stands at the centre whatever the font, and filled with that colour under
+     the pointer. Pinned to the line height every other pill is drawn at, which is what it is measured against. */
+  button.tiny.drop {
+    display: inline-grid;
     place-items: center;
-    width: 18px;
-    height: 18px;
+    height: 14px;
     margin-left: auto;
-    padding: 0;
-    border: 1px solid color-mix(in srgb, var(--del-ink) 55%, transparent);
-    border-radius: 4px;
-    background: transparent;
+    padding: 0 7px;
     color: var(--del-ink);
-    font: inherit;
-    font-size: 13px;
-    line-height: 1;
-    cursor: pointer;
+    border-color: color-mix(in srgb, var(--del-ink) 55%, transparent);
     transition: border-color 0.12s, background-color 0.12s;
   }
-  .thread .drop:hover, .whisper .drop:hover { border-color: var(--del-ink); background: var(--del-bg); }
+  button.tiny.drop:hover { color: var(--del-ink); border-color: var(--del-ink); background: var(--del-bg); }
+  button.tiny.drop svg { width: 6px; height: 6px; }
 
   .log {
     position: fixed;
@@ -3495,8 +3491,8 @@
       head.append(mark);
     }
     const drop = document.createElement("button");
-    drop.className = "drop";
-    drop.textContent = "\u00d7";
+    drop.className = "tiny drop";
+    drop.innerHTML = cross;
     if (note.pending) {
       drop.dataset.tip = "Remove this comment";
       drop.addEventListener("click", () => {
@@ -3640,8 +3636,8 @@
       // leave the ones under it standing against nothing.
       if (!note.pending && notes.live && answer.whisper && carries) {
         const forget = document.createElement("button");
-        forget.className = "drop";
-        forget.textContent = "\u00d7";
+        forget.className = "tiny drop";
+        forget.innerHTML = cross;
         forget.dataset.tip = "Forget this note";
         forget.addEventListener("click", async () => {
           if (!window.confirm("Forget this note?")) return;
@@ -3655,8 +3651,8 @@
       }
       if (!note.pending && notes.live && !answer.whisper && place === answers.length - 1) {
         const undo = document.createElement("button");
-        undo.className = "drop";
-        undo.textContent = "\u00d7";
+        undo.className = "tiny drop";
+        undo.innerHTML = cross;
         undo.dataset.tip = note.github === "posted" ? "Delete this reply, here and on the pull request" : "Delete this reply";
         undo.addEventListener("click", async () => {
           if (!window.confirm("Delete the last reply?")) return;
@@ -4833,6 +4829,7 @@
     if (card) jump(Number(card.id.slice(1)));
   }
 
+  const cross = '<svg viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" aria-hidden="true"><path d="M1 1l6 6M7 1 1 7"/></svg>';
   const chevron = '<svg class="chev" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5"/></svg>';
   const tickMark = '<svg class="tick" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 6.5 4.7 9 10 3.5"/></svg>';
 
