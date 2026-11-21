@@ -37,12 +37,14 @@ def play():
 @pytest.fixture(scope="module", params=[pytest.param(kind, marks=pytest.mark.xdist_group(kind)) for kind in ENGINES])
 def browser(play, request):
     kind = getattr(play, request.param)
+    # Chromium keeps the scrollbar a reader with scrollbars shown sees, standing over the right edge of the window.
+    shown = {"ignore_default_args": ["--hide-scrollbars"]} if request.param == "chromium" else {}
     try:
-        yield kind.launch()
+        yield kind.launch(**shown)
     except playwright.Error:
         # A machine may carry the system browser rather than the bundled build.
         try:
-            yield kind.launch(channel="chrome" if request.param == "chromium" else request.param)
+            yield kind.launch(channel="chrome" if request.param == "chromium" else request.param, **shown)
         except playwright.Error as error:
             pytest.skip(f"{request.param} is not installed: {error}")
 
@@ -1227,7 +1229,7 @@ def test_the_path_box_lists_what_it_matches_for_picking_by_name(page):
     # One panel, centred, carrying the box being typed in: the caret is there rather than in the bar.
     assert page.evaluate("() => document.activeElement.id") == "pq"
     box = page.locator("#palette").bounding_box()
-    assert abs((box["x"] + box["width"] / 2) - 1200 / 2) < 2
+    assert abs((box["x"] + box["width"] / 2) - page.evaluate("() => document.documentElement.clientWidth") / 2) < 2
     paths = page.evaluate("() => [...document.querySelectorAll('section.file')].map((card) => card.dataset.path)")
     assert listed.count() == len(paths)
     # The name stands on its own and the directory beside it, which is how a file is recognised in a list of many.
@@ -1370,7 +1372,8 @@ def test_the_controls_answer_the_pointer(page):
     assert tip.inner_text() == "Refresh the diffs once the branch has moved on"
     told, refresh = tip.bounding_box(), page.locator("#moved").bounding_box()
     assert told["y"] >= refresh["y"] + refresh["height"]
-    assert told["x"] >= 0 and told["x"] + told["width"] <= page.viewport_size["width"]
+    # Inside the page, clear of the scrollbar standing over the right edge of the window.
+    assert told["x"] >= 0 and told["x"] + told["width"] <= page.evaluate("() => document.documentElement.clientWidth")
     # Moving on to the next control, it says the next thing at once, and nothing once the pointer leaves them.
     page.locator("#cnext").hover(force=True)
     page.wait_for_function("() => document.getElementById('tip').textContent === 'Next comment'", timeout=200)
@@ -3093,6 +3096,8 @@ def test_what_the_threads_say_is_found_when_asked(page, desk):
 def test_the_find_box_widens_as_its_edge_is_dragged(page):
     page.keyboard.press("Control+f")
     page.wait_for_selector("#find:not([hidden])")
+    # Nothing asked yet, the count says as much in the form it always takes.
+    assert page.locator("#fcount").inner_text() == "0/0"
     box = page.locator("#find .search")
     narrow = box.bounding_box()["width"]
     # Pulled left by its edge, the box widens by as much, the bar staying where it ends on the right.
@@ -4039,7 +4044,7 @@ def test_a_comment_written_on_the_pull_request_shows_whose_it_is_and_is_answered
         assert head.locator(".who .seq").inner_text() == f"[{seq}]"
         # Whose remark it is stands in the line; when it was said and where it stands are what hovering says.
         assert head.locator(".who .by").inner_text() == "Milotrince"
-        assert head.get_attribute("data-tip") == "2026-08-22 09:00, submitted on the pull request"
+        assert head.locator(".who").get_attribute("data-tip") == "2026-08-22 09:00, submitted on the pull request"
         assert head.locator("button.tiny").filter(has_text="Edit").count() == 0
         assert head.locator("button.drop").count() == 0
         assert page.locator(f"#note-{seq} .actions button.ghost").filter(has_text="Reply").count() == 1
@@ -4411,7 +4416,11 @@ def test_a_remark_and_a_reply_both_say_when_they_were_said_and_where_they_were_w
 
     # Written here and answered here, so both say so, each with the time it was said.
     head = page.locator(f"#note-{made} .thread > .line").first
-    assert head.get_attribute("data-tip").endswith(", submitted here")
+    assert head.locator(".who").get_attribute("data-tip").endswith(", submitted here")
+    # Said by the tag alone: the words of the remark beside it say nothing when pointed at.
+    head.locator(".said .text").hover()
+    page.wait_for_timeout(600)
+    assert page.locator("#tip").is_hidden()
     answer = page.locator(f"#note-{made} .line.reply .who").first
     assert answer.get_attribute("data-tip").endswith(", submitted here")
     assert re.match(r"^[0-9]", answer.get_attribute("data-tip"))
@@ -4427,7 +4436,9 @@ def test_a_remark_and_a_reply_both_say_when_they_were_said_and_where_they_were_w
         }""",
         made,
     )
-    assert page.locator(f"#note-{made} .thread > .line").first.get_attribute("data-tip").endswith(", submitted here")
+    assert (
+        page.locator(f"#note-{made} .thread > .line .who").first.get_attribute("data-tip").endswith(", submitted here")
+    )
     assert page.locator(f"#note-{made} .line.reply .who").first.get_attribute("data-tip").endswith(", submitted here")
 
 

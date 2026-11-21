@@ -491,13 +491,13 @@
   #tip {
     position: fixed;
     z-index: 100;
-    max-width: min(420px, calc(100vw - 16px));
+    max-width: min(420px, calc(100% - 16px));
     padding: 4px 8px;
     border-radius: 5px;
-    /* A touch see-through, the page behind it blurred so the words keep their contrast. */
-    background: color-mix(in srgb, var(--ink) 90%, transparent);
-    -webkit-backdrop-filter: blur(6px);
-    backdrop-filter: blur(6px);
+    /* A touch see-through, the shapes of the page behind it showing, softened so the words keep their contrast. */
+    background: color-mix(in srgb, var(--ink) 75%, transparent);
+    -webkit-backdrop-filter: blur(1px);
+    backdrop-filter: blur(1px);
     color: var(--surface);
     font-family: var(--sans);
     font-size: 11.5px;
@@ -1143,10 +1143,10 @@
     max-width: 300px;
     padding: 6px 9px;
     border-radius: 6px;
-    /* A touch see-through, the page behind it blurred so the words keep their contrast. */
-    background: color-mix(in srgb, var(--ink) 90%, transparent);
-    -webkit-backdrop-filter: blur(6px);
-    backdrop-filter: blur(6px);
+    /* A touch see-through, the shapes of the page behind it showing, softened so the words keep their contrast. */
+    background: color-mix(in srgb, var(--ink) 75%, transparent);
+    -webkit-backdrop-filter: blur(1px);
+    backdrop-filter: blur(1px);
     color: var(--surface);
     font-size: 11.5px;
     line-height: 1.4;
@@ -1346,7 +1346,7 @@
       <button class="mode" id="fthreads" aria-pressed="false" data-tip="Find in comments too (Alt+T)" aria-label="Find in comments too"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg></button>
     </span>
   </div>
-  <span class="count" id="fcount"></span>
+  <span class="count" id="fcount">0/0</span>
   <button class="mode" id="fprev" data-tip="Previous match (Shift+Enter)">&#8593;</button>
   <button class="mode" id="fnext" data-tip="Next match (Enter)">&#8595;</button>
   <button class="mode" id="fclose" data-tip="Close (Escape)">&#215;</button>
@@ -3438,7 +3438,8 @@
       from.className = `by ${note.who ? (isReader(note.who) ? "you" : "them") : "you"}`;
       from.textContent = note.who ? spokenBy(note.who) : "you";
       who.append(document.createTextNode(" "), from);
-      head.dataset.tip = saidWhen(note.at, note.who);
+      // Said by the tag alone, as a reply's is: the line holds the words and the buttons, which say their own.
+      who.dataset.tip = saidWhen(note.at, note.who);
     }
     const text = document.createElement("span");
     text.className = "said";
@@ -4853,7 +4854,7 @@
     const hit = finding.hits[finding.at];
     const pattern = wanted();
     els.fq.dataset.bad = String(pattern === undefined);
-    const none = pattern === undefined ? "?" : pattern ? "0/0" : "";
+    const none = pattern === undefined ? "?" : "0/0";
     els.fcount.textContent = hit ? `${finding.at + 1}/${finding.hits.length}` : none;
     if (!hit) return;
     const card = document.querySelector(`section.file[data-path="${CSS.escape(hit.path)}"]`);
@@ -6253,7 +6254,7 @@
   const findBox = els.find.querySelector(".search");
   const narrowest = parseFloat(getComputedStyle(findBox).width);
   const widenFind = (width) => {
-    const widest = Math.max(narrowest, window.innerWidth - 240);
+    const widest = Math.max(narrowest, document.documentElement.clientWidth - 240);
     findBox.style.width = `${Math.round(Math.min(widest, Math.max(narrowest, width)))}px`;
   };
   try {
@@ -6388,7 +6389,8 @@
     if (!open) return;
     drawAuthors();
     const box = els.settingsopen.getBoundingClientRect();
-    els.settings.style.left = `${Math.max(8, Math.min(box.left, window.innerWidth - els.settings.firstElementChild.offsetWidth - 8))}px`;
+    const edge = document.documentElement.clientWidth - els.settings.firstElementChild.offsetWidth - 8;
+    els.settings.style.left = `${Math.max(8, Math.min(box.left, edge))}px`;
   }
   els.settingsopen.addEventListener("click", () => openSettings(els.settings.dataset.open !== "true"));
   // Says what the setting of a row does, beside the panel on whichever side has room for it, or nothing without a row.
@@ -6653,12 +6655,14 @@
     tip.textContent = tipFor.dataset.tip;
     tip.hidden = false;
     balance(tip);
-    // Under the control, or over it where the window has no room below, and kept inside the window across.
+    // Under the control, or over it where the window has no room below, and kept inside the page across: the width of
+    // the window counts a scrollbar that stands over its right edge.
     const box = tipFor.getBoundingClientRect();
     const below = box.bottom + 6 + tip.offsetHeight <= window.innerHeight - 4;
     tip.style.top = `${below ? box.bottom + 6 : box.top - 6 - tip.offsetHeight}px`;
     const across = box.left + box.width / 2 - tip.offsetWidth / 2;
-    tip.style.left = `${Math.max(4, Math.min(across, window.innerWidth - tip.offsetWidth - 4))}px`;
+    const edge = document.documentElement.clientWidth - tip.offsetWidth - 4;
+    tip.style.left = `${Math.max(4, Math.min(across, edge))}px`;
   }
 
   function hideTip() {
