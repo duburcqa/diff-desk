@@ -1377,6 +1377,68 @@ def test_the_controls_answer_the_pointer(page):
     close.click()
 
 
+def test_a_thread_named_by_its_number_is_a_link_and_lists_the_threads_naming_it(page, desk):
+    branch = page.evaluate("() => data.branches[0].ref")
+    named = desk.post(
+        "/comments",
+        [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": "the one named"}],
+    )["seq"]
+    naming = desk.post(
+        "/comments",
+        [
+            {
+                "branch": branch,
+                "path": "pkg/sub/deep.py",
+                "line": 2,
+                "side": "new",
+                "text": f"see [{named}], and [99999] is nobody",
+            }
+        ],
+    )["seq"]
+    # Named in a reply too, and named in code, which is code rather than a mention.
+    also = desk.post(
+        "/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": "another"}]
+    )["seq"]
+    desk.post("/reply", {"seq": also, "text": f"as in [{named}], unlike `[{naming}]`", "who": "session"})
+    page.reload(wait_until="load")
+    page.wait_for_selector(f"#note-{named} .thread")
+    try:
+        # A number naming a thread of the review is a link to it, and one naming nothing stays as it was written.
+        link = page.locator(f"#note-{naming} a.xref")
+        assert link.all_inner_texts() == [f"[{named}]"]
+        assert "[99999] is nobody" in page.locator(f"#note-{naming} .said").first.inner_text()
+        assert page.locator(f"#note-{also} a.xref").all_inner_texts() == [f"[{named}]"]
+
+        # The thread named lists, beside its buttons, the threads naming it; code names nothing.
+        listed = page.locator(f"#note-{named} .mentions .chip")
+        assert listed.all_inner_texts() == [f"[{naming}]", f"[{also}]"]
+        assert page.locator(f"#note-{naming} .mentions").count() == 0
+
+        # Followed, a link lands on the thread it names, where the thread it was followed from stands out.
+        link.click()
+        page.wait_for_function(
+            """(seq) => {
+              const box = document.getElementById(`note-${seq}`).getBoundingClientRect();
+              return box.top >= 0 && box.top < window.innerHeight;
+            }""",
+            arg=named,
+        )
+        assert page.locator(f"#note-{named} .mentions .chip.from").all_inner_texts() == [f"[{naming}]"]
+
+        # And one listed there goes back the other way.
+        listed.filter(has_text=f"[{also}]").click()
+        page.wait_for_function(
+            """(seq) => {
+              const box = document.getElementById(`note-${seq}`).getBoundingClientRect();
+              return box.top >= 0 && box.top < window.innerHeight;
+            }""",
+            arg=also,
+        )
+    finally:
+        for seq in (named, naming, also):
+            desk.post("/drop", {"seq": seq, "who": "you"})
+
+
 def test_comments_are_filtered_by_their_author_and_stepped_through(page, desk):
     ours = desk.post(
         "/comments",

@@ -870,6 +870,13 @@
   .thread .actions { align-items: center; flex-wrap: wrap; }
   /* The rest of a reply box reads with the boxes above; what is its own here is that it fills the row it sits in. */
   .thread .actions textarea { flex: 1; min-height: 0; }
+  /* Another thread named by its number, and the threads naming this one, set at the far end of its buttons. The one the
+     reader jumped from stands out among them. */
+  a.xref { color: var(--accent); font-family: var(--mono); font-size: 0.95em; text-decoration: none; }
+  a.xref:hover { text-decoration: underline; }
+  .thread .mentions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-left: auto; color: var(--muted); font-size: 11.5px; }
+  .thread .mentions .chip { font-family: var(--mono); }
+  .thread .mentions .chip.from { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
   button.tiny {
     flex: none;
     font: inherit;
@@ -2968,8 +2975,62 @@
       String.raw`(?<![\w*])\*(?![\s*])[^*\n]*?[^\s*]\*(?![\w*])`,
       String.raw`(?<![\w_])_(?![\s_])[^_\n]*?[^\s_]_(?![\w_])`,
       String.raw`https?:\/\/[^\s<>()]*[^\s<>().,;:!?'"]`,
+      // Another thread of the review, named by its number as the desk numbers it (see `mentions`).
+      String.raw`(?<![\w\]])\[\d+\](?![(\[])`,
     ].join("|"),
   );
+
+  // The threads mentioning each thread of the review, read once for every reading of the comments. A mention is a
+  // thread's number in brackets, in the remark or a reply, outside code.
+  const MENTION = /(?<![\w\]])\[(\d+)\](?![(\[])/g;
+  const mentionsRead = new WeakMap();
+
+  function mentions(seq) {
+    if (!mentionsRead.has(notes.sent)) {
+      const read = new Map();
+      for (const note of mine()) {
+        const said = [note.text, ...(note.replies || []).map((answer) => answer.text)].join("\n");
+        const prose = said.replace(/```[\s\S]*?(?:```|$)/g, " ").replace(/`[^`\n]+`/g, " ");
+        for (const [, named] of prose.matchAll(MENTION)) {
+          const target = Number(named);
+          if (target === note.seq) continue;
+          if (!read.has(target)) read.set(target, new Set());
+          read.get(target).add(note.seq);
+        }
+      }
+      mentionsRead.set(notes.sent, read);
+    }
+    const by = mentionsRead.get(notes.sent).get(seq);
+    return by ? mine().filter((note) => by.has(note.seq)) : [];
+  }
+
+  // The thread a node stands in, by number, or null outside one.
+  function threadOf(node) {
+    const row = node.closest("tr.noterow[id^='note-'], .filenote[data-seq]");
+    if (!row) return null;
+    const seq = Number(row.dataset.seq || row.id.slice("note-".length));
+    return Number.isNaN(seq) ? null : seq;
+  }
+
+  // The last jump made along a mention, so the thread it came from stands out among the ones mentioning the thread
+  // reached, for as long as the reader stays with it.
+  let jumped = null;
+
+  function markJumped() {
+    for (const chip of document.querySelectorAll(".mentions .chip.from")) chip.classList.remove("from");
+    if (!jumped) return;
+    for (const chip of document.querySelectorAll(`.mentions[data-of="${jumped.to}"] .chip[data-seq="${jumped.from}"]`)) {
+      chip.classList.add("from");
+    }
+  }
+
+  function jumpTo(seq, from) {
+    const note = mine().find((row) => row.seq === seq);
+    if (!note) return;
+    jumped = { to: seq, from };
+    reach(note);
+    markJumped();
+  }
 
   function phrase(into, text) {
     // Bold as bold, a link as a link, and a badge as the word it stands for: assembled as nodes, so nothing said on a
@@ -2981,7 +3042,21 @@
       const bold = piece.match(/^\*\*([^*\n]+)\*\*$/) || piece.match(/^__([^_\n]+)__$/);
       const struck = piece.match(/^~~([^~\n]+)~~$/);
       const leaned = piece.match(/^\*([^*\n]+)\*$/) || piece.match(/^_([^_\n]+)_$/);
-      if (badge) {
+      const named = piece.match(/^\[(\d+)\]$/);
+      const target = named ? mine().find((note) => note.seq === Number(named[1])) : null;
+      if (target) {
+        // A thread of this review named by its number goes to that thread, saying what it holds.
+        const anchor = document.createElement("a");
+        anchor.className = "xref";
+        anchor.href = `#${target.seq}`;
+        anchor.textContent = piece;
+        anchor.dataset.tip = outline(target.text).slice(0, 120);
+        anchor.addEventListener("click", (event) => {
+          event.preventDefault();
+          jumpTo(target.seq, threadOf(anchor));
+        });
+        into.append(anchor);
+      } else if (badge) {
         const word = badge[1].replace(/\s*badge$/i, "").trim();
         if (word) into.append(document.createTextNode(word));
       } else if (link) {
@@ -3672,6 +3747,23 @@
           render();
         });
         actions.append(out);
+      }
+      const mentioning = mentions(note.seq);
+      if (mentioning.length) {
+        const listed = actions.appendChild(document.createElement("span"));
+        listed.className = "mentions";
+        listed.dataset.of = note.seq;
+        listed.append("Mentioned in");
+        for (const other of mentioning) {
+          const chip = listed.appendChild(document.createElement("button"));
+          chip.className = "chip";
+          chip.type = "button";
+          chip.dataset.seq = other.seq;
+          chip.textContent = `[${other.seq}]`;
+          chip.dataset.tip = outline(other.text).slice(0, 120);
+          if (jumped && jumped.to === note.seq && jumped.from === other.seq) chip.classList.add("from");
+          chip.addEventListener("click", () => jumpTo(other.seq, note.seq));
+        }
       }
       box.append(actions);
     }
