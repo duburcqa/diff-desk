@@ -177,9 +177,14 @@
     padding: 6px 9px;
   }
   select { max-width: 44ch; }
-  /* As tall as the buttons beside it, a line inside the same padding and border: a select draws itself a little
-     shorter from the same padding. */
-  #scope { height: calc(1lh + 14px); }
+  /* The boxes and buttons of the bar stand as tall as its pairs of arrows and its stacks: a line inside a slimmer
+     padding than the panels give theirs. */
+  header .toggle, header .tab, header select, header .search input, header #goto, header button.solid {
+    padding-top: 3px;
+    padding-bottom: 3px;
+  }
+  /* A line inside that padding and the border: a select draws itself a little shorter from the same padding. */
+  #scope { height: calc(1lh + 8px); }
   /* The box takes what the rest does not need, and gives it back first. */
   .search { position: relative; display: flex; align-items: center; flex: 1 1 12ch; min-width: 8ch; margin-right: auto; }
   .search input { width: 100%; min-width: 0; padding-left: 26px; }
@@ -330,7 +335,7 @@
   .step:disabled { border-color: transparent; background: #ababab; color: #e2e2e2; cursor: default; }
 
   /* One above the other, as the pairs of arrows are, so the bar reads as a row of small stacks of the same height. */
-  .totals { flex: none; display: grid; justify-items: end; gap: 1px; font-family: var(--mono); font-size: 11px; line-height: 12px; }
+  .totals { flex: none; display: grid; justify-items: end; gap: 3px; font-family: var(--mono); font-size: 11px; line-height: 12px; }
   .totals .plus { color: var(--add-ink); }
   .totals .minus { color: var(--del-ink); }
 
@@ -1151,7 +1156,7 @@
 
   /* The choices of how the diff is shown, one switch each, a choice that only applies under another set beneath it. */
   /* As tall as the buttons beside it and square: its icon takes the line their words take, inside the same padding. */
-  #settingsopen { display: grid; place-items: center; padding: 6px; color: var(--muted); }
+  #settingsopen { display: grid; place-items: center; padding: 3px; color: var(--muted); }
   #settingsopen svg { width: 1lh; height: 1lh; }
   #settingsopen:hover { color: var(--ink); }
   .settings { position: fixed; top: calc(var(--head) + 8px); z-index: 60; display: none; }
