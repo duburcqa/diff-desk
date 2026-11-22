@@ -3199,6 +3199,15 @@ def test_what_the_threads_say_is_found_when_asked(page, desk):
 def test_the_find_box_widens_as_its_edge_is_dragged(page):
     page.keyboard.press("Control+f")
     page.wait_for_selector("#find:not([hidden])")
+    # Hung below the file head pinned under the bar, whose tick stays within reach while the hits are stepped through.
+    assert page.evaluate(
+        """() => {
+          const tick = document.querySelector('section.file .filehead .seen');
+          const box = tick.getBoundingClientRect();
+          const under = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+          return tick.contains(under) && document.getElementById('find').getBoundingClientRect().top >= box.bottom;
+        }"""
+    )
     # Nothing asked yet, the count says as much in the form it always takes.
     assert page.locator("#fcount").inner_text() == "0/0"
     box = page.locator("#find .search")
