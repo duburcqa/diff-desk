@@ -219,13 +219,13 @@ def spoken_as(item):
 
     Every body sent and every body compared is read through here, so a comment carrying a screenshot travels by what
     was posted for it rather than by its words alone. A file GitHub has no copy of is left out, a link to it standing
-    for nothing. A thread named by its number goes out as a link to that thread on GitHub, wherever `linked_up` found
-    one for it.
+    for nothing. A thread named by its number goes out as a link to that thread on GitHub reading "this thread", since
+    the number means nothing there, wherever `linked_up` found one for it.
     """
     xrefs = item.get("xrefs") or {}
     pieces = CODE.split(item.get("text") or "")
     pieces[::2] = [
-        MENTION.sub(lambda named: f"[{named[0]}]({xrefs[named[1]]})" if named[1] in xrefs else named[0], prose)
+        MENTION.sub(lambda named: f"[this thread]({xrefs[named[1]]})" if named[1] in xrefs else named[0], prose)
         for prose in pieces[::2]
     ]
     links = [

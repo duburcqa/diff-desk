@@ -2522,7 +2522,7 @@ def test_a_thread_named_by_number_reaches_the_pull_request_as_a_link_to_it(desk)
     )
     assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 34, "seq": [naming]})["ok"]
     linked = (
-        f"same as [[{first}]](https://github.com/x/y/pull/34#r501), unlike `[{first}]` in code, "
+        f"same as [this thread](https://github.com/x/y/pull/34#r501), unlike `[{first}]` in code, "
         f"and [{local}] which only this desk holds"
     )
     assert linked in [call for call in desk.github_calls() if "pulls/34/comments" in call][-1]
@@ -2561,7 +2561,7 @@ def test_a_thread_named_by_number_reaches_the_pull_request_as_a_link_to_it(desk)
     desk.github_answers(rules=[reviewed, {"match": "/comments/701/replies", "out": json.dumps({"id": 702})}])
     assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 34, "seq": [naming]})["replies"] == 1
     answered = [call for call in desk.github_calls() if "701/replies" in call][-1]
-    assert f"body=and [[{second}]](https://github.com/x/y/pull/34#r601) too" in answered
+    assert "body=and [this thread](https://github.com/x/y/pull/34#r601) too" in answered
     desk.github_answers(rules=[reviewed])
     assert desk.post("/sync", {"repo": "someone/somewhere", "pr": 34})["took"] == 0
 
