@@ -1221,7 +1221,7 @@ def test_a_file_opened_by_hand_stays_open_when_the_page_redraws(page):
     card.locator(".filehead").first.click()
 
 
-def test_the_review_key_folds_file(page):
+def test_reviewed_files_fold_one_by_one_or_all_at_once(page):
     card = page.locator("section.file").first
     # Folded and opened again by hand, which leaves a decision on record for the key to override.
     card.locator(".filehead").first.click()
@@ -1232,6 +1232,24 @@ def test_the_review_key_folds_file(page):
     page.wait_for_selector("section.file[data-done='true'][data-open='false']")
     page.locator("body").press("r")
     page.wait_for_selector("section.file[data-done='false'][data-open='true']")
+
+    # Reviewed files opened again to be read, folded all at once by the key or the button over the file list, the files
+    # left to review staying open.
+    cards = page.locator("section.file")
+    reviewed = [cards.nth(0), cards.nth(1)]
+    for held in reviewed:
+        held.locator("input[type=checkbox]").check()
+        held.locator(".filehead").first.click()
+        assert held.get_attribute("data-open") == "true"
+    left = cards.nth(2)
+    assert left.get_attribute("data-open") == "true"
+    for fold in (lambda: page.locator("body").press("z"), lambda: page.locator("#foldreviewed").click()):
+        fold()
+        page.wait_for_selector("section.file[data-done='true'][data-open='true']", state="detached")
+        assert page.locator("section.file[data-done='true'][data-open='false']").count() == len(reviewed)
+        assert left.get_attribute("data-open") == "true"
+        reviewed[0].locator(".filehead").first.click()
+        assert reviewed[0].get_attribute("data-open") == "true"
 
 
 def test_the_path_box_lists_what_it_matches_for_picking_by_name(page):
@@ -4617,6 +4635,49 @@ def test_reaching_a_comment_in_a_file_far_from_the_reader_lands_on_it(page, desk
     assert until(lambda: page.evaluate(latest, made), seconds=6.0)
     page.wait_for_timeout(900)
     assert page.evaluate(latest, made)
+
+
+def test_going_back_from_a_comment_returns_to_the_place_left(page, desk):
+    branch = page.evaluate("() => data.branches[0].ref")
+    # Written on the first file of the review, far from a reader standing at the end of it.
+    path = page.evaluate("() => data.branches[0].files[0].path")
+    line = page.evaluate(
+        "(path) => (data.branches[0].files.find((file) => file.path === path).lines.find((row) => row[0] !== 'h'))[2]",
+        path,
+    )
+    said = {"branch": branch, "path": path, "line": line, "side": "new", "text": "gone to and come back from"}
+    made = desk.post("/comments", [said])["seq"]
+    page.set_viewport_size({"width": 1200, "height": 380})
+    page.reload(wait_until="load")
+    page.wait_for_selector("section.file")
+    assert page.locator("#goback").is_disabled()
+    # The file under the bar and how far it has been scrolled under it, which is what the reader is reading.
+    standing = """() => {
+      const covered = document.querySelector('header').getBoundingClientRect().bottom;
+      const cards = [...document.querySelectorAll('section.file')];
+      const card = cards.find((one) => one.getBoundingClientRect().bottom > covered);
+      return [card.dataset.path, Math.round(card.getBoundingClientRect().top - covered)];
+    }"""
+    places = []
+    for start in ("() => window.scrollTo(0, document.body.scrollHeight)", "() => window.scrollTo(0, 0)"):
+        page.evaluate(start)
+        page.wait_for_timeout(400)
+        places.append(page.evaluate(standing))
+        page.locator("#goto").fill(str(made))
+        page.locator("#goto").press("Enter")
+        page.wait_for_function("(seq) => document.querySelector(`#note-${seq} .thread.found`)", arg=made)
+        page.wait_for_timeout(900)
+
+    # Back where the reader was before each jump, one jump at a time, by the key or the button joined to the box that
+    # goes to a comment, and nowhere further once every jump is undone.
+    backs = (lambda: page.locator("body").press("b"), lambda: page.locator("#goback").click())
+    for back, left in zip(backs, reversed(places), strict=True):
+        back()
+        page.wait_for_timeout(300)
+        reached = page.evaluate(standing)
+        assert reached[0] == left[0]
+        assert abs(reached[1] - left[1]) <= 2
+    assert page.locator("#goback").is_disabled()
 
 
 def test_a_remark_and_a_reply_both_say_when_they_were_said_and_where_they_were_written(page, desk):
