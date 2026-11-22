@@ -1666,8 +1666,9 @@ def test_a_page_on_its_way_out_asks_for_nothing_more(page, desk):
 
     # Leaving begins at beforeunload, not at pagehide: between the two the next document is being fetched, which takes
     # the desk as long as collecting the diffs again, and a request started in that window is refused by WebKit and
-    # reported as a page error. A round fired at beforeunload, after the page has heard it, asks for nothing.
-    page.evaluate("() => addEventListener('beforeunload', () => tick())")
+    # reported as a page error. A round or a refresh fired at beforeunload, after the page has heard it, asks for
+    # nothing, the refresh included with the progress it polls for.
+    page.evaluate("() => addEventListener('beforeunload', () => { tick(); rescan(true); })")
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
 
