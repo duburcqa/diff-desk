@@ -1591,7 +1591,7 @@
     // The desk holds the ticks, so they outlive this browser, its profile, and the address the page was opened at. What
     // it holds wins; what only this browser holds is sent up, which is how a reader who ticked offline keeps it.
     try {
-      const response = await fetch("reviewed", { cache: "no-store" });
+      const response = await ask("reviewed", { cache: "no-store" });
       if (!response.ok) throw new Error("no endpoint");
       const held = (await response.json()).marks || {};
       const mine = Object.fromEntries(Object.entries(seen).filter(([mark]) => !(mark in held)));
@@ -1733,9 +1733,15 @@
 
   /* ---------- comments ---------- */
 
-  // Set once the page is on its way out. A request still in flight when it goes is reported as an error by some
-  // engines - and by the suite, which holds every page to raising none - so nothing new is asked for after it.
+  // Set once the page is on its way out. A request started after it is reported as an error by WebKit - and by the
+  // suite, which holds every page to raising none - so nothing new is asked for after it.
   let leaving = false;
+
+  // Every request of the page goes through here, so that none starts once the page is leaving, whatever timer or
+  // press asks for it: refused at once instead, as a request that failed, which every caller already handles.
+  function ask(route, options) {
+    return leaving ? Promise.reject(new Error("the page is going")) : fetch(route, options);
+  }
 
   // A desk answering with code older than the page it rendered: the tool moved on under it, so the page asks for
   // endpoints it has never had. Nothing the page does can cure that - the process has to be started again - so it is
@@ -1770,7 +1776,7 @@
 
   async function sent(route, payload) {
     try {
-      const answer = await fetch(route, {
+      const answer = await ask(route, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -1791,7 +1797,7 @@
     // is on the desk, and what the comment holds is its name.
     if (leaving) return { ok: false, error: "the page is going" };
     try {
-      const answer = await fetch(`media?name=${encodeURIComponent(file.name || "pasted.png")}`, {
+      const answer = await ask(`media?name=${encodeURIComponent(file.name || "pasted.png")}`, {
         method: "POST",
         headers: { "Content-Type": "application/octet-stream" },
         body: file,
@@ -2021,7 +2027,7 @@
     // has moved on - a commit, a fixup, work saved on disk - the page says so and waits to be asked.
     if (leaving) return;
     try {
-      const answer = await fetch("state", { cache: "no-store" });
+      const answer = await ask("state", { cache: "no-store" });
       if (!answer.ok) return;
       const { stamp, decor, desk, stale } = await answer.json();
       // What GitHub adds to the diffs lands after them, since collecting never waits on it: taken from the desk as it
@@ -2050,7 +2056,7 @@
   }
 
   async function redecorate() {
-    const fresh = await (await fetch("data", { cache: "no-store" })).json();
+    const fresh = await (await ask("data", { cache: "no-store" })).json();
     data.upstream = fresh.upstream;
     data.viewer = fresh.viewer;
     data.decor = fresh.decor;
@@ -2066,7 +2072,7 @@
   async function loadNotes() {
     if (leaving) return;
     try {
-      const response = await fetch("comments", { cache: "no-store" });
+      const response = await ask("comments", { cache: "no-store" });
       if (!response.ok) throw new Error("no endpoint");
       notes.sent = await response.json();
       notes.live = true;
@@ -4109,7 +4115,7 @@
       `lines?dir=${encodeURIComponent(data.root)}&ref=${encodeURIComponent(branch().ref)}&path=${encodeURIComponent(path)}` +
       `&from=${line}&to=${line}&anchors=${encodeURIComponent(JSON.stringify(asked))}`;
     try {
-      const answer = await (await fetch(where, { cache: "no-store" })).json();
+      const answer = await (await ask(where, { cache: "no-store" })).json();
       return !answer.stale;
     } catch (error) {
       return false;
@@ -4298,7 +4304,7 @@
       `lines?dir=${encodeURIComponent(data.root)}&rev=${encodeURIComponent(rev)}&path=${encodeURIComponent(file.path)}` +
       `&from=${from}&to=${to}&oldrev=${encodeURIComponent(oldRev)}&oldfrom=${oldFrom}${held}`;
     try {
-      return await (await fetch(where, { cache: "no-store" })).json();
+      return await (await ask(where, { cache: "no-store" })).json();
     } catch (error) {
       return { lines: [], total: 0 };
     }
@@ -4509,7 +4515,7 @@
     els.srcstatus.textContent = "reading branches...";
     const where = `refs?dir=${encodeURIComponent(els.srcdir.value)}&base=${encodeURIComponent(els.srcbase.value)}`;
     try {
-      const info = await (await fetch(where, { cache: "no-store" })).json();
+      const info = await (await ask(where, { cache: "no-store" })).json();
       // A branch being served is listed whether or not it is a local one, such as a fork's `origin/<branch>`, so its
       // base can be read and changed here. A pull request has its own row below.
       const listed = new Set(info.refs.map((row) => row.ref));
@@ -4643,7 +4649,7 @@
     els.loading.style.width = "6%";
     const following = setInterval(async () => {
       try {
-        const { done, total } = await (await fetch("progress", { cache: "no-store" })).json();
+        const { done, total } = await (await ask("progress", { cache: "no-store" })).json();
         if (els.moved.dataset.busy && total) els.loading.style.width = `${Math.max(6, (100 * done) / total)}%`;
       } catch (error) {
         // The bar stays where it was: the scan itself says what went wrong.
@@ -4651,7 +4657,7 @@
     }, 150);
     try {
       const outcome = await (
-        await fetch("scan", {
+        await ask("scan", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(order),
@@ -5523,7 +5529,7 @@
       }
     };
     // A desk that cannot line the view up leaves its files to the line diff, which is what an empty answer shows.
-    fetch(`semantic?${query}`)
+    ask(`semantic?${query}`)
       .then(asked)
       .then((answer) => settle(answer.files || {}))
       .catch(() => settle({}));
