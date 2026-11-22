@@ -2493,6 +2493,79 @@ def test_a_comment_carries_a_file_to_the_pull_request_and_keeps_a_local_one_here
     assert f"({alone['name']}, here only)" in printed
 
 
+def test_a_thread_named_by_number_reaches_the_pull_request_as_a_link_to_it(desk):
+    def remark(line, text, github=True):
+        said = {"branch": "feature", "path": "sample.py", "line": line, "side": "new", "text": text}
+        return desk.post("/comments", {"comments": [said], "github": github})["seqs"][0]
+
+    first = remark(30, "first remark")
+    desk.github_answers(
+        rules=[
+            {"match": "--jq .head.sha", "out": "abc1234\n"},
+            {"match": "pulls/34/comments", "out": json.dumps({"html_url": "https://github.com/x/y/pull/34#r501"})},
+        ]
+    )
+    assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 34, "seq": [first]})["ok"]
+    # Sent in a review, which GitHub answers with where the review is read rather than where the remark is.
+    second = remark(32, "second remark")
+    desk.github_answers(out=json.dumps({"html_url": "https://github.com/x/y/pull/34#review-1"}))
+    assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 34, "seq": [second], "summary": "a review"})["ok"]
+    local = remark(34, "kept here", github=False)
+
+    text = f"same as [{first}], unlike `[{first}]` in code, and [{local}] which only this desk holds"
+    naming = remark(36, text)
+    desk.github_answers(
+        rules=[
+            {"match": "--jq .head.sha", "out": "abc1234\n"},
+            {"match": "pulls/34/comments", "out": json.dumps({"html_url": "https://github.com/x/y/pull/34#r701"})},
+        ]
+    )
+    assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 34, "seq": [naming]})["ok"]
+    linked = (
+        f"same as [[{first}]](https://github.com/x/y/pull/34#r501), unlike `[{first}]` in code, "
+        f"and [{local}] which only this desk holds"
+    )
+    assert linked in [call for call in desk.github_calls() if "pulls/34/comments" in call][-1]
+    # The desk keeps the words as they were written, its own page linking the number to the thread here.
+    assert {row["seq"]: row for row in desk.get("/comments")}[naming]["text"] == text
+
+    # A remark that went out in a review is placed by its thread, read before the reply naming it goes out, and the
+    # thread of the remark naming the first is found again by the body it was posted with.
+    desk.post("/reply", {"seq": naming, "text": f"and [{second}] too", "who": "session"})
+
+    def thread(name, line, number, body):
+        node = {"databaseId": number, "url": f"https://github.com/x/y/pull/34#r{number}", "body": body}
+        return {
+            "id": name,
+            "isResolved": False,
+            "path": "sample.py",
+            "line": line,
+            "startLine": None,
+            "originalLine": line,
+            "originalStartLine": None,
+            "diffSide": "RIGHT",
+            "comments": {"nodes": [{**node, "path": "sample.py", "author": {"login": "duburcqa"}}]},
+        }
+
+    threads = [
+        thread("T_first", 30, 501, "first remark"),
+        thread("T_second", 32, 601, "second remark"),
+        thread("T_naming", 36, 701, linked),
+    ]
+    reviewed = {
+        "match": "reviewThreads",
+        "out": json.dumps(
+            {"data": {"repository": {"pullRequest": {"headRefName": "feature", "reviewThreads": {"nodes": threads}}}}}
+        ),
+    }
+    desk.github_answers(rules=[reviewed, {"match": "/comments/701/replies", "out": json.dumps({"id": 702})}])
+    assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 34, "seq": [naming]})["replies"] == 1
+    answered = [call for call in desk.github_calls() if "701/replies" in call][-1]
+    assert f"body=and [[{second}]](https://github.com/x/y/pull/34#r601) too" in answered
+    desk.github_answers(rules=[reviewed])
+    assert desk.post("/sync", {"repo": "someone/somewhere", "pr": 34})["took"] == 0
+
+
 def test_the_sync_command_says_what_it_brought_back(desk):
     made = desk.post(
         "/comments",
