@@ -2399,10 +2399,15 @@
   function missedBy(target, seq) {
     // How far the target stands from where an aim leaves it: a thread in the middle of the room under the header, and
     // a file with its head on the line its own scroll margin asks for, which is where the reader is said to be on it.
+    // A thread taller than the room is read from its latest reply, so that reply is what stands in the middle: centring
+    // the whole thread would leave what was said last below the view.
     const box = target.getBoundingClientRect();
     if (seq === null) return box.top - parseFloat(getComputedStyle(target).scrollMarginTop);
     const covered = document.querySelector("header").getBoundingClientRect().bottom;
-    return box.top - covered - Math.max(0, (window.innerHeight - covered - box.height) / 2);
+    const room = window.innerHeight - covered;
+    const latest = [...target.querySelectorAll(".line.reply")].filter((reply) => reply.getClientRects().length).pop();
+    const read = box.height > room && latest ? latest.getBoundingClientRect() : box;
+    return read.top - covered - Math.max(0, (room - read.height) / 2);
   }
 
   function aim(aimed, tries, again) {

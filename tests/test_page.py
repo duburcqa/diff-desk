@@ -4552,6 +4552,31 @@ def test_reaching_a_comment_in_a_file_far_from_the_reader_lands_on_it(page, desk
         made,
     )
 
+    # A thread taller than the view is reached at what was said last, which stands in the middle: centring the whole
+    # thread leaves its latest reply below the view.
+    for number in range(6):
+        desk.post("/reply", {"seq": made, "text": f"answer {number}\n\nwith\n\nseveral\n\nlines", "who": "session"})
+    desk.post("/reply", {"seq": made, "text": "said last", "who": "session"})
+    page.evaluate("() => tick()")
+    page.wait_for_selector(f"#note-{made} .line.reply:has-text('said last')")
+    assert page.evaluate(
+        "(seq) => document.getElementById(`note-${seq}`).getBoundingClientRect().height > window.innerHeight", made
+    )
+    page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+    page.locator("#logopen").click()
+    page.wait_for_selector("#log[data-open='true']")
+    page.locator(".logrow").filter(has_text=saying).first.click()
+    latest = """(seq) => {
+      const replies = document.querySelectorAll(`#note-${seq} .line.reply`);
+      const rect = replies[replies.length - 1].getBoundingClientRect();
+      const covered = document.querySelector('header').getBoundingClientRect().bottom;
+      const off = rect.top - covered - Math.max(0, (window.innerHeight - covered - rect.height) / 2);
+      return Math.abs(off) < 4;
+    }"""
+    assert until(lambda: page.evaluate(latest, made), seconds=6.0)
+    page.wait_for_timeout(900)
+    assert page.evaluate(latest, made)
+
 
 def test_a_remark_and_a_reply_both_say_when_they_were_said_and_where_they_were_written(page, desk):
     branch = page.evaluate("() => data.branches[0].ref")
