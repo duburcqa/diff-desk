@@ -205,7 +205,7 @@
   #palette .search { flex: none; width: 100%; margin: 0; }
   #picks { max-height: min(56vh, 480px); overflow-y: auto; }
   #veil[hidden], #palette[hidden] { display: none; }
-  /* Finding text, under the bar and out of the way of the diff it reads. */
+  /* Finding text, under the bar and the file head pinned below it, out of the way of the diff it reads. */
   #find {
     position: fixed;
     z-index: 44;
@@ -5020,8 +5020,15 @@
 
   function openFind() {
     // Hung under the header's own edge, read now: the header folds onto two rows in a narrow window, and a bar placed
-    // by the header's nominal height then stands across it.
-    els.find.style.top = `${document.querySelector("header").getBoundingClientRect().bottom + 8}px`;
+    // by the header's nominal height then stands across it. Below the file head standing under it too, whose tick is
+    // what the reader presses on their way through the hits: pinned there, or a little lower at the top of the page.
+    const header = document.querySelector("header").getBoundingClientRect().bottom;
+    const fileHead = [...document.querySelectorAll(".filehead")]
+      .map((head) => head.getBoundingClientRect())
+      .find((box) => box.height && box.bottom > header);
+    const isUnder = fileHead && fileHead.top <= header + fileHead.height;
+    const below = isUnder ? Math.max(fileHead.bottom, header + fileHead.height) : header;
+    els.find.style.top = `${below + 8}px`;
     els.find.hidden = false;
     els.fq.focus();
     els.fq.select();
