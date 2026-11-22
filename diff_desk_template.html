@@ -245,6 +245,8 @@
   /* Set in its button, out of reach of the rule placing the magnifier of the box. */
   #find .mode svg { position: static; display: block; width: 12px; height: 12px; }
   #find .mode[aria-pressed="true"] { color: var(--ink); background: color-mix(in srgb, var(--accent) 30%, transparent); }
+  /* Comments alone, the code left out: the bubble filled, apart from the one reading comments with the code. */
+  #fthreads[data-threads="only"] svg path { fill: currentColor; }
   /* The arrows and the cross, larger than the toggles: pressed on their own rather than read. */
   #find > .mode { color: var(--ink); font-size: 15px; padding: 4px 7px; }
   #fword { text-decoration: underline; }
@@ -1360,7 +1362,7 @@
       <button class="mode" id="fcase" aria-pressed="false" data-tip="Match case (Alt+C)">Aa</button>
       <button class="mode" id="fword" aria-pressed="false" data-tip="Match whole word (Alt+W)">ab</button>
       <button class="mode" id="fregex" aria-pressed="false" data-tip="Use regular expression (Alt+R)">.*</button>
-      <button class="mode" id="fthreads" aria-pressed="false" data-tip="Find in comments too (Alt+T)" aria-label="Find in comments too"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg></button>
+      <button class="mode" id="fthreads" aria-pressed="false" data-threads="off" data-tip="Find in comments too (Alt+T)" aria-label="Find in comments too"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg></button>
     </span>
   </div>
   <span class="count" id="fcount">0/0</span>
@@ -4816,8 +4818,8 @@
   const finding = { hits: [], byPath: new Map(), at: -1 };
 
   // How the box is read: in its case, as whole words, as a pattern, and whether what the threads say is read with the
-  // code. Off by default, as the browser's own find.
-  const modes = { matchCase: false, wholeWord: false, regex: false, threads: false };
+  // code ("too"), instead of it ("only") or not at all ("off"). Off by default, as the browser's own find.
+  const modes = { matchCase: false, wholeWord: false, regex: false, threads: "off" };
 
   // What the box asks for, as a pattern: the text as written, escaped unless it is a pattern already, and, when whole
   // words are asked for, kept from running into a word on either side where it begins or ends with a word character.
@@ -4842,14 +4844,14 @@
     for (const file of inTreeOrder(view().files)) {
       const found = [];
       file.lines.forEach((row, order) => {
-        if (row[0] === "h" || (bare && row[0] === "c")) return;
+        if (modes.threads === "only" || row[0] === "h" || (bare && row[0] === "c")) return;
         if (!pattern.test(String(row[3]))) return;
         const side = row[0] === "d" ? "old" : "new";
         found.push({ path: file.path, order, side, line: side === "old" ? row[1] : row[2] });
       });
       // What a thread says is found where the thread hangs, under the last line it is about, each remark and reply a
       // hit of its own: one about the file as a whole before every line, one whose lines have left the diff after them.
-      for (const note of modes.threads ? mine() : []) {
+      for (const note of modes.threads === "off" ? [] : mine()) {
         if (note.path !== file.path) continue;
         const line = note.endLine || note.line;
         const column = note.side === "old" ? 1 : 2;
@@ -6499,7 +6501,7 @@
       { once: true },
     );
   });
-  const MODE_BUTTONS = [["fcase", "matchCase"], ["fword", "wholeWord"], ["fregex", "regex"], ["fthreads", "threads"]];
+  const MODE_BUTTONS = [["fcase", "matchCase"], ["fword", "wholeWord"], ["fregex", "regex"]];
   for (const [id, mode] of MODE_BUTTONS) {
     els[id].addEventListener("click", () => {
       modes[mode] = !modes[mode];
@@ -6508,6 +6510,22 @@
       findAgain();
     });
   }
+  // The threads take three presses round: read with the code, read instead of it, and left out again. Each state says
+  // what the next press does, as the other modes say what pressing them does.
+  const THREAD_MODES = {
+    off: { next: "too", tip: "Find in comments too" },
+    too: { next: "only", tip: "Find in comments only" },
+    only: { next: "off", tip: "Find in the code alone" },
+  };
+  els.fthreads.addEventListener("click", () => {
+    modes.threads = THREAD_MODES[modes.threads].next;
+    els.fthreads.setAttribute("aria-pressed", String(modes.threads !== "off"));
+    els.fthreads.dataset.threads = modes.threads;
+    els.fthreads.dataset.tip = `${THREAD_MODES[modes.threads].tip} (Alt+T)`;
+    els.fthreads.setAttribute("aria-label", THREAD_MODES[modes.threads].tip);
+    els.fq.focus();
+    findAgain();
+  });
   els.fnext.addEventListener("click", () => findAgain(1));
   els.fprev.addEventListener("click", () => findAgain(-1));
   els.fclose.addEventListener("click", closeFind);

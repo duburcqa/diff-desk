@@ -3188,9 +3188,17 @@ def test_what_the_threads_say_is_found_when_asked(page, desk):
         page.locator("#fq").press("Enter")
         assert page.locator(shown).get_attribute("data-part") == "1"
 
-        # Taken back with its key, it reads the code alone again.
+        # Pressed again, the threads are read instead of the code: the line found before is no hit any more.
+        page.locator("#fq").press("Alt+KeyT")
+        page.wait_for_function(counted, arg="1/2")
+        assert page.locator("tr.hit").count() == 0
+        assert page.locator(shown).get_attribute("data-part") == "0"
+        assert page.locator("#fthreads").get_attribute("aria-pressed") == "true"
+
+        # And once more, it reads the code alone again.
         page.locator("#fq").press("Alt+KeyT")
         page.wait_for_function(counted, arg="1/1")
+        assert page.locator("#fthreads").get_attribute("aria-pressed") == "false"
         page.locator("#fq").press("Escape")
     finally:
         desk.post("/drop", {"seq": made, "who": "you"})
