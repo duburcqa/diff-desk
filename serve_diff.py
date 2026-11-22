@@ -79,6 +79,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import threading
 import time
 import types
@@ -148,6 +149,11 @@ CAPS = {"image": 10 * 1024 * 1024, "video": 100 * 1024 * 1024}
 # and answers a URL for it.
 ASSETS = "https://uploads.github.com/user-attachments/assets"
 
+# Another thread of the review, named by its number in brackets, as the page reads it (see `MENTION` in the page): never
+# the text of a link, and never inside code, which `CODE` splits out of what is said.
+MENTION = re.compile(r"(?<![\w\]])\[(\d+)\](?![(\[])")
+CODE = re.compile(r"(```[\s\S]*?(?:```|$)|`[^`\n]+`)")
+
 
 def read_notes():
     """Every recorded comment, numbered: a row written before the cursor existed is numbered by its position."""
@@ -213,15 +219,22 @@ def spoken_as(item):
 
     Every body sent and every body compared is read through here, so a comment carrying a screenshot travels by what
     was posted for it rather than by its words alone. A file GitHub has no copy of is left out, a link to it standing
-    for nothing.
+    for nothing. A thread named by its number goes out as a link to that thread on GitHub, wherever `linked_up` found
+    one for it.
     """
+    xrefs = item.get("xrefs") or {}
+    pieces = CODE.split(item.get("text") or "")
+    pieces[::2] = [
+        MENTION.sub(lambda named: f"[{named[0]}]({xrefs[named[1]]})" if named[1] in xrefs else named[0], prose)
+        for prose in pieces[::2]
+    ]
     links = [
         # A video has no markdown of its own: GitHub plays a bare URL that is a paragraph in itself.
         image["url"] if image["kind"].startswith("video/") else f"![{image['alt']}]({image['url']})"
         for image in item.get("images") or ()
         if image.get("url")
     ]
-    return "\n\n".join([said for said in (item.get("text") or "", *links) if said])
+    return "\n\n".join([said for said in ("".join(pieces), *links) if said])
 
 
 def wordings(item):
@@ -250,7 +263,7 @@ query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
           originalLine
           originalStartLine
           diffSide
-          comments(first: 50) { nodes { id databaseId body path state createdAt author { login } ...Reacted } }
+          comments(first: 50) { nodes { id databaseId url body path state createdAt author { login } ...Reacted } }
         }
       }
     }
@@ -345,12 +358,15 @@ def reactions_owed(row):
 
 
 def known_by(node):
-    """What one comment of the pull request is known by from then on: its node, which a reaction is sent against, and
-    the reactions it carries, the pull request's word on them being the one everyone reads.
+    """What one comment of the pull request is known by from then on: its node, which a reaction is sent against, where
+    it is read, which a thread naming it links to, and the reactions it carries, the pull request's word on them being
+    the one everyone reads.
 
-    A comment GitHub answered for without either is left as this desk holds it.
+    A comment GitHub answered for without any of them is left as this desk holds it.
     """
     known = {"prNode": node["id"]} if node.get("id") else {}
+    if node.get("url"):
+        known["prUrl"] = node["url"]
     if "reactionGroups" in node:
         known["reactions"] = reactions_of(node)
     return known
@@ -728,6 +744,61 @@ def carried_up(repo, chosen, summary):
     return trouble
 
 
+def named_in(text):
+    """The threads a text names by number, outside code, each as it is written there."""
+    return [mention for prose in CODE.split(text or "")[::2] for mention in MENTION.findall(prose)]
+
+
+def linked_up(order, chosen, summary):
+    """Write onto every remark and reply these threads are about to carry where on GitHub each thread it names is read,
+    so it reaches the pull request as a link rather than a number only this desk knows.
+
+    A thread is linked once a pull request holds it, whichever one. A thread this desk alone holds, or one going out in
+    this same send, keeps its number as written. The links are kept on what they were written into, as the URL of a
+    file it carries is, so the body compared with the pull request's copy later is the one posted, whatever has become
+    of the threads named since. A remark that went out in a review is placed by its thread, so the threads of the pull
+    request are read first when a thread named here is on it without being placed yet.
+    """
+    asked = {row["seq"] for row in chosen}
+    named = {int(mention) for row in chosen for item in (row, *row["replies"]) for mention in named_in(item["text"])}
+    named.update(int(mention) for mention in named_in(summary["text"]))
+    if not named:
+        return
+    with CHANGING:
+        rows = read_notes()
+    placed = {row["seq"]: row["prUrl"] for row in rows if row.get("prUrl") and row.get("state") != "deleted"}
+    unplaced = [
+        row
+        for row in rows
+        if row["seq"] in named - placed.keys() and row.get("github") == "posted" and under_review(row, order)
+    ]
+    found = {}
+    reviewed = review_threads(order["repo"], order["pr"])[0] if unplaced else None
+    for row in unplaced if reviewed is not None else ():
+        thread = thread_of(reviewed.threads, row)
+        if thread is not None and thread["comments"]["nodes"] and thread["comments"]["nodes"][0].get("url"):
+            found[row["seq"]] = thread["comments"]["nodes"][0]["url"]
+    placed.update(found)
+    # Written onto what is about to be sent and onto the log read again, as `carried_up` does: comments recorded
+    # meanwhile must not be written away. The links follow from the words alone, so both get the same ones.
+    with changing() as fresh:
+        for row in (*chosen, *fresh):
+            if row["seq"] in found:
+                row["prUrl"] = found[row["seq"]]
+        sending = [
+            item
+            for row in (*chosen, *fresh)
+            if row["seq"] in asked
+            for item in (row, *row["replies"])
+            if item.get("github") != "posted" and not item.get("whisper")
+        ]
+        for item in (summary, *sending):
+            xrefs = {mention: placed[int(mention)] for mention in named_in(item["text"]) if int(mention) in placed}
+            item.pop("xrefs", None)
+            if xrefs:
+                item["xrefs"] = xrefs
+
+
 def anchored(note):
     """Where a remark hangs on the pull request: a whole file, the line it was written on, or a range from one."""
     said = spoken_as(note)
@@ -745,16 +816,17 @@ def post_comments(repo, number, sending):
     """Post each remark as a review comment of its own, so the pull request holds nothing but what was written.
 
     A review carries a body of its own, which GitHub requires and nobody asked for, so a submission with no summary
-    goes out without one. Each comment is anchored to the head commit, which is what a comment on a line needs.
+    goes out without one. Each comment is anchored to the head commit, which is what a comment on a line needs. What
+    landed is told by number, with where GitHub put each one.
     """
     asked = gen_diff_data.gh("api", f"repos/{repo}/pulls/{number}", "--jq", ".head.sha", repeatable=False)
     if asked.returncode != 0:
         error = gen_diff_data.failure_of(asked)[:400]
-        return [], "", error, is_refusal(error)
+        return {}, "", error, is_refusal(error)
     commit = asked.stdout.strip()
     target = f"repos/{repo}/pulls/{number}/comments"
     print(f"PUBLISH {len(sending)} comment(s) -> {target}", flush=True)
-    landed, url = [], ""
+    landed, url = {}, ""
     for note in sending:
         given = {**anchored(note), "commit_id": commit}
         done = gen_diff_data.gh(
@@ -763,8 +835,8 @@ def post_comments(repo, number, sending):
         if done.returncode != 0:
             error = gen_diff_data.failure_of(done)[:400]
             return landed, url, error, is_refusal(error)
-        landed.append(note["seq"])
-        url = url or json.loads(done.stdout or "{}").get("html_url", "")
+        landed[note["seq"]] = json.loads(done.stdout or "{}").get("html_url", "")
+        url = url or landed[note["seq"]]
     return landed, url, "", False
 
 
@@ -772,7 +844,8 @@ def post_review(repo, number, summary, sending):
     """Post comments as one review, and say which of them landed, where they landed, and why they did not.
 
     A summary is a review's body, so a submission carrying one goes out as a review. One that carries none goes out as
-    the comments alone, since a review would have to invent a body to hold them.
+    the comments alone, since a review would have to invent a body to hold them. GitHub answers a review with where the
+    review is read, so where each of its comments is read waits for the next look at its threads.
     """
     if not summary:
         return post_comments(repo, number, sending)
@@ -785,7 +858,8 @@ def post_review(repo, number, summary, sending):
     landed = done.returncode == 0
     url = json.loads(done.stdout or "{}").get("html_url", "") if landed else ""
     error = "" if landed else gen_diff_data.failure_of(done)[:400]
-    return [note["seq"] for note in sending] if landed else [], url, error, not landed and is_refusal(error)
+    went = dict.fromkeys((note["seq"] for note in sending) if landed else (), "")
+    return went, url, error, not landed and is_refusal(error)
 
 
 def serve_payload(payload):
@@ -875,13 +949,13 @@ def local_again(row):
     Linked to nothing there any more, and resolved, if at all, here alone.
     """
     row["github"], row["prResolve"] = "none", "none"
-    for key in ("reviewUrl", "prThread", "prNode", "prComment", "prResolveError", "error"):
+    for key in ("reviewUrl", "prThread", "prNode", "prComment", "prUrl", "prResolveError", "error"):
         row.pop(key, None)
     for answer in row.get("replies") or []:
         if answer.get("github") == "posted":
             answer["github"] = "none"
-            answer.pop("prComment", None)
-            answer.pop("prNode", None)
+            for key in ("prComment", "prNode", "prUrl"):
+                answer.pop(key, None)
 
 
 def heard_from(row, thread):
@@ -1586,9 +1660,9 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 said = replies[index]
             if said is not None:
-                earlier = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "text": said["text"]}
-                if said.get("images"):
-                    earlier["images"] = said["images"]
+                # The files and links it carried stay with the wording that went out with them (see `wordings`).
+                kept = {key: said[key] for key in ("images", "xrefs") if said.get(key)}
+                earlier = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "text": said["text"], **kept}
                 said.setdefault("edits", []).append(earlier)
                 said["text"] = text
                 # A request that says nothing about files leaves the ones it carries alone, which is what a session
@@ -1929,6 +2003,7 @@ class Handler(BaseHTTPRequestHandler):
             print(f"PUBLISHED nothing ({trouble})", flush=True)
             self._json({"ok": False, "error": trouble, "sent": 0, "owed": len(chosen), "replies": 0, "resolved": 0})
             return
+        linked_up(order, chosen, summary)
         landed, url, error, missed = self._put_remarks(order, chosen, summary)
         carrying = [row for row in chosen if row["seq"] not in missed and owes_there(row)]
         replies, resolved, trouble = self._carry_threads(order, carrying)
@@ -1969,6 +2044,8 @@ class Handler(BaseHTTPRequestHandler):
                 if row["seq"] in landed:
                     row["github"] = "posted"
                     row["reviewUrl"] = url
+                    if went[row["seq"]]:
+                        row["prUrl"] = went[row["seq"]]
                     row.pop("error", None)
                 elif row["seq"] in missed:
                     row["github"] = "refused" if refused else "failed"
