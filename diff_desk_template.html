@@ -177,6 +177,9 @@
     padding: 6px 9px;
   }
   select { max-width: 44ch; }
+  /* As tall as the buttons beside it, a line inside the same padding and border: a select draws itself a little
+     shorter from the same padding. */
+  #scope { height: calc(1lh + 14px); }
   /* The box takes what the rest does not need, and gives it back first. */
   .search { position: relative; display: flex; align-items: center; flex: 1 1 12ch; min-width: 8ch; margin-right: auto; }
   .search input { width: 100%; min-width: 0; padding-left: 26px; }
@@ -1147,8 +1150,9 @@
   .tray[data-pending="true"] #unsent:not([hidden]) { padding-bottom: 8px; border-bottom: 1px solid var(--rule); }
 
   /* The choices of how the diff is shown, one switch each, a choice that only applies under another set beneath it. */
-  #settingsopen { display: grid; place-items: center; width: 30px; height: 28px; padding: 0; color: var(--muted); }
-  #settingsopen svg { width: 15px; height: 15px; }
+  /* As tall as the buttons beside it and square: its icon takes the line their words take, inside the same padding. */
+  #settingsopen { display: grid; place-items: center; padding: 6px; color: var(--muted); }
+  #settingsopen svg { width: 1lh; height: 1lh; }
   #settingsopen:hover { color: var(--ink); }
   .settings { position: fixed; top: calc(var(--head) + 8px); z-index: 60; display: none; }
   .settings[data-open="true"] { display: block; }
