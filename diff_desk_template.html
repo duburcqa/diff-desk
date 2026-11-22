@@ -334,8 +334,23 @@
   .step svg { width: 9px; height: 9px; }
   .step:disabled { border-color: transparent; background: #ababab; color: #e2e2e2; cursor: default; }
 
-  /* One above the other, as the pairs of arrows are, so the bar reads as a row of small stacks of the same height. */
-  .totals { flex: none; display: grid; justify-items: end; gap: 3px; font-family: var(--mono); font-size: 11px; line-height: 12px; }
+  /* One above the other, as the pairs of arrows are, so the bar reads as a row of small stacks of the same height.
+     Each number is trimmed to its digits, from the cap line to the baseline: a line box carries room for descenders
+     digits never have, which each engine sizes differently, so centring the boxes left the digits off centre. */
+  .totals {
+    flex: none;
+    display: grid;
+    justify-items: end;
+    gap: 3px;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 12px;
+  }
+  /* Trimmed, the numbers stand as far apart as their untrimmed lines did. */
+  @supports (text-box: trim-both cap alphabetic) {
+    .totals { gap: 7px; }
+    .totals > span { text-box: trim-both cap alphabetic; }
+  }
   .totals .plus { color: var(--add-ink); }
   .totals .minus { color: var(--del-ink); }
 
