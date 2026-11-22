@@ -775,6 +775,12 @@
     white-space: normal;
   }
   .thread .line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+  /* The controls of a remark are one group beside its words while the words keep room enough to be read. Short of
+     that, the group takes a row of its own above the words, flush right, and the words take the whole width: a column
+     of words beside a row of labels is a remark read a few words at a time. */
+  .thread .line > .tools { display: flex; align-items: baseline; gap: 8px; flex: none; margin-left: auto; }
+  .thread:not(.folded) > .line:first-child { flex-wrap: wrap-reverse; }
+  .thread:not(.folded) > .line:first-child > .said { flex: 1 1 40em; }
   /* Read as the opening of what is said rather than as a column beside it: a column takes the width of the longest
      line of it from every line, and what is said is what the reader came for. */
   .thread .who { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-right: 7px; }
@@ -3546,6 +3552,9 @@
     shown(text, note.images);
     const reactTo = reacting(note, null, note, text);
     head.append(text);
+    // Its controls are one group, so a line too narrow for both puts them all above the words rather than some of them.
+    const tools = head.appendChild(document.createElement("span"));
+    tools.className = "tools";
     if (note.state === "resolved") {
       const turn = document.createElement("button");
       turn.className = "tiny";
@@ -3565,7 +3574,7 @@
         keepUnfolded();
         render();
       });
-      head.append(turn);
+      tools.append(turn);
     }
     if (settled) {
       // Folded: one line about what it is, and its standing. Everything it holds is a click away, never discarded.
@@ -3576,7 +3585,7 @@
       row.append(cell);
       return row;
     }
-    if (reactTo) head.append(reactTo);
+    if (reactTo) tools.append(reactTo);
     if ((note.pending || notes.live) && !note.who) {
       const change = document.createElement("button");
       change.className = "tiny";
@@ -3619,20 +3628,20 @@
           render();
         });
       });
-      head.append(change);
+      tools.append(change);
     }
     if (!note.pending && note.editedAfterPost) {
       const mark = document.createElement("span");
       mark.className = "mark outdated";
       mark.textContent = "rewritten after posting";
-      head.append(mark);
+      tools.append(mark);
     }
     if (note.outdated) {
       const mark = document.createElement("span");
       mark.className = "mark outdated";
       mark.textContent = "code moved on";
       mark.dataset.tip = `${note.path} ${span(note)} is no longer in this diff`;
-      head.append(mark);
+      tools.append(mark);
     }
     if (!note.pending) {
       const there = closing(note);
@@ -3641,7 +3650,7 @@
         mark.className = `mark ${note.prResolve === "done" ? "posted" : "pending"}`;
         mark.textContent = there;
         if (note.prResolveError) mark.dataset.tip = note.prResolveError;
-        head.append(mark);
+        tools.append(mark);
       }
       // Where the thread stands, said as a label. Only a thread aimed at the pull request and not on it can be taken
       // back from there by pressing it: sending goes through Sync alone, so a press on what reads as a standing never
@@ -3661,7 +3670,7 @@
       } else if (note.reviewUrl) {
         mark.dataset.tip = note.reviewUrl;
       }
-      head.append(mark);
+      tools.append(mark);
     }
     const drop = document.createElement("button");
     drop.className = "tiny drop";
@@ -3674,7 +3683,7 @@
         drawTray();
         render();
       });
-      head.append(drop);
+      tools.append(drop);
     } else if (notes.live && !note.who) {
       const posted = note.github === "posted";
       drop.dataset.tip = posted ? "Delete this comment, here and on the pull request" : "Delete this comment";
@@ -3688,7 +3697,7 @@
         drawLog();
         render();
       });
-      head.append(drop);
+      tools.append(drop);
     }
     // Read where it belongs rather than where it landed: every note written on something follows that thing, and the
     // notes on one thing follow each other in the order they were written. A note on the thread itself closes it.
@@ -3707,7 +3716,7 @@
     ];
     // Every comment carries one way to add a note about it, the remark included: it stands on the last note about
     // that comment, or on the comment itself while none stands there.
-    if (!note.pending && notes.live && !whispersOn(null).length) head.append(whisperOn(note, null));
+    if (!note.pending && notes.live && !whispersOn(null).length) tools.append(whisperOn(note, null));
     // Nothing said is left unread, whatever an anchor written before this says.
     for (const entry of said_of) if (!ordered.includes(entry)) ordered.push(entry);
     // What each thing said belongs to: a reply is its own, and a note belongs to what it stands on.

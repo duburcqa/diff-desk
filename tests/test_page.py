@@ -2248,6 +2248,18 @@ def test_a_thread_with_nowhere_to_go_is_read_in_the_panel(page, desk):
     assert reach["boxes"] > 0
     assert reach["past"] == 0
     assert reach["spill"] <= 0
+    # The remark takes the width of the thread, its controls on a row of their own above it: beside them, in a panel
+    # this narrow, it was left a column a few words wide.
+    room = page.evaluate(
+        """() => {
+          const head = document.querySelector('.logthread .thread > .line:first-child');
+          const words = head.querySelector(':scope > .said').getBoundingClientRect();
+          const tools = head.querySelector(':scope > .tools').getBoundingClientRect();
+          return { share: words.width / head.getBoundingClientRect().width, above: tools.bottom <= words.top + 1 };
+        }"""
+    )
+    assert room["share"] > 0.99
+    assert room["above"]
     # And read once it is shown, which is what the press on its row was for.
     page.wait_for_function(f"() => (JSON.parse(localStorage.getItem('diffdesk.heard') || '{{}}'))[{seq}] === 1")
 
