@@ -651,13 +651,14 @@ def test_a_comment_keeps_its_code_and_its_line_breaks(page, desk):
 def test_a_comment_is_laid_out_in_paragraphs_lists_and_tables(page, desk):
     branch = page.evaluate("() => data.branches[0].ref")
     # A reply is laid out the way the pull request lays it out: paragraphs, lists nested by indentation and hanging off
-    # their markers, a table with its columns aligned, a heading, and emphasis. A marker typed inside a word is the
-    # word's, and points typed flush under a numbered item are that item's own.
+    # their markers, a table with its columns aligned, a heading, and emphasis, closing over the code it holds. A marker
+    # typed inside a word is the word's, and points typed flush under a numbered item are that item's own.
     laid = (
         "Every difference:\n\n### Setters\n\n1. Setter on a *rigid* entity\n- main: ~~slept~~ a full reset\n"
         "- branch: syncs `right away`\n2. Paused step\n   carried on\n\n   a paragraph of its own\n\n"
         "| entry | main | branch |\n|:--|:-:|--:|\n| `step` | **sleeps** | repaints |\n\n"
-        "- [x] done\n- [ ] snake_case_name and a*b*c stay as typed\n\n---\nsaid at https://example.com/x."
+        "- [x] done\n- [ ] snake_case_name and a*b*c stay as typed\n\n---\nsaid at https://example.com/x.\n\n"
+        "**Why not move `qd_to_torch`:** see [`area()`](https://example.com/a)"
     )
     desk.post("/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": laid}])
     page.reload(wait_until="load")
@@ -694,7 +695,11 @@ def test_a_comment_is_laid_out_in_paragraphs_lists_and_tables(page, desk):
     assert "snake_case_name and a*b*c stay as typed" in told.inner_text()
     assert told.locator("hr").count() == 1
     assert told.locator("a", has_text="https://example.com/x").get_attribute("href") == "https://example.com/x"
-    for markup in ("###", "~~", "|", "[x]", "**"):
+    held = told.locator("strong", has_text="Why not move")
+    assert held.inner_text() == "Why not move qd_to_torch:"
+    assert held.locator("code").inner_text() == "qd_to_torch"
+    assert told.locator("a[href='https://example.com/a'] code").inner_text() == "area()"
+    for markup in ("###", "~~", "|", "[x]", "**", "`"):
         assert markup not in told.inner_text()
 
 

@@ -3104,7 +3104,7 @@
       String.raw`~~[^~\n]+~~`,
       String.raw`(?<![\w*])\*(?![\s*])[^*\n]*?[^\s*]\*(?![\w*])`,
       String.raw`(?<![\w_])_(?![\s_])[^_\n]*?[^\s_]_(?![\w_])`,
-      String.raw`https?:\/\/[^\s<>()]*[^\s<>().,;:!?'"]`,
+      String.raw`https?:\/\/[^\s<>()\uE000]*[^\s<>().,;:!?'"\uE000]`,
       // Another thread of the review, named by its number as the desk numbers it (see `mentions`).
       String.raw`(?<![\w\]])\[\d+\](?![(\[])`,
     ].join("|"),
@@ -3162,7 +3162,24 @@
     markJumped();
   }
 
-  function phrase(into, text) {
+  // A code span stands in the text as its place among the spans cut out (see `inline`), between two characters no
+  // keyboard types, so a mark around it reads as one mark.
+  const HELD = /\uE000(\d+)\uE001/;
+
+  function words(into, text, codes) {
+    // Plain words, with each code span they hold put back where it stood.
+    for (const [index, piece] of text.split(HELD).entries()) {
+      if (index % 2) {
+        const code = document.createElement("code");
+        code.textContent = codes[Number(piece)];
+        into.append(code);
+      } else if (piece) {
+        into.append(document.createTextNode(piece));
+      }
+    }
+  }
+
+  function phrase(into, text, codes = []) {
     // Bold as bold, a link as a link, and a badge as the word it stands for: assembled as nodes, so nothing said on a
     // pull request can become part of this page.
     for (const piece of text.split(new RegExp(`(${MARKS.source})`))) {
@@ -3188,37 +3205,34 @@
         into.append(anchor);
       } else if (badge) {
         const word = badge[1].replace(/\s*badge$/i, "").trim();
-        if (word) into.append(document.createTextNode(word));
+        if (word) words(into, word, codes);
       } else if (link) {
         const anchor = document.createElement("a");
         anchor.href = /^https?:\/\//i.test(link[2]) ? link[2] : "#";
         anchor.target = "_blank";
         anchor.rel = "noopener noreferrer";
-        anchor.textContent = link[1] || link[2];
+        words(anchor, link[1] || link[2], codes);
         into.append(anchor);
       } else if (bold || struck || leaned) {
         // Read on: a heading from a pull request carries its badge inside the bold rather than beside it.
         const marked = document.createElement(bold ? "strong" : struck ? "s" : "em");
-        phrase(marked, (bold || struck || leaned)[1]);
+        phrase(marked, (bold || struck || leaned)[1], codes);
         into.append(marked);
       } else {
-        into.append(document.createTextNode(piece));
+        words(into, piece, codes);
       }
     }
   }
 
   function inline(into, text) {
-    // A code span holds what was typed between its backticks, so it is cut out before any other mark is looked for.
-    for (const piece of text.split(/(`[^`\n]+`)/)) {
-      if (!piece) continue;
-      if (piece.length > 2 && piece.startsWith("`") && piece.endsWith("`")) {
-        const code = document.createElement("code");
-        code.textContent = piece.slice(1, -1);
-        into.append(code);
-      } else {
-        phrase(into, piece);
-      }
-    }
+    // A code span holds what was typed between its backticks, so it is cut out before any other mark is looked for,
+    // and held in its place so a mark around it (`**Why not `x`:**`) still closes over it.
+    const codes = [];
+    const held = text.replace(/[\uE000\uE001]/g, "").replace(/`([^`\n]+)`/g, (whole, said) => {
+      codes.push(said);
+      return `\uE000${codes.length - 1}\uE001`;
+    });
+    phrase(into, held, codes);
   }
 
   const outline = (text) =>
