@@ -177,14 +177,14 @@
     padding: 6px 9px;
   }
   select { max-width: 44ch; }
-  /* The boxes and buttons of the bar stand as tall as its pairs of arrows and its stacks: a line inside a slimmer
-     padding than the panels give theirs. */
+  /* The boxes and buttons of the bar stand as tall as its tallest stack, the review count on two lines over its bar: a
+     line inside a slimmer padding than the panels give theirs. */
   header .toggle, header .tab, header select, header .search input, header #goto, header button.solid {
-    padding-top: 3px;
-    padding-bottom: 3px;
+    padding-top: 5px;
+    padding-bottom: 5px;
   }
   /* A line inside that padding and the border: a select draws itself a little shorter from the same padding. */
-  #scope { height: calc(1lh + 8px); }
+  #scope { height: calc(1lh + 12px); }
   /* The box takes what the rest does not need, and gives it back first. */
   .search { position: relative; display: flex; align-items: center; flex: 1 1 12ch; min-width: 8ch; margin-right: auto; }
   .search input { width: 100%; min-width: 0; padding-left: 26px; }
@@ -314,7 +314,7 @@
   /* Sized to the label beside them and never resized, so the bar holds still whether or not there is anywhere to go.
      One above the other rather than side by side: the pair then costs a single control's width, in a bar that has none
      to spare, and the two together stand as tall as everything around them. */
-  .steps { display: grid; gap: 2px; }
+  .steps { display: grid; gap: 4px; }
   /* White as a browser draws its own small buttons, in either theme and in every engine alike: the browser's button
      colours resolve differently from one engine to the next. Lit with a dark blue border on a grey fill when pointed at. */
   .step {
@@ -363,7 +363,7 @@
   }
   /* The count over its bar, at the width of the count, and the arrows beside both: a small stack like the others of the
      bar rather than a strip across it. */
-  .progress { display: grid; grid-template-columns: auto auto; align-items: center; column-gap: 7px; row-gap: 4px; }
+  .progress { display: grid; grid-template-columns: auto auto; align-items: center; column-gap: 7px; row-gap: 2px; }
   .progress .track {
     grid-area: 2 / 1;
     width: 100%;
@@ -1171,7 +1171,7 @@
 
   /* The choices of how the diff is shown, one switch each, a choice that only applies under another set beneath it. */
   /* As tall as the buttons beside it and square: its icon takes the line their words take, inside the same padding. */
-  #settingsopen { display: grid; place-items: center; padding: 3px; color: var(--muted); }
+  #settingsopen { display: grid; place-items: center; padding: 5px; color: var(--muted); }
   #settingsopen svg { width: 1lh; height: 1lh; }
   #settingsopen:hover { color: var(--ink); }
   .settings { position: fixed; top: calc(var(--head) + 8px); z-index: 60; display: none; }
