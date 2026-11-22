@@ -295,7 +295,9 @@
   }
   #goback svg { width: 13px; height: 13px; }
   #goback:hover:not(:disabled) { border-color: var(--muted); background: var(--surface-sunk); }
+  /* Dimmed well below the other faint marks while there is nothing to go back to, so a jump visibly lights it up. */
   #goback:disabled { color: var(--faint); cursor: default; }
+  #goback:disabled svg { opacity: 0.4; }
   #goto.lost { border-color: var(--del-ink); color: var(--del-ink); }
   .tabs { flex: none; }
   .toggle[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
@@ -1291,7 +1293,19 @@
   <span class="jumps">
     <input id="goto" type="text" inputmode="numeric" placeholder="#" aria-label="Go to comment by number" data-tip="Go to a comment by its number - press # from anywhere" />
     <button id="goback" disabled data-tip="Back to where you were before going to a comment (b)" aria-label="Back to where you were before going to a comment">
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4 2.5 7.5 6 11"/><path d="M2.5 7.5h7a4 4 0 0 1 0 8H8"/></svg>
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 2.5 2 6l3.5 3.5"/><path d="M2 6h7.5a4 4 0 0 1 0 8H7"/></svg>
+    </button>
+  </span>
+  <span class="steps">
+    <button class="step" id="cback" disabled data-tip="Previous comment">
+      <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+        <path d="M2.5 7.75 6 4.25l3.5 3.5" />
+      </svg>
+    </button>
+    <button class="step" id="cnext" disabled data-tip="Next comment">
+      <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+        <path d="M2.5 4.25 6 7.75l3.5-3.5" />
+      </svg>
     </button>
   </span>
   <label class="search">
@@ -1323,18 +1337,6 @@
       <span class="minus num" id="tminus"></span>
     </div>
   </div>
-  <span class="steps">
-    <button class="step" id="cback" disabled data-tip="Previous comment">
-      <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-        <path d="M2.5 7.75 6 4.25l3.5 3.5" />
-      </svg>
-    </button>
-    <button class="step" id="cnext" disabled data-tip="Next comment">
-      <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-        <path d="M2.5 4.25 6 7.75l3.5-3.5" />
-      </svg>
-    </button>
-  </span>
   <button class="toggle" id="logopen" data-tip="Every comment recorded, and where each one stands">Comments<i class="dot" id="logdot" aria-hidden="true"></i></button>
   <button class="solid" id="moved" disabled data-tip="Refresh the diffs once the branch has moved on">Refresh</button>
   <div id="loading" aria-hidden="true"></div>
