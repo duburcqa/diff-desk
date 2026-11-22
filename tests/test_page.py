@@ -2528,8 +2528,14 @@ def test_a_resolved_thread_with_news_stays_until_read_and_scrolled_past(page, de
         flip(page, "hideclosed")
         thread.wait_for(state="hidden")
 
-        # Answered since, it is news again: it is back in the diff and the listing until it has been read and scrolled
-        # past.
+        # Answered since, out of the reader's sight, it is news again: it is back in the diff until it has been read and
+        # scrolled past, and in the listing until it has been read.
+        page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+        assert page.evaluate(
+            "(seq) => document.getElementById(`note-${seq}`).getBoundingClientRect().bottom < 0"
+            " || !document.getElementById(`note-${seq}`).getClientRects().length",
+            made,
+        )
         desk.post("/reply", {"seq": made, "text": "news on a settled thread", "who": "session"})
         page.evaluate("() => tick()")
         thread.wait_for(state="visible")
@@ -2540,6 +2546,11 @@ def test_a_resolved_thread_with_news_stays_until_read_and_scrolled_past(page, de
         page.evaluate(shown, made)
         page.wait_for_function(heard, arg=1)
         assert thread.is_visible()
+        # Read, it leaves the listing at once, while the diff keeps it under the reader until it is scrolled past.
+        page.locator("#logopen").click()
+        page.wait_for_selector("#log[data-open='true']")
+        assert page.locator("#logrows .logrow").filter(has_text=saying).count() == 0
+        page.locator("#logclose").click()
 
         # Scrolled past, and drawn again the moment it is left, as the poll draws the page for news, it goes, and leaves
         # the reader where they were.

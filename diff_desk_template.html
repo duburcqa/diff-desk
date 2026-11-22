@@ -2261,10 +2261,12 @@
 
   function drawLog() {
     const all = mine();
-    // The thread open in the panel stays listed whatever the settings hide: the press on its row asked to read it.
+    // The thread open in the panel stays listed whatever the settings hide: the press on its row asked to read it. A
+    // resolved one holding news is listed for as long as it holds any: the diff keeps it until it has also been scrolled
+    // past (see `stillShown`), which a thread in a file folded away never is, and a list redrawn moves nobody's place.
     const shown = withResolved()
       ? all
-      : all.filter((note) => note.state !== "resolved" || note.seq === unmoored || stillShown(note));
+      : all.filter((note) => note.state !== "resolved" || note.seq === unmoored || unread(note));
     const rows = shown.filter((note) => !readOut(note));
     const owed = rows.filter((note) => OWED.includes(note.github));
     const counted = [
