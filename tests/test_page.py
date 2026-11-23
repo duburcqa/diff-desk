@@ -1598,6 +1598,32 @@ def test_comments_are_filtered_by_their_author_and_stepped_through(page, desk):
     page.locator(f"#note-{theirs}").wait_for(state="attached")
 
 
+def test_the_comments_panel_lists_what_the_filters_keep(page, desk):
+    said = {"branch": "feature", "path": "sample.py", "side": "new"}
+    kept = desk.post("/comments", {"comments": [{**said, "line": 30, "text": "only on this desk"}]})["seqs"][0]
+    sent = desk.post("/comments", {"comments": [{**said, "line": 160, "text": "on the PR"}], "github": True})["seqs"][0]
+    desk.github_answers(out=json.dumps({"html_url": "https://github.com/x/y/pull/45#review-1"}))
+    assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 45, "seq": [sent]})["ok"]
+    page.reload(wait_until="load")
+    comments_reach(page)
+    # The panel lists the threads the page shows, whichever filter keeps them, and follows each choice as it is made
+    # with the panel open.
+    page.locator("#logopen").click()
+    page.wait_for_selector("#log[data-open='true']")
+    page.locator("#settingsopen").click()
+    listed = "#logrows .logrow[data-seq='{}']"
+    try:
+        for chosen, shown, hidden in (("Sent", sent, kept), ("Local", kept, sent)):
+            page.locator("#sentfilter .chip", has_text=chosen).click()
+            page.locator(listed.format(hidden)).wait_for(state="detached")
+            assert page.locator(listed.format(shown)).count() == 1
+            assert not page.locator(f"#note-{hidden}").is_visible()
+    finally:
+        page.locator("#sentfilter .chip", has_text="All").click()
+        for seq in (kept, sent):
+            desk.post("/drop", {"seq": seq, "who": "you"})
+
+
 def test_the_next_step_leaves_a_thread_answered_where_it_was_reached(page, desk):
     comments = [
         {"branch": "feature", "path": "sample.py", "line": line, "side": "new", "text": f"stepped past, line {line}"}
