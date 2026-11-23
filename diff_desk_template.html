@@ -1388,7 +1388,7 @@
     <section class="group"><h3>Comments</h3>
       <button class="setting" id="hideclosed" aria-pressed="false"><span class="what">Hide resolved comments<small>The threads already resolved leave the page. One holding something unread stays until it has been read and scrolled past</small></span><i class="switch" aria-hidden="true"></i></button>
       <button class="setting" id="onlyunread" aria-pressed="false"><span class="what">Unread comments only<small>The threads already read leave the page and the comment steps. One read since this was switched on stays until it is switched off</small></span><i class="switch" aria-hidden="true"></i></button>
-      <div class="setting authors" id="authorsrow" hidden><span class="what">Comments by<small>The threads opened by an author left unpicked leave the page and the comment steps</small><span class="chips" id="authors"></span></span></div>
+      <div class="setting authors" id="authorsrow" hidden><span class="what">Comments by<small>The threads opened by an author left unpicked leave the page, the comment steps and the comments panel</small><span class="chips" id="authors"></span></span></div>
       <div class="setting authors"><span class="what">Sent to the pull request<small>The threads kept by where they stand: sent to the pull request, or still only on this desk</small><span class="chips" id="sentfilter"><button class="chip" type="button" data-sent="all" aria-pressed="true">All</button><button class="chip" type="button" data-sent="sent" aria-pressed="false">Sent</button><button class="chip" type="button" data-sent="local" aria-pressed="false">Local</button></span></span></div>
     </section>
     <section class="group"><h3>GitHub</h3>
@@ -2338,19 +2338,22 @@
     const shown = withResolved()
       ? all
       : all.filter((note) => note.state !== "resolved" || note.seq === unmoored || unread(note));
-    const rows = shown.filter((note) => !readOut(note));
-    const owed = rows.filter((note) => OWED.includes(note.github));
+    // Listed as the diff shows them, by author, by where they were sent and by what is unread (see `filteredOut`).
+    const rows = shown.filter((note) => note.seq === unmoored || !filteredOut(note));
+    // Counted, and the presses below offered, on every thread: those presses act on all of them, whatever is listed, so
+    // a failed send hidden by a filter still lights the dot and keeps its retry within reach.
+    const owed = all.filter((note) => OWED.includes(note.github));
     const counted = [
       `${all.filter((note) => note.state === "open").length} open`,
       `${all.filter((note) => note.state === "resolved").length} resolved`,
     ];
     if (owed.length) counted.push(`${owed.length} waiting for GitHub`);
-    const posted = rows.filter((note) => note.github === "posted").length;
+    const posted = all.filter((note) => note.github === "posted").length;
     if (posted) counted.push(`${posted} on the PR`);
     els.logcount.textContent = counted.join(" \u00b7 ");
     // Always in the layout, so saying that something is waiting cannot move the button it is said on.
     els.logdot.dataset.on = String(owed.length > 0);
-    const local = rows.filter((note) => note.github === "none");
+    const local = all.filter((note) => note.github === "none");
     els.logretry.disabled = !owed.length;
     els.logbind.disabled = !local.length || !branch().pr;
     els.logsync.disabled = !branch().pr;
@@ -6415,6 +6418,7 @@
       }
     });
     sayWhereToStep();
+    drawLog();
   }
 
   function drawAuthors() {
