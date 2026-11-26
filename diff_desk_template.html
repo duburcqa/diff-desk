@@ -2410,6 +2410,17 @@
   // holds whatever opens or folds above it meanwhile. Taken back one jump at a time (see `goBack`).
   const returns = [];
 
+  // A pending comment has no number until it is sent, so it is given a name of its own for as long as it is pending,
+  // which no number can be: every pending row sharing one name sent a jump to one of them to whichever came first.
+  const draftKeys = new WeakMap();
+  let draftsNamed = 0;
+  function threadKey(note) {
+    if (Number.isInteger(note.seq)) return note.seq;
+    const draft = note.source || note;
+    if (!draftKeys.has(draft)) draftKeys.set(draft, `draft-${(draftsNamed += 1)}`);
+    return draftKeys.get(draft);
+  }
+
   function reach(note) {
     // Taken only from a reader at rest: a jump made while the last one is still landing starts from nowhere they read.
     if (!reaching) {
@@ -2443,14 +2454,13 @@
     if (held) fillBody(card, held.file, held.index);
     // A remark about the file as a whole hangs under its header rather than on a row, so it is found by the seq it
     // carries either way.
+    const seq = threadKey(note);
     const thread =
-      document.getElementById(`note-${note.seq}`) ||
-      document.querySelector(`.filenote[data-seq="${note.seq}"]`) ||
-      card;
-    reaching = { path: note.path, seq: note.seq };
+      document.getElementById(`note-${seq}`) || document.querySelector(`.filenote[data-seq="${seq}"]`) || card;
+    reaching = { path: note.path, seq };
     // Resolved and hidden away, it is still the thread being reached for, so it is shown, as a folded file is opened.
     // Remembered as well as applied: the poll redraws the card every few seconds, which builds the thread anew.
-    state.reached = { seq: note.seq, path: note.path };
+    state.reached = { seq, path: note.path };
     if (thread !== card) thread.dataset.reveal = "true";
     for (const found of document.querySelectorAll(".thread.found")) found.classList.remove("found");
     const box = thread.querySelector ? thread.querySelector(".thread") : null;
@@ -3146,7 +3156,7 @@
   function notesAt(path, line, side) {
     const hit = (note) =>
       belongs(note) && note.state !== "deleted" && note.path === path && note.side === side && placed(note) === line;
-    return [...notes.sent.filter(hit), ...notes.drafts.filter(hit).map((draft) => ({ ...draft, pending: true }))];
+    return [...notes.sent.filter(hit), ...notes.drafts.filter(hit).map((draft) => ({ ...draft, pending: true, source: draft }))];
   }
 
   // Where a comment now belongs. A diff that changes under a comment leaves its line number pointing at whatever took
@@ -3610,8 +3620,8 @@
   function noteRow(note) {
     const row = document.createElement("tr");
     row.className = "noterow";
-    row.id = `note-${note.seq || "draft"}`;
-    if (state.reached && note.seq === state.reached.seq) row.dataset.reveal = "true";
+    row.id = `note-${threadKey(note)}`;
+    if (state.reached && threadKey(note) === state.reached.seq) row.dataset.reveal = "true";
     const cell = document.createElement("td");
     cell.colSpan = 5;
     const answers = (note.replies || []).length;
@@ -5603,10 +5613,9 @@
     wrap.append(head);
 
     for (const note of notesAt(file.path, 0, "file")) {
-      note.source = notes.drafts.find((draft) => draft.text === note.text && draft.path === note.path);
       const holder = document.createElement("div");
       holder.className = "filenote";
-      holder.dataset.seq = note.seq;
+      holder.dataset.seq = threadKey(note);
       const built = noteRow(note);
       if (built.dataset.done) holder.dataset.done = built.dataset.done;
       if (built.dataset.filtered) holder.dataset.filtered = built.dataset.filtered;
@@ -5891,7 +5900,6 @@
       for (const [side, number] of [["new", newNo], ["old", oldNo]]) {
         if (!number) continue;
         for (const note of notesAt(file.path, number, side).filter((note) => !behind.has(note.seq))) {
-          note.source = notes.drafts.find((draft) => draft.text === note.text && draft.line === note.line && draft.path === note.path);
           tbody.append(noteRow(note));
         }
       }
@@ -6111,7 +6119,6 @@
         // exists, and rendering it in both places showed the reader the same remark twice.
         const behind = new Set(stranded.map((note) => note.seq));
         for (const note of notesAt(file.path, line, side).filter((note) => !behind.has(note.seq))) {
-          note.source = notes.drafts.find((draft) => draft.text === note.text && draft.line === note.line && draft.path === note.path);
           tbody.append(noteRow(note));
         }
         // A comment whose line is gone is shown against the nearest line still in the diff, so it keeps the place that
