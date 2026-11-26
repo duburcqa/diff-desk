@@ -1585,6 +1585,10 @@ class Handler(BaseHTTPRequestHandler):
             group = max((row.get("batch", 0) for row in rows), default=0) + 1
             for note in batch:
                 seq += 1
+                # A remark recorded here is the reader's, or the session's where it says so. Any other author is one a
+                # sync brings back from the pull request, which the desk can neither reword nor send.
+                if note.get("who") != "session":
+                    note.pop("who", None)
                 # When it was written, where the writer did not say: a comment recorded through the API carries no
                 # stamp of its own, and a thread with no time on it can say when nothing it holds was said.
                 note.setdefault("at", time.strftime("%Y-%m-%d %H:%M:%S"))
@@ -1594,7 +1598,7 @@ class Handler(BaseHTTPRequestHandler):
                 note["github"] = "pending" if bound else "none"
                 note["replies"] = []
                 rows.append(note)
-                touched(rows, note, "you")
+                touched(rows, note, note.get("who", "you"))
         print(f"BATCH {group}: {len(batch)} comment(s) submitted{', bound for GitHub' if bound else ''}", flush=True)
         for note in batch:
             span = str(note.get("line", "?"))
@@ -1649,7 +1653,7 @@ class Handler(BaseHTTPRequestHandler):
             replies = found["replies"] if found is not None else []
             if found is None:
                 refused = f"no comment numbered {order.get('seq')}"
-            elif index is None and found.get("who") and found["who"] != reader():
+            elif index is None and found.get("who") not in (None, "session", reader()):
                 refused = f"comment {found['seq']} is {found['who']}'s word, written on the pull request"
             elif index is None:
                 said = found
@@ -1910,7 +1914,7 @@ class Handler(BaseHTTPRequestHandler):
         if last_only and not replies:
             self._json({"ok": False, "error": "nothing has been said in answer to it"})
             return
-        if not last_only and found.get("who") and found["who"] != reader():
+        if not last_only and found.get("who") not in (None, "session", reader()):
             self._json({"ok": False, "error": f"comment {seq} is {found['who']}'s word, written on the pull request"})
             return
         # Newest first, so the comment that opened the thread is the last to go.
@@ -2030,7 +2034,7 @@ class Handler(BaseHTTPRequestHandler):
         A remark written on the pull request is its author's word and is already there, so what this desk sends of such
         a thread is only what this desk wrote in it.
         """
-        posting = [row for row in chosen if not row.get("who") and row.get("github") != "posted"]
+        posting = [row for row in chosen if row.get("who") in (None, "session") and row.get("github") != "posted"]
         if not posting:
             return set(), "", "", set()
         went, url, error, refused = post_review(order["repo"], order["pr"], spoken_as(summary), posting)

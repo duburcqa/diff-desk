@@ -5,6 +5,7 @@ desk.py serve --stack <tip> [--local]                serve a stack, each branch 
 desk.py serve ... --take                             serve it even where a desk holds another review
 desk.py watch [--since N] [--once]                   print whatever the reviewer says, as they say it
 desk.py comments [--all]                             what has been submitted, unresolved unless --all
+desk.py remark '#3243' path.py:12-14 "..."           open a thread on lines of a review, as the session's [--old]
 desk.py reply 3 "why it happens ..."                 answer a comment without closing it
 desk.py reply 3 --whisper "look at this again"       leave a whisper, which never reaches the pull request
 desk.py reply 3 --whisper --on 0 "done."             answer what was said at [0], here and nowhere else
@@ -455,6 +456,57 @@ def edit(args):
     print(f"rewrote {named}, {outcome['edits']} earlier wording(s) kept")
 
 
+def remark(args):
+    """Open a thread on a range of lines of a served review, written as the session's.
+
+    The thread reads as Claude's on the page, wakes no watch, and is sent to the pull request only by a press on its
+    Sync, as a remark of the reader's is.
+    """
+    data = ask("/data")
+    if data is None:
+        sys.exit("nothing is serving")
+    entry = next(
+        (entry for entry in data["branches"] if args.branch in (entry["ref"], f"#{(entry['pr'] or {}).get('number')}")),
+        None,
+    )
+    if entry is None:
+        sys.exit(f"{args.branch} is not under review")
+    path, _, span = args.at.rpartition(":")
+    first, _, last = span.partition("-")
+    line, end = int(first), int(last or first)
+    side = "old" if args.old else "new"
+    file = next((file for file in entry["files"] if file["path"] == path), None)
+    if file is None:
+        sys.exit(f"{path} is not in the diff of {entry['ref']}")
+    # The lines a remark can stand on are the ones the diff shows on its side: removed ones on the old side, added and
+    # unchanged ones on the new, each numbered on that side.
+    rows = [row for row in file["lines"] if row[0] != "h" and (row[0] == "d") == (side == "old")]
+    placed = [row[1] if side == "old" else row[2] for row in rows]
+    if line not in placed or end not in placed or end < line:
+        sys.exit(f"{path}:{span} is not a range of lines the diff shows on the {side} side")
+    top, bottom = placed.index(line), placed.index(end)
+    note = {
+        "branch": entry["ref"],
+        "review": f"#{entry['pr']['number']}" if entry["pr"] else entry["ref"],
+        "path": path,
+        "line": line,
+        "endLine": end,
+        "side": side,
+        "anchor": rows[bottom][3],
+        "around": {
+            "above": [row[3] for row in rows[max(0, top - 3) : top]],
+            "below": [row[3] for row in rows[bottom + 1 : bottom + 4]],
+        },
+        "text": " ".join(args.text),
+        "images": [],
+        "who": "session",
+    }
+    outcome = ask("/comments", {"comments": [note], "github": False})
+    if outcome is None:
+        sys.exit("nothing is serving")
+    print(f"opened [{outcome['seq']}] on {path}:{span} ({side})")
+
+
 def reply(args):
     order = {"seq": args.seq, "text": " ".join(args.text), "who": "session", "whisper": args.whisper}
     if args.on is not None:
@@ -591,6 +643,13 @@ job.add_argument(
     "--reply", type=int, default=None, help="rewrite this reply of the comment instead, by its place in the thread"
 )
 job.set_defaults(run=edit)
+
+job = jobs.add_parser("remark", help="open a thread on lines of a review, as the session's")
+job.add_argument("branch", help="the review, as its ref or its pull request (#3243)")
+job.add_argument("at", help="the lines, as path:line or path:line-endLine")
+job.add_argument("text", nargs="+", help="the remark, shown on the page")
+job.add_argument("--old", action="store_true", help="stand on removed lines, numbered as they were")
+job.set_defaults(run=remark)
 
 job = jobs.add_parser("reply", help="answer a comment without closing it")
 job.add_argument("seq", type=int)

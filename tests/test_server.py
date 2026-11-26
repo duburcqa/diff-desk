@@ -250,6 +250,44 @@ def test_either_side_can_reply_without_closing_the_thread(desk):
     assert desk.post("/reply", {"seq": 99999, "text": "nowhere"})["ok"] is False
 
 
+def test_a_session_opens_a_thread_of_its_own(desk):
+    opening = desk.cli("remark", "feature", f"sample.py:{FIRST_EDIT - 1}-{FIRST_EDIT}", "worth", "a", "look")
+    said = opening.communicate(timeout=60)[0]
+    assert opening.returncode == 0, said
+    row = desk.get("/comments")[-1]
+    assert said.startswith(f"opened [{row['seq']}]")
+    assert (row["who"], row["text"], row["line"], row["endLine"], row["side"]) == (
+        "session",
+        "worth a look",
+        FIRST_EDIT - 1,
+        FIRST_EDIT,
+        "new",
+    )
+    # Anchored on the lines the diff shows, so the thread still finds its place once they move.
+    assert row["anchor"] == f"line {FIRST_EDIT} rewritten"
+    # Read from the hunk alone, which starts two lines above the range.
+    assert row["around"]["above"] == [f"line {FIRST_EDIT - 3}", f"line {FIRST_EDIT - 2}"]
+    # The session's own word is no news to a session watching the review.
+    assert row["eventBy"] == "session"
+
+    # Lines the diff does not show are refused rather than recorded where no thread can be drawn.
+    missed = desk.cli("remark", "feature", "kept.py:1", "nowhere")
+    assert "not in the diff" in missed.communicate(timeout=60)[0] and missed.returncode != 0
+
+    # Any other author is one a sync brings back from the pull request, which nothing posted here can claim to be.
+    claimed = desk.post(
+        "/comments", {"branch": "feature", "path": "sample.py", "line": 8, "side": "new", "text": "x", "who": "octocat"}
+    )
+    assert "who" not in {held["seq"]: held for held in desk.get("/comments")}[claimed["seq"]]
+
+    # The session's remark is this desk's to reword and to send, as the reader's is.
+    assert desk.post("/edit", {"seq": row["seq"], "text": "worth a second look"})["ok"]
+    desk.github_answers(out=json.dumps({"html_url": "https://github.com/x/y/pull/21#review-1"}))
+    assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 21, "seq": [row["seq"]]})["ok"]
+    sent = {held["seq"]: held for held in desk.get("/comments")}[row["seq"]]
+    assert (sent["github"], sent["who"]) == ("posted", "session")
+
+
 def test_rewriting_a_comment_or_one_of_its_replies_keeps_what_it_said_before(desk):
     made = desk.post(
         "/comments", {"branch": "feature", "path": "sample.py", "line": 12, "side": "new", "text": "first"}
