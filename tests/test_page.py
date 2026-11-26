@@ -4291,6 +4291,31 @@ def test_a_comment_written_on_the_pull_request_shows_whose_it_is_and_is_answered
         desk.github_answers(code=1, err="gh: Not Found (HTTP 404)")
 
 
+def test_a_remark_the_session_wrote_reads_as_its_own_and_stays_this_desks_to_change(page, desk):
+    branch = page.evaluate("() => data.branches[0].ref")
+    seq = desk.post(
+        "/comments",
+        {
+            "branch": branch,
+            "path": "sample.py",
+            "line": SECOND_EDIT,
+            "side": "new",
+            "text": "seen by Claude",
+            "who": "session",
+        },
+    )["seq"]
+    page.evaluate("() => loadNotes()")
+    page.wait_for_selector(f"#note-{seq}")
+
+    head = page.locator(f"#note-{seq} .thread > .line").first
+    assert head.locator(".who .by").inner_text() == "claude"
+    assert "session" in head.locator(".who .by").get_attribute("class")
+    assert head.locator(".who").get_attribute("data-tip").endswith("submitted here")
+    # Written on this desk, so the reader may reword it or take it back before anything sends it.
+    assert head.locator("button.tiny").filter(has_text="Edit").count() == 1
+    assert head.locator("button.drop").count() == 1
+
+
 def test_a_thread_says_what_it_owes_the_pull_request_and_sends_it_when_asked(page, desk):
     branch = page.evaluate("() => data.branches[0].ref")
     knows = [

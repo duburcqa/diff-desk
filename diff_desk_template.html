@@ -846,6 +846,7 @@
   /* Whose it is, in the voice their replies are read in: the reader's own, or somebody else's from the pull request. */
   .thread .who .by.you { color: var(--add-ink); }
   .thread .who .by.them { color: var(--stale); }
+  .thread .who .by.session { color: var(--accent); }
   .thread .said { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: normal; color: var(--ink); }
   .thread .reacts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
   .thread .react {
@@ -2179,8 +2180,10 @@
   const mine_ = () => data.viewer || "";
   const isReader = (who) => who === "you" || (Boolean(mine_()) && who === mine_());
   const spokenBy = (who) => (isReader(who) ? "you" : who === "session" ? "claude" : who);
-  // Who opened a thread: a remark written here names nobody, and is the reader's own.
+  // Who opened a thread: a remark written here names nobody and is the reader's own, unless the session wrote it.
   const authorOf = (note) => (note.who && !isReader(note.who) ? note.who : "you");
+  // A remark this desk can reword, delete and send: the reader's, or the session's.
+  const writtenHere = (note) => !note.who || note.who === "session";
 
   const saidWhen = (when, who) => {
     const from = who && who !== "you" && who !== "session" ? "submitted on the pull request" : "submitted here";
@@ -3665,7 +3668,7 @@
       // Whose remark it is, said where a reply says whose it is. Where it was written is the one thing left to hovering:
       // a thread reads the same either way, and this desk is where the reader is reading it.
       const from = document.createElement("span");
-      from.className = `by ${note.who ? (isReader(note.who) ? "you" : "them") : "you"}`;
+      from.className = `by ${!note.who || isReader(note.who) ? "you" : note.who === "session" ? "session" : "them"}`;
       from.textContent = note.who ? spokenBy(note.who) : "you";
       who.append(document.createTextNode(" "), from);
       // Said by the tag alone, as a reply's is: the line holds the words and the buttons, which say their own.
@@ -3715,7 +3718,7 @@
       return row;
     }
     if (reactTo) tools.append(reactTo);
-    if ((note.pending || notes.live) && !note.who) {
+    if ((note.pending || notes.live) && writtenHere(note)) {
       const change = document.createElement("button");
       change.className = "tiny";
       change.textContent = "edit";
@@ -3813,7 +3816,7 @@
         render();
       });
       tools.append(drop);
-    } else if (notes.live && !note.who) {
+    } else if (notes.live && writtenHere(note)) {
       const posted = note.github === "posted";
       drop.dataset.tip = posted ? "Delete this comment, here and on the pull request" : "Delete this comment";
       drop.addEventListener("click", async () => {
