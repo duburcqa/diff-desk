@@ -2863,21 +2863,28 @@
     }
   });
 
-  function grows(box) {
-    // A box the size of what has been written into it: measured after it is in the page, since a box not yet there has
-    // nothing to measure, and bounded so a long remark scrolls inside it rather than pushing the diff off screen.
-    const fit = () => {
-      // Out of sight - in a thread the header hides, or a file folded away - it measures nothing, and a height taken
-      // from nothing is a sliver once the thread is shown. Left to the observer below, which hears it being shown.
-      if (!box.clientWidth) return;
-      box.style.height = "auto";
-      const cap = Math.round(window.innerHeight * 0.45);
-      const wanted = box.scrollHeight;
-      box.style.height = `${Math.min(wanted, cap)}px`;
+  function fitBoxes(boxes) {
+    // Each box the size of what has been written into it, bounded so a long remark scrolls inside it rather than
+    // pushing the diff off screen. Out of sight - in a thread the header hides, or a file folded away - a box measures
+    // nothing, and a height taken from nothing is a sliver once the thread is shown: it is left to the observer of
+    // `grows`, which hears it being shown.
+    const shown = boxes.filter((box) => box.clientWidth);
+    for (const box of shown) box.style.height = "auto";
+    const cap = Math.round(window.innerHeight * 0.45);
+    // Every box measured before any is set, so a file holding dozens of them is laid out once rather than once each.
+    const wanted = shown.map((box) => box.scrollHeight);
+    shown.forEach((box, index) => {
+      box.style.height = `${Math.min(wanted[index], cap)}px`;
       // A bar to drag only where there is something left to reach: the box is the size of what was written until it
       // hits the cap, and a bar on a box that already shows everything is furniture.
-      box.style.overflowY = wanted > cap ? "auto" : "hidden";
-    };
+      box.style.overflowY = wanted[index] > cap ? "auto" : "hidden";
+    });
+  }
+
+  function grows(box) {
+    // Measured after it is in the page, since a box not yet there has nothing to measure. A file built whole fits its
+    // boxes itself, as it is filled (see `fillBody`).
+    const fit = () => fitBoxes([box]);
     box.addEventListener("input", fit);
     requestAnimationFrame(fit);
     // A frame later rather than in the observer's own callback: a box resized while the observer reports on it is a
@@ -6003,6 +6010,7 @@
     body.style.minHeight = "";
     body.replaceChildren();
     if (semanticOn() && fillSemantic(body, file)) {
+      fitBoxes([...body.querySelectorAll("textarea")]);
       markFile(wrap);
       return;
     }
@@ -6134,6 +6142,10 @@
       table.append(tbody);
       body.append(table);
     }
+    // The boxes of its threads fitted at once rather than a frame later, which would move everything below them under
+    // a reader landed beyond: a file is built because the reader scrolled near it, and a scroll anchored at the end of
+    // the page is not given back what such a frame takes from it.
+    fitBoxes([...body.querySelectorAll("textarea")]);
     markFile(wrap);
   }
 

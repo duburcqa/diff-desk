@@ -4673,37 +4673,56 @@ def test_going_back_from_a_comment_returns_to_the_place_left(page, desk):
     )
     said = {"branch": branch, "path": path, "line": line, "side": "new", "text": "gone to and come back from"}
     made = desk.post("/comments", [said])["seq"]
-    page.set_viewport_size({"width": 1200, "height": 380})
-    page.reload(wait_until="load")
-    page.wait_for_selector("section.file")
-    assert page.locator("#goback").is_disabled()
-    # The file under the bar and how far it has been scrolled under it, which is what the reader is reading.
-    standing = """() => {
-      const covered = document.querySelector('header').getBoundingClientRect().bottom;
-      const cards = [...document.querySelectorAll('section.file')];
-      const card = cards.find((one) => one.getBoundingClientRect().bottom > covered);
-      return [card.dataset.path, Math.round(card.getBoundingClientRect().top - covered)];
-    }"""
-    places = []
-    for start in ("() => window.scrollTo(0, document.body.scrollHeight)", "() => window.scrollTo(0, 0)"):
-        page.evaluate(start)
-        page.wait_for_timeout(400)
-        places.append(page.evaluate(standing))
-        page.locator("#goto").fill(str(made))
-        page.locator("#goto").press("Enter")
-        page.wait_for_function("(seq) => document.querySelector(`#note-${seq} .thread.found`)", arg=made)
-        page.wait_for_timeout(900)
+    # Threads on the files the reader passes between the two places, each with a box to reply in: enough of them that
+    # going back builds again a file let go of on the way, and a box drawn at a size it does not keep moves the place
+    # the reader is put back on. Dropped afterwards, since the files they lengthen are where later tests look.
+    passing = []
+    try:
+        for passed, count in (("added.py", 8), ("sample.py", 24)):
+            numbers = page.evaluate(
+                "(path) => data.branches[0].files.find((file) => file.path === path).lines"
+                ".filter((row) => row[0] !== 'h' && row[2]).map((row) => row[2])",
+                passed,
+            )
+            threads = [
+                {"branch": branch, "path": passed, "line": number, "side": "new", "text": "passed by"}
+                for number in numbers[-count:]
+            ]
+            passing += desk.post("/comments", threads)["seqs"]
+        page.set_viewport_size({"width": 1200, "height": 380})
+        page.reload(wait_until="load")
+        page.wait_for_selector("section.file")
+        assert page.locator("#goback").is_disabled()
+        # The file under the bar and how far it has been scrolled under it, which is what the reader is reading.
+        standing = """() => {
+          const covered = document.querySelector('header').getBoundingClientRect().bottom;
+          const cards = [...document.querySelectorAll('section.file')];
+          const card = cards.find((one) => one.getBoundingClientRect().bottom > covered);
+          return [card.dataset.path, Math.round(card.getBoundingClientRect().top - covered)];
+        }"""
+        places = []
+        for start in ("() => window.scrollTo(0, document.body.scrollHeight)", "() => window.scrollTo(0, 0)"):
+            page.evaluate(start)
+            page.wait_for_timeout(400)
+            places.append(page.evaluate(standing))
+            page.locator("#goto").fill(str(made))
+            page.locator("#goto").press("Enter")
+            page.wait_for_function("(seq) => document.querySelector(`#note-${seq} .thread.found`)", arg=made)
+            page.wait_for_timeout(900)
 
-    # Back where the reader was before each jump, one jump at a time, by the key or the button joined to the box that
-    # goes to a comment, and nowhere further once every jump is undone.
-    backs = (lambda: page.locator("body").press("b"), lambda: page.locator("#goback").click())
-    for back, left in zip(backs, reversed(places), strict=True):
-        back()
-        page.wait_for_timeout(300)
-        reached = page.evaluate(standing)
-        assert reached[0] == left[0]
-        assert abs(reached[1] - left[1]) <= 2
-    assert page.locator("#goback").is_disabled()
+        # Back where the reader was before each jump, one jump at a time, by the key or the button joined to the box
+        # that goes to a comment, and nowhere further once every jump is undone.
+        backs = (lambda: page.locator("body").press("b"), lambda: page.locator("#goback").click())
+        for back, left in zip(backs, reversed(places), strict=True):
+            back()
+            page.wait_for_timeout(300)
+            reached = page.evaluate(standing)
+            assert reached[0] == left[0]
+            assert abs(reached[1] - left[1]) <= 2
+        assert page.locator("#goback").is_disabled()
+    finally:
+        for seq in passing:
+            desk.post("/drop", {"seq": seq, "who": "you"})
 
 
 def test_a_remark_and_a_reply_both_say_when_they_were_said_and_where_they_were_written(page, desk):
