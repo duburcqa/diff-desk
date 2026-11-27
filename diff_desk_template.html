@@ -413,28 +413,20 @@
   body.hide-files #filesgrip { display: none; }
   @media (max-width: 900px) { #filesgrip { display: none; } }
   @media (max-width: 900px) { .shell { grid-template-columns: minmax(0, 1fr); } }
-  /* The file list folds away from its own head, and a rail at the edge brings it back. */
+  /* The file list folds away from its own head, and a rail at the edge brings it back, holding the other button of that
+     head as well. */
   .asidehead { display: flex; align-items: center; justify-content: space-between; margin: 0 0 8px 4px; }
   .asidehead h2 { margin: 0; }
-  #hidefiles, #foldreviewed, .rail { display: grid; place-items: center; padding: 0; border-color: transparent; background: transparent; color: var(--muted); }
+  #hidefiles, #foldreviewed, .rail button { display: grid; place-items: center; padding: 0; border-color: transparent; background: transparent; color: var(--muted); }
   #hidefiles, #foldreviewed { width: 24px; height: 22px; }
   #foldreviewed { margin-left: auto; }
   #hidefiles svg, #foldreviewed svg, .rail svg { width: 12px; height: 12px; }
-  #hidefiles:hover, #foldreviewed:hover, .rail:hover { color: var(--ink); background: var(--surface-sunk); }
+  #hidefiles:hover, #foldreviewed:hover, .rail button:hover { color: var(--ink); background: var(--surface-sunk); }
   .rail { display: none; }
   body.hide-files .shell { grid-template-columns: 28px minmax(0, 1fr); }
   body.hide-files aside { display: none; }
-  body.hide-files .rail {
-    display: grid;
-    position: sticky;
-    top: var(--head);
-    width: 28px;
-    height: 36px;
-    margin-top: 8px;
-    border: 0;
-    border-radius: 0 6px 6px 0;
-    cursor: pointer;
-  }
+  body.hide-files .rail { display: flex; flex-direction: column; gap: 2px; position: sticky; top: var(--head); margin-top: 8px; }
+  .rail button { width: 28px; height: 36px; border: 0; border-radius: 0 6px 6px 0; cursor: pointer; }
 
   aside {
     position: sticky;
@@ -1603,9 +1595,14 @@
 </div>
 
 <div class="shell">
-  <button class="rail" id="showfiles" data-tip="Show the file list" aria-label="Show the file list">
-    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg>
-  </button>
+  <div class="rail">
+    <button id="showfiles" data-tip="Show the file list" aria-label="Show the file list">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg>
+    </button>
+    <button id="railfold" data-tip="Fold every reviewed file (z)" aria-label="Fold every reviewed file">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 2.5 8 6l3.5-3.5"/><path d="M4.5 13.5 8 10l3.5 3.5"/></svg>
+    </button>
+  </div>
   <aside>
     <div class="asidehead">
       <h2 class="label">Files</h2>
@@ -1692,7 +1689,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "goback", "foldreviewed", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "loading", "goto", "veil", "palette", "pq", "picks", "find", "fgrip", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "fthreads", "toast", "toastwhere", "toastsaid", "toastmark", "logdot", "chatopen", "chatdot", "chat", "chatgrip", "chatback", "chattitle", "chatcopy", "chatnew", "chatclose", "chatwho", "chatrows", "chatsay", "chatname", "chattext", "chatsend", "chatresult", "filesgrip"]) {
+  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "goback", "foldreviewed", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "loading", "goto", "veil", "palette", "pq", "picks", "find", "fgrip", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "fthreads", "toast", "toastwhere", "toastsaid", "toastmark", "logdot", "chatopen", "chatdot", "chat", "chatgrip", "chatback", "chattitle", "chatcopy", "chatnew", "chatclose", "chatwho", "chatrows", "chatsay", "chatname", "chattext", "chatsend", "chatresult", "filesgrip", "railfold"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -6928,6 +6925,7 @@
   });
   els.goback.addEventListener("click", goBack);
   els.foldreviewed.addEventListener("click", foldReviewed);
+  els.railfold.addEventListener("click", foldReviewed);
   els.cback.addEventListener("click", () => {
     const { back } = commentsAround();
     if (back) reach(back);

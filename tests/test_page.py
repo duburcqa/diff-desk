@@ -1248,7 +1248,17 @@ def test_reviewed_files_fold_one_by_one_or_all_at_once(page):
         assert held.get_attribute("data-open") == "true"
     left = cards.nth(2)
     assert left.get_attribute("data-open") == "true"
-    for fold in (lambda: page.locator("body").press("z"), lambda: page.locator("#foldreviewed").click()):
+
+    def fold_from_the_rail():
+        # The list hidden, its button to fold stands on the rail that brings the list back, under that one.
+        page.locator("aside #hidefiles").click()
+        shown, under = page.locator("#showfiles").bounding_box(), page.locator("#railfold").bounding_box()
+        assert abs(under["x"] - shown["x"]) <= 1 and under["y"] >= shown["y"] + shown["height"]
+        page.locator("#railfold").click()
+        page.locator("#showfiles").click()
+
+    folds = (lambda: page.locator("body").press("z"), lambda: page.locator("#foldreviewed").click(), fold_from_the_rail)
+    for fold in folds:
         fold()
         page.wait_for_selector("section.file[data-done='true'][data-open='true']", state="detached")
         assert page.locator("section.file[data-done='true'][data-open='false']").count() == len(reviewed)
