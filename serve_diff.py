@@ -18,6 +18,9 @@ Endpoints, all on 127.0.0.1 so nothing is exposed off the machine:
   GET  /heard?branch=         where the agent asking last stopped watching those reviews, and whether the desk has
                               restarted since
   GET  /watching              the agents watching the desk right now
+  GET  /chat                  every message of the chat, threads and all
+  GET  /chat/export?thread=N  one thread of the chat as plain text, to be kept or read back
+  POST /chat                  {thread, title, text, images} - say something in a thread, or open one with a title
   POST /comments              {comments: [...], github: bool} - a batch as submitted, or a bare list of comments
   POST /bind                  {seq: [...], github} - mark comments as bound for the pull request, or keep them local
   POST /edit                  {seq, text, reply} - rewrite a comment, or the reply at that place in its thread,
@@ -45,6 +48,12 @@ home, scoped to this port, which every request of the page then carries. An agen
 header and is recorded as `agent:<name>`. Every agent stands where every other does, and the reader's word is the only
 one told apart. A request naming nobody is refused. Everything on the machine can read the desk's home, so the key
 keeps a request from being recorded as the reader's by mistake, which is all a desk on 127.0.0.1 can promise.
+
+The chat is where the reader and the agents talk outside any line of the diff: threads by topic, each opened with a
+title, written in the same markdown as comments, naming a thread of the review as `[N]` and a line as `path:line` in
+backticks. It shares the log's event cursor, so a watch hears it as it hears the comments. A message wakes an agent when
+it opens a thread, when the agent has already spoken in its thread, or when it names the agent as `@name`: several
+agents share a desk, and a conversation between two of them is nobody else's to be woken by.
 
 Deleting is the one thing that does discard: a dropped comment leaves the page and every exchange with the pull
 request, and a dropped reply is gone from the thread. What was posted is deleted on the pull request first, so a
@@ -139,6 +148,7 @@ DATA = HOME / "diff_data.json"
 NOTES = HOME / "comments.jsonl"
 TICKS = HOME / "reviewed.json"
 HEARD = HOME / "heard.json"
+CHAT = HOME / "chat.jsonl"
 PULLS = HOME / "pulls.json"
 MEDIA = HOME / "media"
 PORT = int(os.environ.get("DIFF_DESK_PORT", "8787"))
@@ -149,7 +159,19 @@ READER_KEY = HOME / "reader.key"
 READER_COOKIE = f"diff_desk_reader_{PORT}"
 AGENT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,39}")
 # The requests that write to the log, each recorded under its author.
-AUTHORED = ("/comments", "/bind", "/edit", "/reply", "/resolve", "/drop", "/react", "/forget", "/publish", "/sync")
+AUTHORED = (
+    "/comments",
+    "/bind",
+    "/edit",
+    "/reply",
+    "/resolve",
+    "/drop",
+    "/react",
+    "/forget",
+    "/publish",
+    "/sync",
+    "/chat",
+)
 # Who an author recorded in the log can be, apart from an agent and the pull request's own authors: the reader, the
 # pull request as a whole for what a sync brings in, and the desk itself for its own bookkeeping, which wakes nobody.
 READER, GITHUB, DESK = "you", "github", "desk"
@@ -1248,6 +1270,58 @@ def is_refusal(error):
     return any(code in error for code in ("HTTP 401", "HTTP 403", "HTTP 404", "HTTP 422"))
 
 
+def latest_event(rows):
+    """The last event of the desk, a change to the log or a message of the chat.
+
+    The two share one cursor, so that one watch follows both.
+    """
+    said = read_chat()
+    return max([held.get("event", 0) for held in rows] + [message["event"] for message in said[-1:]], default=0)
+
+
+def read_chat():
+    """Every message of the chat, oldest first."""
+    if not CHAT.exists():
+        return []
+    return [json.loads(line) for line in CHAT.read_text().splitlines() if line.strip()]
+
+
+def chat_threads(messages):
+    """The threads of the chat by number, each the list of its messages, the one opening it first."""
+    threads = {}
+    for message in messages:
+        threads.setdefault(message["thread"], []).append(message)
+    return threads
+
+
+def wakes(message, who, threads):
+    """Whether a message of the chat is news to this agent: one opening a thread, one in a thread it has spoken in, or
+    one naming it."""
+    if message["who"] == who:
+        return False
+    if message["id"] == message["thread"]:
+        return True
+    if any(said["who"] == who for said in threads.get(message["thread"], ())):
+        return True
+    name = who.removeprefix("agent:")
+    return re.search(rf"(?<![\w@])@{re.escape(name)}(?![\w.-])", message["text"]) is not None
+
+
+def spoken_name(who):
+    """The name an author is read under: `you` for the reader, an agent by the name it gave, anyone else as recorded."""
+    return who.removeprefix("agent:")
+
+
+def chat_export(thread):
+    """One thread of the chat as plain markdown: its title, then every message under who said it and when."""
+    first = thread[0]
+    out = [f"# {first.get('title') or 'Untitled'}", "", f"Chat thread {first['thread']}, {len(thread)} message(s)."]
+    for message in thread:
+        out += ["", f"## {spoken_name(message['who'])}, {message['at']}", "", message["text"].rstrip()]
+        out += [f"[{image['name']}]({MEDIA / image['file']})" for image in message.get("images") or ()]
+    return "\n".join(out) + "\n"
+
+
 def touched(rows, row, by):
     """Stamp a row as the latest news, and say who made it.
 
@@ -1256,7 +1330,7 @@ def touched(rows, row, by):
     for can be told from what it just did, and the desk's own bookkeeping is stamped as the desk's, which is news to
     nobody.
     """
-    row["event"] = max((held.get("event", 0) for held in rows), default=0) + 1
+    row["event"] = latest_event(rows) + 1
     row["eventBy"] = by
     # The last word said carries that stamp too, so an agent woken by a thread can tell which line woke it from the
     # ones it has already read.
@@ -1308,7 +1382,11 @@ def remembered_pulls(branches):
 
 def write_notes(rows):
     gen_diff_data.write_whole(NOTES, "".join(json.dumps(row) + "\n" for row in rows))
-    # Every request waiting for news looks again (see `_news`).
+    told()
+
+
+def told():
+    """Wake every request waiting for news, so it looks again (see `_news`)."""
     with NEWS:
         Watch.written += 1
         NEWS.notify_all()
@@ -1437,9 +1515,16 @@ class Handler(BaseHTTPRequestHandler):
             "/reviewed": lambda: {"marks": read_ticks()},
             "/progress": lambda: dict(gen_diff_data.COLLECTING),
             "/watching": lambda: {"agents": watching()},
+            "/chat": lambda: {"messages": read_chat()},
         }
         # What is answered from the arguments it is asked with.
-        asked = {"/lines": self._lines, "/semantic": self._semantic, "/news": self._news, "/heard": self._heard}
+        asked = {
+            "/lines": self._lines,
+            "/semantic": self._semantic,
+            "/news": self._news,
+            "/heard": self._heard,
+            "/chat/export": self._export,
+        }
         if path in ("", "/index.html"):
             print(f"PAGE served to {self.headers.get('User-Agent', '?')}", flush=True)
             # Sent as it was last built, at once: collecting a long branch takes seconds, and a page held back that
@@ -1519,6 +1604,8 @@ class Handler(BaseHTTPRequestHandler):
     def _news(self, query):
         """What someone other than the asking agent said past an event, waiting for it when nothing has been said yet.
 
+        That is the comments touched since, and the messages of the chat that wake the agent (see `wakes`).
+
         Held open until there is some or the wait is over, so an agent blocks on one request rather than asking over and
         over, and counts as watching while it does. What the desk does on its own account is news to nobody. Where the
         agent has heard up to is recorded as it asks and as it is answered, so the next watch it arms carries on from
@@ -1543,8 +1630,13 @@ class Handler(BaseHTTPRequestHandler):
                     and row.get("eventBy") not in (self.author, DESK)
                     and (not branches or row.get("branch") in branches)
                 ]
+                messages = read_chat()
+                threads = chat_threads(messages)
+                said = [
+                    message for message in messages if message["event"] > since and wakes(message, self.author, threads)
+                ]
                 left = deadline - time.monotonic()
-                if fresh or left <= 0:
+                if fresh or said or left <= 0:
                     break
                 # Asleep only if nothing was written since the log was read, which would otherwise wake nobody.
                 with NEWS:
@@ -1554,9 +1646,65 @@ class Handler(BaseHTTPRequestHandler):
             with NEWS:
                 WAITING[self.author] -= 1
                 WAITED[self.author] = time.monotonic()
-        if fresh:
-            heard_up_to(self.author, branches, max(row["event"] for row in fresh))
-        self._json({"rows": fresh, "desk": SERVING})
+        if fresh or said:
+            heard_up_to(self.author, branches, max(item["event"] for item in fresh + said))
+        # Each message of the chat goes with the title of its thread, which a message further down does not carry.
+        titles = {number: thread[0].get("title", "") for number, thread in threads.items()}
+        said = [{**message, "title": titles.get(message["thread"], "")} for message in said]
+        self._json({"rows": fresh, "chat": said, "desk": SERVING})
+
+    def _export(self, query):
+        """One thread of the chat as plain text, which is what an agent keeps of a conversation or reads back later."""
+        wanted = query.get("thread", [""])[0]
+        thread = chat_threads(read_chat()).get(int(wanted) if wanted.isdigit() else None)
+        if thread is None:
+            self._send(404, f"no chat thread numbered {wanted}".encode())
+            return
+        self._send(200, chat_export(thread).encode(), "text/markdown; charset=utf-8")
+
+    def _chat(self):
+        """Say something in a thread of the chat, or open a thread with a title and its first message.
+
+        Numbered as the comments are, in a sequence of its own, and stamped on the log's event cursor so a watch hears
+        it in order with everything else.
+        """
+        order = self._body()
+        text = (order.get("text") or "").strip()
+        title = " ".join((order.get("title") or "").split())
+        if not text:
+            self._json({"ok": False, "error": "an empty message says nothing"})
+            return
+        with CHANGING:
+            messages = read_chat()
+            threads = chat_threads(messages)
+            number = max((message["id"] for message in messages), default=0) + 1
+            thread = order.get("thread")
+            if thread is None and not title:
+                refused = "a new thread needs a title, which is what it is found by"
+            elif thread is not None and thread not in threads:
+                refused = f"no chat thread numbered {thread}"
+            else:
+                refused = ""
+            if refused:
+                self._json({"ok": False, "error": refused})
+                return
+            said = {
+                "id": number,
+                "thread": number if thread is None else thread,
+                "who": self.author,
+                "text": text,
+                "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "event": latest_event(read_notes()) + 1,
+            }
+            if thread is None:
+                said["title"] = title
+            if order.get("images"):
+                said["images"] = carried(order)
+            messages.append(said)
+            gen_diff_data.write_whole(CHAT, "".join(json.dumps(message) + "\n" for message in messages))
+        told()
+        print(f"CHAT [{said['thread']}] {said['who']}: {' '.join(text.split())}", flush=True)
+        self._json({"ok": True, "id": said["id"], "thread": said["thread"]})
 
     def _lines(self, query):
         """A slice of a file at a revision, which is how the page fills the gaps between hunks.
@@ -1691,6 +1839,7 @@ class Handler(BaseHTTPRequestHandler):
             "/forget": self._forget,
             "/publish": self._publish,
             "/sync": self._sync,
+            "/chat": self._chat,
             "/stop": self._stop,
         }
         serving = routes.get(path)

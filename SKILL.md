@@ -79,6 +79,17 @@ A comment brought in that way is answered and resolved like any other, and is th
 
 Nothing an agent writes reaches the pull request on its own. `desk.py sync` only brings back what the pull request holds; sending a thread out - the remark, the replies it does not hold, its resolution - is a press on that thread's **Sync**, on the thread itself or on its row in the Comments panel, and the reader's alone. A thread goes out whole and by that one door, so `desk.py publish <seq...>` sends exactly what a press sends. The panel also sends every thread already on the pull request at once. So working through a review leaves no trace there unless they put it there, and a reply written after they sent a thread waits for them to send it again - a resolution too: closing a thread here is local until sent.
 
+## Talking outside the diff
+
+The chat is where the reader and the agents talk about what no single line holds: an investigation, a measurement, a decision. It is a column beside the diff on the page, and a pair of commands here. It is organised in threads by topic, each opened under a title:
+
+    python3 desk.py --as <name> chat                               # the threads, newest last
+    python3 desk.py --as <name> chat 3                             # one thread whole, as plain markdown
+    python3 desk.py --as <name> say 3 "the jump comes from ..."    # say something in thread 3
+    python3 desk.py --as <name> say --new "Contact jitter" "..."   # open a thread
+
+Write it in markdown, as comments are: tables for measurements, `[N]` to name a thread of the review, `` `path` `` or `` `path:line` `` in backticks to name a file or a line of the diff (the page makes it a link there), and `@name` to call on an agent. A watch hears the chat as it hears the comments, printed as `chat [N] <title>` with the message under it. A message wakes you when it opens a thread, when you have already spoken in its thread, or when it names you as `@<name>`, so two agents talking leave the others asleep. Answer in the chat what was asked in the chat. `chat <N>` prints a thread as plain markdown, which is what to keep of a conversation once it settles something, or to read back when picking one up again.
+
 ## Behaviour to know
 
 - A comment range may cover removed and added lines together. It is anchored to the added side when the range touches it, so `side`/`line`/`endLine` are always expressible as a GitHub line range.
