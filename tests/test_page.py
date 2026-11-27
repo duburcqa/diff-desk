@@ -5040,6 +5040,7 @@ def test_the_chat_stands_beside_the_diff_and_names_its_lines(page, desk):
     topic.click()
     page.wait_for_selector(".chat .msg")
     assert page.locator(".chat .msg .who").first.inner_text().startswith(AGENT)
+
     colour = "(node) => getComputedStyle(node).color"
     try:
         named = page.locator("#chatwho .name").filter(has_text=AGENT)
@@ -5143,3 +5144,38 @@ def test_an_answer_asked_for_before_another_never_replaces_it(page, desk):
     route.fulfill(response=stale)
     page.evaluate("() => window.older")
     assert page.evaluate("(seq) => notes.sent.some((note) => note.seq === seq)", made)
+
+
+def test_a_table_of_measurements_reads_as_prose(page, desk):
+    measured = (
+        "| case | Compatibility, max over x/y/z | Max residual | LSQR | Correction |\n|---|---|---|---|---|\n"
+        "| lattice | 2.3e-13 | 1.0e-11 | istop 1, 5,514 iterations | -0.82 |\n"
+        "| displaced interior | 1.5e-11 | **1.6e-11** | istop 1, 10,046 iterations | 1.415 |"
+    )
+    title = f"Measured, number {len(desk.get('/chat')['messages']) + 1}"
+    thread = desk.post("/chat", {"title": title, "text": measured}, agent=AGENT)["thread"]
+    page.evaluate("() => loadNotes()")
+    page.locator("#chatopen").click()
+    page.locator(f".chat .topic[data-thread='{thread}']").click()
+    page.wait_for_selector(".chat .msg table")
+    # A table of measurements reads as prose: a figure is never split at its sign or its exponent, and a column is never
+    # narrower than its longest word.
+    laid = page.evaluate(
+        """() => {
+          const table = document.querySelector('.chat .msg table');
+          const figures = [...table.querySelectorAll('.figure')];
+          const head = [...table.querySelectorAll('th')].find((cell) => cell.textContent.startsWith('Compatibility'));
+          const word = document.createRange();
+          word.setStart(head.firstChild, 0);
+          word.setEnd(head.firstChild, 'Compatibility'.length);
+          return {
+            mono: getComputedStyle(table.querySelector('td')).fontFamily.includes('monospace'),
+            figures: figures.map((figure) => figure.textContent),
+            split: figures.filter((figure) => figure.getClientRects().length > 1).length,
+            word: word.getClientRects().length,
+          };
+        }"""
+    )
+    assert not laid["mono"]
+    assert {"2.3e-13", "1.6e-11", "-0.82"} <= set(laid["figures"])
+    assert (laid["split"], laid["word"]) == (0, 1)
