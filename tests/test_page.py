@@ -1613,6 +1613,50 @@ def test_comments_are_filtered_by_their_author_and_stepped_through(page, desk):
     page.locator(f"#note-{theirs}").wait_for(state="attached")
 
 
+def test_the_comments_panel_moves_by_its_grip_and_sizes_by_its_corner(page):
+    page.locator("#logopen").click()
+    page.wait_for_selector("#log[data-open='true']")
+    corner = page.locator("#log").bounding_box()
+
+    def drag(handle, dx, dy):
+        box = page.locator(handle).bounding_box()
+        x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+        page.mouse.move(x, y)
+        page.mouse.down()
+        page.mouse.move(x + dx / 2, y + dy / 2)
+        page.mouse.move(x + dx, y + dy)
+        page.mouse.up()
+        return page.locator("#log").bounding_box()
+
+    # Nothing moves it by mistake: a press on the grip that barely moves, or a drag over the rest of its head.
+    assert drag("#logmove", 3, 2) == corner
+    assert drag("#log .head strong", -200, -150) == corner
+    # Its grip moves it, and its corner sizes it with the place it stands at kept.
+    moved = drag("#logmove", -300, -200)
+    assert (round(moved["x"] - corner["x"]), round(moved["y"] - corner["y"])) == (-300, -200)
+    sized = drag("#logsize", 120, 80)
+    assert (round(sized["width"] - moved["width"]), round(sized["height"] - moved["height"])) == (120, 80)
+    assert (sized["x"], sized["y"]) == (moved["x"], moved["y"])
+    # However far it is dragged, it stays within the window, its grip within reach.
+    view = page.viewport_size
+    grip = page.locator("#logmove").bounding_box()
+    # Let go just inside the window, which is where a release is delivered.
+    x, y = grip["x"] + grip["width"] / 2, grip["y"] + grip["height"] / 2
+    pushed = drag("#logmove", view["width"] - 2 - x, view["height"] - 2 - y)
+    assert pushed["x"] + pushed["width"] <= view["width"] and pushed["y"] + pushed["height"] <= view["height"]
+
+    # Kept for the next load, and put back in its corner by a double click on the grip.
+    page.reload(wait_until="load")
+    page.wait_for_selector("#log[data-open='true']")
+    assert page.locator("#log").bounding_box() == pushed
+    page.locator("#logmove").dblclick()
+    assert page.locator("#log").bounding_box() == corner
+    page.reload(wait_until="load")
+    page.wait_for_selector("#log[data-open='true']")
+    assert page.locator("#log").bounding_box() == corner
+    page.locator("#logclose").click()
+
+
 def test_the_comments_panel_lists_what_the_filters_keep(page, desk):
     said = {"branch": "feature", "path": "sample.py", "side": "new"}
     kept = desk.post("/comments", {"comments": [{**said, "line": 30, "text": "only on this desk"}]})["seqs"][0]
