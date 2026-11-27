@@ -1,25 +1,31 @@
-"""Serve the diff desk locally: rescan any repository, record every comment, and hand them to a session in order.
+"""Serve the diff desk locally: rescan any repository, record every comment, and hand them to agents in order.
 
 Endpoints, all on 127.0.0.1 so nothing is exposed off the machine:
   GET  /                      the page
   GET  /data                  the payload the page renders
   GET  /refs?dir=&base=       branches ahead of a base, for the source picker
   GET  /state                 what the served diffs are built from, so a page can tell the branch has moved on,
-                              and the source they came from, so a session can tell whose review it is holding
+                              and the source they came from, so an agent can tell whose review it is holding
   POST /scan                  {dir, base, refs} - regenerate the payload and return it
   GET  /reviewed              which files have been read, so a tick outlives the browser it was made in
   POST /reviewed              {marks, drop} - tick files at the digest they were read at, or untick them
   GET  /comments?since=N      every recorded comment past the cursor, each with its seq and batch
   GET  /serving             which run of the desk is answering, so a watch armed against an older one stops
-  GET  /comments?event=N      every comment touched past that event, which is how a session hears about replies
+  GET  /comments?event=N      every comment touched past that event, which is how an agent hears about replies
+  GET  /news?since=N&branch=&wait=S
+                              what someone other than the agent asking said past that event, held open until there is
+                              some or the wait is over, on the reviews named (every one when none is)
+  GET  /heard?branch=         where the agent asking last stopped watching those reviews, and whether the desk has
+                              restarted since
+  GET  /watching              the agents watching the desk right now
   POST /comments              {comments: [...], github: bool} - a batch as submitted, or a bare list of comments
   POST /bind                  {seq: [...], github} - mark comments as bound for the pull request, or keep them local
   POST /edit                  {seq, text, reply} - rewrite a comment, or the reply at that place in its thread,
                               keeping what it said before
-  POST /reply                 {seq, text, who} - add a reply to a comment, from the session or from the reviewer
-  POST /resolve               {seq: [...], answer, resolved, who} - close comments, or reopen them
-  POST /drop                  {seq, reply, who, repo, pr} - delete a comment, or only its last reply, here and there
-  POST /react                 {seq, reply, content, on, who, at_once, repo, pr} - add or take back an emoji reaction
+  POST /reply                 {seq, text} - add a reply to a comment, from the reader or from an agent
+  POST /resolve               {seq: [...], answer, resolved} - close comments, or reopen them
+  POST /drop                  {seq, reply, repo, pr} - delete a comment, or only its last reply, here and there
+  POST /react                 {seq, reply, content, on, at_once, repo, pr} - add or take back an emoji reaction
                               on a remark or a reply: on the pull request at once when it holds that comment, or
                               else owed to the thread's next send
   POST /publish               {repo, pr, summary, seq, resolved} - send those threads whole: the remark if it is not
@@ -33,6 +39,13 @@ Endpoints, all on 127.0.0.1 so nothing is exposed off the machine:
   GET  /semantic?dir=&oldrev=&rev=&path=...
                               the Python files named, old and new, lined up by statement for the semantic view
 
+Every request that writes to the log says who is making it, and the desk records that author rather than anything the
+request body claims. The reader is the page: serving it hands the browser a cookie holding a key kept in the desk's
+home, scoped to this port, which every request of the page then carries. An agent names itself in an `X-Desk-Agent`
+header and is recorded as `agent:<name>`. Every agent stands where every other does, and the reader's word is the only
+one told apart. A request naming nobody is refused. Everything on the machine can read the desk's home, so the key
+keeps a request from being recorded as the reader's by mistake, which is all a desk on 127.0.0.1 can promise.
+
 Deleting is the one thing that does discard: a dropped comment leaves the page and every exchange with the pull
 request, and a dropped reply is gone from the thread. What was posted is deleted on the pull request first, so a
 deletion that could not be made there leaves both copies as they were rather than hiding a remark that is still on it.
@@ -42,7 +55,7 @@ request's word on what is resolved, and records the comments written there. What
 a time, when the reader sends it, and carries the thread as it reads at that moment - a reply written afterwards waits
 for them to send it again.
 
-A comment is a thread: a remark plus replies from either side, each stamped with who wrote it and whether the pull
+A comment is a thread: a remark plus replies from anyone, each stamped with who wrote it and whether the pull
 request holds it - `none` while it is only here, `posted` once it is there, `failed` when a send did not land, with its
 reason. The remark is the reviewer's own unless a sync brought it in from the pull request, in which case it carries the
 author who wrote it there and stays their word: this desk answers and resolves it, and leaves its wording and its
@@ -76,10 +89,13 @@ keep their reason. The log on disk is written before GitHub is contacted, so a p
 
 import contextlib
 import hashlib
+import hmac
+import http.cookies
 import json
 import os
 import pathlib
 import re
+import secrets
 import threading
 import time
 import types
@@ -104,8 +120,8 @@ class Serving:
 
     Named at startup and renamed by every scan, since a scan is how the reader chooses what to review.
 
-    Who started it is kept beside what it holds, so a session on its way out can stop the desk it opened and leave
-    one opened by another session running, with the reviews that session is still reading.
+    Who started it is kept beside what it holds, so an agent on its way out can stop the desk it opened and leave
+    one opened by another agent running, with the reviews that agent is still reading.
     """
 
     source = None
@@ -122,9 +138,26 @@ TEMPLATE = HERE / "diff_desk_template.html"
 DATA = HOME / "diff_data.json"
 NOTES = HOME / "comments.jsonl"
 TICKS = HOME / "reviewed.json"
+HEARD = HOME / "heard.json"
 PULLS = HOME / "pulls.json"
 MEDIA = HOME / "media"
 PORT = int(os.environ.get("DIFF_DESK_PORT", "8787"))
+# Where the reader's key is kept: across restarts, since a page outlives the desk that served it and is still the
+# reader's when the desk comes back. The cookie carrying it is named after the port, as a browser keeps one cookie per
+# host whatever its port, and two desks would otherwise each refuse the page of the other.
+READER_KEY = HOME / "reader.key"
+READER_COOKIE = f"diff_desk_reader_{PORT}"
+AGENT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,39}")
+# The requests that write to the log, each recorded under its author.
+AUTHORED = ("/comments", "/bind", "/edit", "/reply", "/resolve", "/drop", "/react", "/forget", "/publish", "/sync")
+# Who an author recorded in the log can be, apart from an agent and the pull request's own authors: the reader, the
+# pull request as a whole for what a sync brings in, and the desk itself for its own bookkeeping, which wakes nobody.
+READER, GITHUB, DESK = "you", "github", "desk"
+# How long an agent between two of its waits still counts as watching: the gap between a wait answered and the next
+# one asked for.
+WATCH_GAP = 5.0
+# The longest a request waiting for news is held, which keeps it well inside the timeout of whoever is asking.
+WAIT_LONGEST = 25.0
 
 # What GitHub's upload takes, and the type it is told for each: a file of any other kind is refused as it is offered
 # rather than at the send, where the comment written around it would be what failed. The endpoint answers every type
@@ -172,8 +205,15 @@ def read_notes():
             row["line"], row["endLine"] = row["endLine"], row["line"]
         # A row written before the cursor existed is as old as its position says.
         row.setdefault("event", row["seq"])
-        row.setdefault("eventBy", "you")
+        row.setdefault("eventBy", READER)
+        # Written when the desk knew one agent and called it the session: every one of those was a Claude session.
+        if row.get("who") == "session":
+            row["who"] = "agent:claude"
+        if row["eventBy"] == "session":
+            row["eventBy"] = DESK
         for answer in row["replies"]:
+            if answer.get("who") == "session":
+                answer["who"] = "agent:claude"
             # A reply written before it had a standing of its own: one already on the pull request stands as posted, and
             # one written here stands local, which is what it would have been given had it been written now. One brought
             # back before it was stamped says where it is in its standing, so the words that stood for a time go.
@@ -182,6 +222,18 @@ def read_notes():
             if answer["at"] == "on the PR":
                 answer["at"] = ""
     return rows
+
+
+def written_here(who):
+    """Whether words are this desk's own, the reader's or an agent's, which it may reword, delete and send."""
+    return who in (None, READER) or who.startswith("agent:")
+
+
+def reader_key():
+    """The key a page proves it is the reader's with, made the first time it is asked for."""
+    if not READER_KEY.exists():
+        gen_diff_data.write_whole(READER_KEY, secrets.token_urlsafe(32))
+    return READER_KEY.read_text().strip()
 
 
 def attached(name, raw):
@@ -532,7 +584,7 @@ def heard_again(row, thread):
     """
     said = thread["comments"]["nodes"]
     row["prThread"] = thread["id"]
-    ours = ("you", "session", reader())
+    login = reader()
     pairs = [(row, said[0])] if said else []
     for answer in row.get("replies", []):
         if answer.get("whisper"):
@@ -552,7 +604,8 @@ def heard_again(row, thread):
         item.update(known)
         # Only somebody else's word follows the pull request: this desk's own is rewritten here, and one rewritten there
         # is still known by its id.
-        if item.get("who") and item["who"] not in ours and node["body"] != item["text"]:
+        is_ours = written_here(item.get("who")) or item["who"] == login
+        if not is_ours and node["body"] != item["text"]:
             item.setdefault("edits", []).append({"at": time.strftime("%Y-%m-%d %H:%M:%S"), "text": item["text"]})
             item["text"] = node["body"]
 
@@ -1129,8 +1182,8 @@ def take_in(rows, arriving, order, ref):
         note = brought_in(thread, order, ref)
         note["seq"], note["batch"] = seq, group
         rows.append(note)
-        # Somebody else's remark, so it is news for this side just as a reply brought back from there is.
-        touched(rows, note, "you")
+        # Somebody else's remark, so it is news for everyone here just as a reply brought back from there is.
+        touched(rows, note, GITHUB)
         taken.append(note)
     return taken
 
@@ -1196,15 +1249,16 @@ def is_refusal(error):
 
 
 def touched(rows, row, by):
-    """Stamp a row as the latest news, and say which side made it.
+    """Stamp a row as the latest news, and say who made it.
 
-    A session follows this rather than the comment numbers: a reply on a comment it has already read is news just as
+    An agent follows this rather than the comment numbers: a reply on a comment it has already read is news just as
     much as a new comment, and numbering alone cannot say so. Its own writes are stamped too, so that what it is waiting
-    for can be told from what it just did.
+    for can be told from what it just did, and the desk's own bookkeeping is stamped as the desk's, which is news to
+    nobody.
     """
     row["event"] = max((held.get("event", 0) for held in rows), default=0) + 1
     row["eventBy"] = by
-    # The last word said carries that stamp too, so a session woken by a thread can tell which line woke it from the
+    # The last word said carries that stamp too, so an agent woken by a thread can tell which line woke it from the
     # ones it has already read.
     said = row.get("replies") or []
     if said and not said[-1].get("event"):
@@ -1254,6 +1308,47 @@ def remembered_pulls(branches):
 
 def write_notes(rows):
     gen_diff_data.write_whole(NOTES, "".join(json.dumps(row) + "\n" for row in rows))
+    # Every request waiting for news looks again (see `_news`).
+    with NEWS:
+        Watch.written += 1
+        NEWS.notify_all()
+
+
+class Watch:
+    """How often the log has been written, which a wait compares before it sleeps. Changed under `NEWS`."""
+
+    written = 0
+
+
+# Who is waiting for news: how many requests each agent holds open, and when its last one ended, so an agent between two
+# waits still counts as watching (see `WATCH_GAP`). Changed under `NEWS`.
+WAITING = {}
+WAITED = {}
+
+
+def watching():
+    """The agents watching the desk, by name: those waiting for news now, or a moment ago."""
+    now = time.monotonic()
+    with NEWS:
+        names = {who for who, held in WAITING.items() if held}
+        names |= {who for who, ended in WAITED.items() if now - ended < WATCH_GAP}
+    return sorted(who.removeprefix("agent:") for who in names)
+
+
+def heard_up_to(who, branches, event=None):
+    """Where an agent watching these reviews has heard up to, and the run of the desk it heard it from, recorded when an
+    event is given and read back otherwise.
+
+    Kept per agent and per set of reviews: one agent catching up carries no other past what it has yet to hear, and one
+    watching a review is never carried past what is said about another.
+    """
+    key = f"{who}|{'|'.join(branches)}"
+    with HEARING:
+        held = json.loads(HEARD.read_text()) if HEARD.exists() else {}
+        if event is not None:
+            held[key] = {"event": event, "desk": SERVING}
+            gen_diff_data.write_whole(HEARD, json.dumps(held, indent=1, sort_keys=True))
+    return held.get(key)
 
 
 # The desk answers requests on several threads, and every change to the log is a read of the whole of it followed by a
@@ -1263,6 +1358,9 @@ CHANGING = threading.Lock()
 
 # Collecting the diffs ends in a write of the payload and of the page, so it is done one at a time for the same reason.
 BUILDING = threading.Lock()
+# Told of every write to the log, which is what wakes the requests waiting for news.
+NEWS = threading.Condition()
+HEARING = threading.Lock()
 # This run of the desk, as the moment it started answering: a restart carries whatever the tool has become with it.
 SERVING = time.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -1284,11 +1382,16 @@ ALIGNING = threading.Lock()
 
 
 class Handler(BaseHTTPRequestHandler):
-    def _send(self, code, body=b"", kind="text/plain; charset=utf-8"):
+    # Who is making the request, for a request that writes to the log or asks for an agent's news (see `_author`).
+    author = None
+
+    def _send(self, code, body=b"", kind="text/plain; charset=utf-8", cookie=""):
         self.send_response(code)
         self.send_header("Content-Type", kind)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
         self.end_headers()
         if body:
             self.wfile.write(body)
@@ -1299,6 +1402,27 @@ class Handler(BaseHTTPRequestHandler):
     def _body(self):
         length = int(self.headers.get("Content-Length", 0))
         return json.loads(self.rfile.read(length) or b"{}")
+
+    def _author(self):
+        """Who is making this request, and why nobody is when it says nothing the desk can take.
+
+        The reader is whoever holds the key the page was served with. An agent is anyone naming itself in the
+        `X-Desk-Agent` header with a name that stands for nobody else.
+        """
+        cookies = http.cookies.SimpleCookie()
+        with contextlib.suppress(http.cookies.CookieError):
+            cookies.load(self.headers.get("Cookie", ""))
+        held = cookies.get(READER_COOKIE)
+        if held is not None and hmac.compare_digest(held.value, reader_key()):
+            return READER, ""
+        name = (self.headers.get("X-Desk-Agent") or "").strip()
+        if not name:
+            return None, "say who is writing: an agent names itself with --as <name>, or in the X-Desk-Agent header"
+        if not AGENT_NAME.fullmatch(name):
+            return None, f"{name!r} cannot name an agent: letters, digits, '.', '_' and '-', at most 40 of them"
+        if name.lower() in (READER, GITHUB, DESK, reader().lower()):
+            return None, f"{name!r} already stands for someone other than an agent"
+        return f"agent:{name}", ""
 
     def do_GET(self):
         route = urlparse(self.path)
@@ -1312,12 +1436,18 @@ class Handler(BaseHTTPRequestHandler):
             "/serving": lambda: {"desk": SERVING},
             "/reviewed": lambda: {"marks": read_ticks()},
             "/progress": lambda: dict(gen_diff_data.COLLECTING),
+            "/watching": lambda: {"agents": watching()},
         }
+        # What is answered from the arguments it is asked with.
+        asked = {"/lines": self._lines, "/semantic": self._semantic, "/news": self._news, "/heard": self._heard}
         if path in ("", "/index.html"):
             print(f"PAGE served to {self.headers.get('User-Agent', '?')}", flush=True)
             # Sent as it was last built, at once: collecting a long branch takes seconds, and a page held back that
-            # long shows nothing at all. The page then brings itself up to date (see 'freshen' in the template).
-            self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
+            # long shows nothing at all. The page then brings itself up to date (see 'freshen' in the template). The
+            # cookie is what makes every request of the page the reader's, and it lasts as long as a page can stay
+            # open, since one restored by a browser coming back is not asked for again.
+            key = f"{READER_COOKIE}={reader_key()}; Path=/; Max-Age=31536000; SameSite=Strict; HttpOnly"
+            self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8", cookie=key)
         elif path in held:
             self._json(held[path]())
         elif path == "/data":
@@ -1339,7 +1469,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/state":
             source = Serving.source
             marked = gen_diff_data.stamp(source.root, source.base, source.refs) if source else None
-            # The source, and not only the stamp it hashes to: a session about to serve has to tell a desk showing
+            # The source, and not only the stamp it hashes to: an agent about to serve has to tell a desk showing
             # another review from one showing the review it is itself here for, which a stamp alone cannot say.
             self._json(
                 {
@@ -1354,8 +1484,8 @@ class Handler(BaseHTTPRequestHandler):
                     "startedBy": Serving.started_by,
                 }
             )
-        elif path in ("/lines", "/semantic"):
-            {"/lines": self._lines, "/semantic": self._semantic}[path](query)
+        elif path in asked:
+            asked[path](query)
         elif path.startswith("/media/"):
             self._kept(path[len("/media/") :])
         elif path == "/favicon.ico":
@@ -1370,6 +1500,63 @@ class Handler(BaseHTTPRequestHandler):
                 self._json([row for row in rows if row.get("seq", 0) > since])
         else:
             self._send(404)
+
+    def _watcher(self):
+        """The agent asking about its watch, or None once the request has been refused for naming none."""
+        self.author, refused = self._author()
+        if self.author is None or self.author == READER:
+            self._json({"ok": False, "error": refused or "news is what an agent waits for"}, 403)
+            return None
+        return self.author
+
+    def _heard(self, query):
+        """Where the asking agent last stopped watching the reviews it names, and whether the desk restarted since."""
+        if self._watcher() is None:
+            return
+        stopped = heard_up_to(self.author, tuple(sorted(query.get("branch", [])))) or {}
+        self._json({"event": stopped.get("event"), "restarted": stopped.get("desk", SERVING) != SERVING})
+
+    def _news(self, query):
+        """What someone other than the asking agent said past an event, waiting for it when nothing has been said yet.
+
+        Held open until there is some or the wait is over, so an agent blocks on one request rather than asking over and
+        over, and counts as watching while it does. What the desk does on its own account is news to nobody. Where the
+        agent has heard up to is recorded as it asks and as it is answered, so the next watch it arms carries on from
+        there.
+        """
+        if self._watcher() is None:
+            return
+        branches = tuple(sorted(query.get("branch", [])))
+        since = int(query.get("since", ["0"])[0])
+        deadline = time.monotonic() + min(float(query.get("wait", ["0"])[0]), WAIT_LONGEST)
+        heard_up_to(self.author, branches, since)
+        with NEWS:
+            WAITING[self.author] = WAITING.get(self.author, 0) + 1
+        try:
+            while True:
+                with NEWS:
+                    written = Watch.written
+                fresh = [
+                    row
+                    for row in read_notes()
+                    if row.get("event", 0) > since
+                    and row.get("eventBy") not in (self.author, DESK)
+                    and (not branches or row.get("branch") in branches)
+                ]
+                left = deadline - time.monotonic()
+                if fresh or left <= 0:
+                    break
+                # Asleep only if nothing was written since the log was read, which would otherwise wake nobody.
+                with NEWS:
+                    if Watch.written == written:
+                        NEWS.wait(left)
+        finally:
+            with NEWS:
+                WAITING[self.author] -= 1
+                WAITED[self.author] = time.monotonic()
+        if fresh:
+            heard_up_to(self.author, branches, max(row["event"] for row in fresh))
+        self._json({"rows": fresh, "desk": SERVING})
 
     def _lines(self, query):
         """A slice of a file at a revision, which is how the page fills the gaps between hunks.
@@ -1510,6 +1697,12 @@ class Handler(BaseHTTPRequestHandler):
         if serving is None:
             self._send(404)
             return
+        # What writes to the log is recorded under its author, so a request naming nobody writes nothing.
+        if path in AUTHORED:
+            self.author, refused = self._author()
+            if self.author is None:
+                self._json({"ok": False, "error": refused}, 403)
+                return
         serving()
 
     def _stop(self):
@@ -1585,10 +1778,11 @@ class Handler(BaseHTTPRequestHandler):
             group = max((row.get("batch", 0) for row in rows), default=0) + 1
             for note in batch:
                 seq += 1
-                # A remark recorded here is the reader's, or the session's where it says so. Any other author is one a
-                # sync brings back from the pull request, which the desk can neither reword nor send.
-                if note.get("who") != "session":
-                    note.pop("who", None)
+                # A remark is its author's, whatever the request says: the reader's names nobody, an agent's names the
+                # agent, and any other author is one a sync brings back from the pull request.
+                note.pop("who", None)
+                if self.author != READER:
+                    note["who"] = self.author
                 # When it was written, where the writer did not say: a comment recorded through the API carries no
                 # stamp of its own, and a thread with no time on it can say when nothing it holds was said.
                 note.setdefault("at", time.strftime("%Y-%m-%d %H:%M:%S"))
@@ -1598,7 +1792,7 @@ class Handler(BaseHTTPRequestHandler):
                 note["github"] = "pending" if bound else "none"
                 note["replies"] = []
                 rows.append(note)
-                touched(rows, note, note.get("who", "you"))
+                touched(rows, note, self.author)
         print(f"BATCH {group}: {len(batch)} comment(s) submitted{', bound for GitHub' if bound else ''}", flush=True)
         for note in batch:
             span = str(note.get("line", "?"))
@@ -1625,7 +1819,7 @@ class Handler(BaseHTTPRequestHandler):
                     continue
                 row["github"] = "pending" if bound else "none"
                 row.pop("error", None)
-                touched(rows, row, "session")
+                touched(rows, row, DESK)
                 if bound and order.get("repo"):
                     # Which pull request it is now headed for, so no other review's sweep picks it up.
                     row["prRepo"], row["prNumber"] = order["repo"], order.get("pr")
@@ -1653,13 +1847,13 @@ class Handler(BaseHTTPRequestHandler):
             replies = found["replies"] if found is not None else []
             if found is None:
                 refused = f"no comment numbered {order.get('seq')}"
-            elif index is None and found.get("who") not in (None, "session", reader()):
+            elif index is None and not (written_here(found.get("who")) or found["who"] == reader()):
                 refused = f"comment {found['seq']} is {found['who']}'s word, written on the pull request"
             elif index is None:
                 said = found
             elif not 0 <= index < len(replies):
                 refused = f"comment {found['seq']} has no reply {index}"
-            elif replies[index]["who"] not in ("you", "session", reader()):
+            elif not (written_here(replies[index]["who"]) or replies[index]["who"] == reader()):
                 refused = f"reply {index} of comment {found['seq']} is {replies[index]['who']}'s word, not this desk's"
             else:
                 said = replies[index]
@@ -1669,7 +1863,7 @@ class Handler(BaseHTTPRequestHandler):
                 earlier = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "text": said["text"], **kept}
                 said.setdefault("edits", []).append(earlier)
                 said["text"] = text
-                # A request that says nothing about files leaves the ones it carries alone, which is what a session
+                # A request that says nothing about files leaves the ones it carries alone, which is what an agent
                 # rewording a comment from the command line asks for.
                 if "images" in order:
                     said["images"] = carried(order)
@@ -1677,7 +1871,7 @@ class Handler(BaseHTTPRequestHandler):
                 landed = (said["github"] if index is not None else found.get("github")) == "posted"
                 if landed:
                     said["editedAfterPost"] = True
-                touched(rows, found, "you")
+                touched(rows, found, self.author)
         if refused is not None:
             self._json({"ok": False, "error": refused})
             return
@@ -1686,12 +1880,12 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": True, "seq": found["seq"], "reply": index, "edits": len(said["edits"])})
 
     def _reply(self):
-        """Add a reply to a comment, from whichever side wrote it, or a whisper that stays here. A reply leaves the
-        thread open.
+        """Add a reply to a comment, from whoever wrote it, or a whisper that stays here. A reply leaves the thread
+        open.
 
         Recorded here and nowhere else: what a thread says reaches the pull request when the reader sends that
         thread, never as a consequence of somebody answering in it. A whisper goes further and never leaves at all: it
-        is written for this side of the desk - what to look at again, what a session is to do - so nothing that decides
+        is written for this side of the desk - what to look at again, what an agent is to do - so nothing that decides
         what a thread owes the pull request looks at it.
         """
         order = self._body()
@@ -1699,7 +1893,7 @@ class Handler(BaseHTTPRequestHandler):
         if not text:
             self._json({"ok": False, "error": "an empty reply says nothing"})
             return
-        who = "you" if order.get("who") == "you" else "session"
+        who = self.author
         # What it hangs under: the remark it answers, or one of the words already said in the thread, by its place in
         # it. Nothing that hangs under a whisper can leave either, the pull request holding no such thing to answer.
         on = order.get("on")
@@ -1731,7 +1925,7 @@ class Handler(BaseHTTPRequestHandler):
                         said["on"] = on
                 if is_whisper:
                     said["whisper"] = True
-                # The same words from the same side, right after themselves, are a press repeated while the page
+                # The same words from the same author, right after themselves, are a press repeated while the page
                 # looked frozen rather than a second answer: the thread ends with them already and is left as it is.
                 repeated = said_before and all(
                     said_before[-1].get(key) == said.get(key) for key in ("who", "text", "whisper", "on", "images")
@@ -1748,12 +1942,12 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": True, "seq": found["seq"], "replies": len(found["replies"])})
 
     def _resolve(self):
-        """Close comments, or reopen them. Either side may do it, and an answer is kept as a reply of its own."""
+        """Close comments, or reopen them. Anyone may do it, and an answer is kept as a reply of its own."""
         order = self._body()
         wanted = set(order.get("seq") or [])
         answer = (order.get("answer") or "").strip()
         closing = bool(order.get("resolved", True))
-        who = "you" if order.get("who") == "you" else "session"
+        who = self.author
         closed = 0
         with changing() as rows:
             for row in rows:
@@ -1763,8 +1957,8 @@ class Handler(BaseHTTPRequestHandler):
                         said = {"who": who, "text": answer, "at": time.strftime("%Y-%m-%d %H:%M:%S"), "github": "none"}
                         if order.get("images"):
                             said["images"] = carried(order)
-                        # An answer the thread already ends with, from the same side, is the same answer asked for
-                        # twice, as when a session answers a thread and then closes it with the same words, or asks
+                        # An answer the thread already ends with, from the same author, is the same answer asked for
+                        # twice, as when an agent answers a thread and then closes it with the same words, or asks
                         # again after the desk restarted under it. The thread is closed as asked and says it once.
                         last = row["replies"][-1] if row["replies"] else None
                         repeated = last and all(
@@ -1806,7 +2000,7 @@ class Handler(BaseHTTPRequestHandler):
                     on = answer.get("on")
                     if on is not None and on > at:
                         answer["on"] = on - 1
-                touched(rows, found, "you")
+                touched(rows, found, self.author)
         if found is None:
             self._json({"ok": False, "error": f"[{at}] is not the last whisper on what it stands on in comment {seq}"})
             return
@@ -1822,6 +2016,9 @@ class Handler(BaseHTTPRequestHandler):
         only here, is recorded under `reactOwed` and goes out when the thread is sent. Reactions are the reader's alone,
         since the pull request knows the reader's account and no other.
         """
+        if self.author != READER:
+            self._json({"ok": False, "error": "a reaction is the reader's, the one account the pull request knows"})
+            return
         order = self._body()
         content, index, on = order.get("content"), order.get("reply"), order.get("on", True) is not False
         at_once = order.get("at_once", True) is not False
@@ -1901,9 +2098,9 @@ class Handler(BaseHTTPRequestHandler):
         order = self._body()
         seq = order.get("seq")
         last_only = bool(order.get("reply"))
-        # Told apart like every other change: a reader's press is theirs, and what a session drops is its own doing, so
-        # a watch is not woken by the very session that ran it.
-        who = "you" if order.get("who") == "you" else "session"
+        # Told apart like every other change: what an agent drops is its own doing, so a watch is not woken by the very
+        # agent that ran it.
+        who = self.author
         with CHANGING:
             rows = read_notes()
         found = next((row for row in rows if row["seq"] == seq), None)
@@ -1914,7 +2111,7 @@ class Handler(BaseHTTPRequestHandler):
         if last_only and not replies:
             self._json({"ok": False, "error": "nothing has been said in answer to it"})
             return
-        if not last_only and found.get("who") not in (None, "session", reader()):
+        if not last_only and not (written_here(found.get("who")) or found["who"] == reader()):
             self._json({"ok": False, "error": f"comment {seq} is {found['who']}'s word, written on the pull request"})
             return
         # Newest first, so the comment that opened the thread is the last to go.
@@ -2003,7 +2200,7 @@ class Handler(BaseHTTPRequestHandler):
                     if row["seq"] in asked and row.get("github") != "posted":
                         row["github"] = "failed"
                         row["error"] = trouble
-                        touched(rows, row, "session")
+                        touched(rows, row, DESK)
             print(f"PUBLISHED nothing ({trouble})", flush=True)
             self._json({"ok": False, "error": trouble, "sent": 0, "owed": len(chosen), "replies": 0, "resolved": 0})
             return
@@ -2034,7 +2231,7 @@ class Handler(BaseHTTPRequestHandler):
         A remark written on the pull request is its author's word and is already there, so what this desk sends of such
         a thread is only what this desk wrote in it.
         """
-        posting = [row for row in chosen if row.get("who") in (None, "session") and row.get("github") != "posted"]
+        posting = [row for row in chosen if written_here(row.get("who")) and row.get("github") != "posted"]
         if not posting:
             return set(), "", "", set()
         went, url, error, refused = post_review(order["repo"], order["pr"], spoken_as(summary), posting)
@@ -2058,7 +2255,7 @@ class Handler(BaseHTTPRequestHandler):
                     continue
                 # Where it was sent, so a later sweep for another pull request leaves it alone.
                 row["prRepo"], row["prNumber"] = order["repo"], order["pr"]
-                touched(rows, row, "session")
+                touched(rows, row, DESK)
         return landed, url, error, missed
 
     def _carry_threads(self, order, carrying):
@@ -2080,7 +2277,7 @@ class Handler(BaseHTTPRequestHandler):
                     for held in fresh:
                         if held["seq"] == row["seq"]:
                             note_trouble(held, trouble)
-                            touched(fresh, held, "session")
+                            touched(fresh, held, DESK)
                 continue
             heard_again(row, thread)
             going = going_out(row, thread["comments"]["nodes"])
@@ -2102,7 +2299,7 @@ class Handler(BaseHTTPRequestHandler):
                         heard_again(held, thread)
                         settle_sent(held, thread, going, step)
                         settle_reactions(held, reacted.get(seq) or {})
-                        touched(fresh, held, "session")
+                        touched(fresh, held, DESK)
         if replies or resolved:
             print(f"SENT {replies} reply(ies)" + (f", {resolved} resolved there" if resolved else ""), flush=True)
         return replies, resolved, trouble
@@ -2187,7 +2384,7 @@ class Handler(BaseHTTPRequestHandler):
                 thread = threads[row["seq"]]
                 if row["seq"] in deleted:
                     local_again(row)
-                    touched(fresh, row, "you")
+                    touched(fresh, row, GITHUB)
                     gone += 1
                     continue
                 if thread is not None:
@@ -2201,9 +2398,9 @@ class Handler(BaseHTTPRequestHandler):
                 # so is a thread somebody closed there. A sync that found neither is not news, and saying it is would
                 # float every synced thread above the answers written here since, on a page ordered by what is recent.
                 if step.incoming:
-                    touched(fresh, row, "you")
+                    touched(fresh, row, GITHUB)
                 elif step.settled and was_open:
-                    touched(fresh, row, "session")
+                    touched(fresh, row, DESK)
                 if step.given:
                     row["prResolve"], trouble = step.given
                     if trouble:
@@ -2226,9 +2423,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 class Server(ThreadingHTTPServer):
-    """The desk's server, with a listen queue deep enough for a page and a session asking at once.
+    """The desk's server, with a listen queue deep enough for a page and agents asking at once.
 
-    The standard queue holds five connections, and a page firing its requests together with a session posting comments
+    The standard queue holds five connections, and a page firing its requests together with an agent posting comments
     overflows it: the operating system turns the connections it has no room for away, and their requests fail on a
     broken pipe rather than wait their turn.
     """
