@@ -3420,16 +3420,22 @@ def test_the_pinned_file_head_clears_the_page_header(page, width):
         .filter((box) => box.top >= -1 && box.top < 260)
         .sort((one, other) => one.top - other.top)[0];
       const under = document.elementFromPoint(Math.round(header.width / 2), Math.round(header.bottom + 4));
+      const held = under && under.closest('.filehead');
+      const rest = [...document.querySelectorAll('.filehead')].find((node) => node !== held);
       return {
         bottom: header.bottom,
         top: pinned ? pinned.top : null,
-        head: Boolean(under && under.closest('.filehead')),
+        head: Boolean(held),
+        corners: held ? getComputedStyle(held).borderTopLeftRadius : null,
+        rest: getComputedStyle(rest).borderTopLeftRadius,
       };
     }""")
     assert look["top"] is not None
     # A head hidden behind the page header leaves a hunk delimiter standing where the file name should be.
     assert look["top"] >= look["bottom"] - 1
     assert look["head"]
+    # Held under the bar, its corners are square, as the bar's lower edge is; a head at rest keeps the card's.
+    assert (look["corners"], look["rest"]) == ("0px", "7px")
 
 
 def test_marking_a_file_reviewed_outlives_the_browser_it_was_made_in(page, desk):
