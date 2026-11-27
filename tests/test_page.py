@@ -4768,7 +4768,9 @@ def test_going_back_from_a_comment_returns_to_the_place_left(page, desk):
                 kind,
             )
             back()
-            page.wait_for_timeout(300)
+            # Waited out by what the page says rather than by a guessed pause: a loaded machine delivers frames slowly,
+            # and the aim corrects one frame in two until it lands.
+            page.wait_for_function("() => reaching === null && !centring")
             reached = page.evaluate(standing)
             page.evaluate("() => { document.querySelector('section.file').style.marginTop = ''; }")
             assert reached[0] == left[0]
