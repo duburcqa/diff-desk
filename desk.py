@@ -408,7 +408,7 @@ def spoken(message):
     opened = " (new thread)" if message["id"] == message["thread"] else ""
     print(f"chat [{message['thread']}] {message['title']}{opened}", flush=True)
     who = message["who"].removeprefix("agent:")
-    print(f"      {who} {message['at']}: {' '.join(message['text'].split())}", flush=True)
+    print(f"      #{message['id']} {who} {message['at']}: {' '.join(message['text'].split())}", flush=True)
     carried(message, "          ")
 
 

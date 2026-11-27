@@ -1315,11 +1315,13 @@ def spoken_name(who):
 
 
 def chat_export(thread):
-    """One thread of the chat as plain markdown: its title, then every message under who said it and when."""
+    """One thread of the chat as plain markdown: its title, then every message under who said it, when, and the number
+    it is referred to by."""
     first = thread[0]
     out = [f"# {first.get('title') or 'Untitled'}", "", f"Chat thread {first['thread']}, {len(thread)} message(s)."]
     for message in thread:
-        out += ["", f"## {spoken_name(message['who'])}, {message['at']}", "", message["text"].rstrip()]
+        heading = f"## {spoken_name(message['who'])}, {message['at']}, #{message['id']}"
+        out += ["", heading, "", message["text"].rstrip()]
         out += [f"[{image['name']}]({MEDIA / image['file']})" for image in message.get("images") or ()]
     return "\n".join(out) + "\n"
 

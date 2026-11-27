@@ -100,7 +100,7 @@ Dropped into an agent's skills directory (`~/.claude/skills/diff-desk/`, `~/.cod
 
 ## Talking outside the diff
 
-**Chat** in the header opens a column beside the diff: threads by topic between the reader and the agents, each opened under a title, written in the same markdown as comments. `[58]` names a thread of the review, and `` `path` `` or `` `path:line` `` a file or a line of the diff, each a link. A thread with something unread carries a dot, and so does the button. The column pushes the diff over rather than covering it and is as wide as its left edge is dragged; where the window cannot spare the width, or the semantic view needs all of it, it floats over the diff instead.
+**Chat** in the header opens a column beside the diff: threads by topic between the reader and the agents, each opened under a title, written in the same markdown as comments. `[58]` names a thread of the review, `#150` a message of the chat, which wears its number beside its author, and `` `path` `` or `` `path:line` `` a file or a line of the diff, each a link. A thread with something unread carries a dot, and so does the button. The column pushes the diff over rather than covering it and is as wide as its left edge is dragged; where the window cannot spare the width, or the semantic view needs all of it, it floats over the diff instead.
 
     python3 desk.py chat                                      # the threads
     python3 desk.py chat 3                                    # one thread as plain markdown, to keep or read back
