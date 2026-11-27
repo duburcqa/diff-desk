@@ -3339,15 +3339,21 @@ def test_the_chat_is_found_when_asked_by_a_box_standing_over_the_diff(page, desk
     page.evaluate("() => loadNotes()")
     counted = "(want) => document.getElementById('fcount').textContent === want"
 
-    # The same height wherever the page stands, a file head pinned under the bar or not, and over the diff alone.
+    # Right under the file head standing under the bar, resting at the top of the page or pinned further down, with
+    # nothing of the diff between the two.
+    under = """() => {
+      const header = document.querySelector('header').getBoundingClientRect().bottom;
+      const head = [...document.querySelectorAll('.filehead')]
+        .map((held) => held.getBoundingClientRect())
+        .find((box) => box.height && box.bottom > header);
+      return document.getElementById('find').getBoundingClientRect().top - head.bottom;
+    }"""
     page.evaluate("() => window.scrollTo(0, 0)")
     page.keyboard.press("Control+f")
     page.wait_for_selector("#find:not([hidden])")
-    top = page.locator("#find").bounding_box()["y"]
-    page.locator("#fq").press("Escape")
+    assert 0 <= page.evaluate(under) <= 6
     page.evaluate("() => window.scrollTo(0, document.body.scrollHeight / 2)")
-    page.keyboard.press("Control+f")
-    assert page.locator("#find").bounding_box()["y"] == top
+    page.wait_for_function(f"() => {{ const gap = ({under})(); return gap >= 0 && gap <= 6; }}")
 
     # The diff alone by default: the words are nowhere in it.
     page.locator("#fq").fill(words)
@@ -5250,7 +5256,8 @@ def test_an_answer_asked_for_before_another_never_replaces_it(page, desk):
 
 def test_a_table_of_measurements_reads_as_prose(page, desk):
     measured = (
-        "| case | Compatibility, max over x/y/z | Max residual | LSQR | Correction |\n|---|---|---|---|---|\n"
+        # A norm written in code holds pipes of its own, which are no edge of a cell.
+        "| case | Compatibility, max over x/y/z | Max residual | LSQR | Correction `|δ|` |\n|---|---|---|---|---|\n"
         "| lattice | 2.3e-13 | 1.0e-11 | istop 1, 5,514 iterations | -0.82 |\n"
         "| displaced interior | 1.5e-11 | **1.6e-11** | istop 1, 10,046 iterations | 1.415 |"
     )
@@ -5281,6 +5288,7 @@ def test_a_table_of_measurements_reads_as_prose(page, desk):
     assert not laid["mono"]
     assert {"2.3e-13", "1.6e-11", "-0.82"} <= set(laid["figures"])
     assert (laid["split"], laid["word"]) == (0, 1)
+    assert page.locator(".chat .msg table th").last.inner_text() == "Correction |δ|"
 
 
 def test_a_message_of_the_chat_is_named_by_its_number(page, desk):

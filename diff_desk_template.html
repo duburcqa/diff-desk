@@ -3003,7 +3003,11 @@
     () => {
       if (isStuckAsked) return;
       isStuckAsked = true;
-      requestAnimationFrame(markStuck);
+      requestAnimationFrame(() => {
+        markStuck();
+        // The find box follows the head it stands under as that head comes to rest under the bar.
+        if (!els.find.hidden) placeFind();
+      });
     },
     { passive: true },
   );
@@ -3949,14 +3953,36 @@
   const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/;
   const TASK = /^\[([ xX])\]\s+/;
 
-  // The cells of a table row: the pipes at either end are its edges, and an escaped pipe is part of a cell.
-  const cells = (line) =>
-    line
-      .trim()
-      .replace(/^\|/, "")
-      .replace(/(?<!\\)\|$/, "")
-      .split(/(?<!\\)\|/)
-      .map((cell) => cell.trim().replace(/\\\|/g, "|"));
+  // The cells of a table row: the pipes at either end are its edges, and an escaped pipe, or one inside a code span, is
+  // part of a cell. A norm written in code (`|x|`) is what a table of measurements holds, and split there the row has
+  // more cells than its head, which is no table at all.
+  function cells(line) {
+    const row = line.trim().replace(/^\|/, "");
+    const found = [];
+    let cell = "";
+    let fence = 0;
+    for (let at = 0; at < row.length; at += 1) {
+      const char = row[at];
+      if (char === "\\" && row[at + 1] === "|") {
+        cell += "|";
+        at += 1;
+      } else if (char === "`") {
+        let run = 1;
+        while (row[at + run] === "`") run += 1;
+        // A span closes on a run as long as the one that opened it.
+        fence = fence === 0 ? run : fence === run ? 0 : fence;
+        cell += row.slice(at, at + run);
+        at += run - 1;
+      } else if (char === "|" && fence === 0) {
+        found.push(cell.trim());
+        cell = "";
+      } else {
+        cell += char;
+      }
+    }
+    if (cell.trim() || !row.endsWith("|")) found.push(cell.trim());
+    return found;
+  }
 
   // Every piece of the plain text under a node that a pattern matches, put back as what make builds of it. Code and
   // links are left alone. The pattern has one capturing group, which is the piece.
@@ -5750,10 +5776,10 @@
     showHit();
   }
 
-  // The box stands over the diff it reads, at its right edge whatever the chat beside it takes, and always at the same
-  // height: under the header's own edge, read now since a narrow window folds the header onto two rows, and below
-  // where the first file head rests at the top of the page, so the tick of a head, resting there or pinned under the
-  // bar, stays within reach on the way through the hits.
+  // The box stands over the diff it reads, at its right edge whatever the chat beside it takes, and right under the file
+  // head standing under the bar: pinned there, or resting a little lower at the top of the page, below which it never
+  // goes. The tick of that head stays within reach on the way through the hits, and nothing of the diff shows between
+  // the two. The header's edge is read now, since a narrow window folds the header onto two rows.
   function placeFind() {
     const header = document.querySelector("header").getBoundingClientRect().bottom;
     // The first file shown: one hidden as reviewed takes no room, and measures as nothing.
@@ -5761,7 +5787,11 @@
     const head = card && card.querySelector(".filehead");
     const rest = card ? Math.max(0, card.getBoundingClientRect().top + window.scrollY - header) : 0;
     const tall = head ? head.getBoundingClientRect().height : 0;
-    els.find.style.top = `${header + rest + tall + 8}px`;
+    const under = [...document.querySelectorAll(".filehead")]
+      .map((held) => held.getBoundingClientRect())
+      .find((box) => box.height && box.bottom > header);
+    const below = Math.min(under ? under.bottom : header + rest + tall, header + rest + tall);
+    els.find.style.top = `${below + 4}px`;
     // Flush with the right edge of the files, which is the edge of what it reads.
     const edge = card ? card.getBoundingClientRect().right : els.main.getBoundingClientRect().right;
     els.find.style.right = `${Math.max(0, document.documentElement.clientWidth - edge)}px`;
