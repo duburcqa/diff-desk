@@ -261,7 +261,7 @@
   #find .grip:hover, #find .grip.held { background: color-mix(in srgb, var(--accent) 70%, transparent); }
   #find .search { flex: none; width: 260px; margin: 0; }
   /* How the box is read stands inside it, at its end, as the browser's own find has it. */
-  #find .search input { padding-right: 104px; background: var(--surface); }
+  #find .search input { padding-right: 126px; background: var(--surface); }
   #find .modes { position: absolute; right: 4px; display: flex; gap: 1px; }
   #find .mode {
     font: inherit;
@@ -1561,6 +1561,7 @@
       <button class="mode" id="fword" aria-pressed="false" data-tip="Match whole word (Alt+W)">ab</button>
       <button class="mode" id="fregex" aria-pressed="false" data-tip="Use regular expression (Alt+R)">.*</button>
       <button class="mode" id="fthreads" aria-pressed="false" data-threads="off" data-tip="Find in comments too (Alt+T)" aria-label="Find in comments too"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg></button>
+      <button class="mode" id="fchat" aria-pressed="false" data-tip="Find in the chat too (Alt+M)" aria-label="Find in the chat too"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 2.5h9v5.5h-5l-2.5 2v-2h-1.5z"/><path d="M12.5 5.5h2v5.5h-1.5v2l-2.5-2h-3.5v-1.5"/></svg></button>
     </span>
   </div>
   <span class="count" id="fcount">0/0</span>
@@ -1720,7 +1721,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "goback", "foldreviewed", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "loading", "goto", "veil", "palette", "pq", "picks", "find", "fgrip", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "fthreads", "toast", "toastwhere", "toastsaid", "toastmark", "logdot", "chatopen", "chatdot", "chat", "chatgrip", "chatback", "chattitle", "chatcopy", "chatnew", "chatclose", "chatwho", "chatrows", "chatsay", "chatname", "chattext", "chatsend", "chatresult", "filesgrip", "railfold", "logmove", "logsize"]) {
+  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "goback", "foldreviewed", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "loading", "goto", "veil", "palette", "pq", "picks", "find", "fgrip", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "fthreads", "toast", "toastwhere", "toastsaid", "toastmark", "logdot", "chatopen", "chatdot", "chat", "chatgrip", "chatback", "chattitle", "chatcopy", "chatnew", "chatclose", "chatwho", "chatrows", "chatsay", "chatname", "chattext", "chatsend", "chatresult", "filesgrip", "railfold", "logmove", "logsize", "fchat"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -2456,6 +2457,7 @@
       for (const message of threads.get(chat.open)) {
         const line = document.createElement("div");
         line.className = "msg";
+        line.dataset.id = String(message.id);
         voiced(line, message.who);
         const who = line.appendChild(document.createElement("div"));
         who.className = "who";
@@ -2471,6 +2473,8 @@
       // The latest word is what a thread is opened for, and where a reader at the foot of it stays as it grows.
       if (atFoot || chat.drawnThread !== chat.open) els.chatrows.scrollTop = els.chatrows.scrollHeight;
       chat.drawnThread = chat.open;
+      // The words found are painted on the messages just built, since the ranges over the old ones paint nothing.
+      markChat();
       return;
     }
     chat.drawnThread = null;
@@ -2511,6 +2515,8 @@
 
   function showChat(open) {
     document.body.classList.toggle("chat-open", open);
+    // The diff narrows or widens, and the find box standing over it follows its edge.
+    if (!els.find.hidden) requestAnimationFrame(placeFind);
     els.chatopen.setAttribute("aria-pressed", String(open));
     keepChoices();
     chat.drawn = null;
@@ -5450,7 +5456,8 @@
 
   // How the box is read: in its case, as whole words, as a pattern, and whether what the threads say is read with the
   // code ("too"), instead of it ("only") or not at all ("off"). Off by default, as the browser's own find.
-  const modes = { matchCase: false, wholeWord: false, regex: false, threads: "off" };
+  // Whether the chat is read as well, after the diff: its hits are reached in the chat, in their thread.
+  const modes = { matchCase: false, wholeWord: false, regex: false, threads: "off", chat: false };
 
   // What the box asks for, as a pattern: the text as written, escaped unless it is a pattern already, and, when whole
   // words are asked for, kept from running into a word on either side where it begins or ends with a word character.
@@ -5495,7 +5502,33 @@
       }
       hits.push(...found.sort((first, second) => first.order - second.order));
     }
+    // The chat after the diff, thread by thread as the list of threads reads, each message in the order it was said.
+    if (modes.chat) {
+      const threads = [...chatThreads().values()].sort((first, second) => second.at(-1).id - first.at(-1).id);
+      for (const thread of threads) {
+        for (const message of thread) {
+          if (pattern.test(String(message.text))) hits.push({ chat: true, id: message.id, thread: message.thread });
+        }
+      }
+    }
     return hits;
+  }
+
+  // The words of a message of the chat a hit stands on, or null while its thread is not the one on screen.
+  const chatHitAt = (hit) => els.chatrows.querySelector(`.msg[data-id="${hit.id}"] .said > .text`);
+
+  // Paints the hits of the thread on screen in the chat, which is drawn apart from the diff.
+  const chatMarked = [];
+  function markChat() {
+    if (!canMark) return;
+    for (const range of chatMarked.splice(0)) foundMarks.delete(range);
+    const pattern = wanted();
+    if (els.find.hidden || !pattern) return;
+    for (const hit of finding.hits) {
+      const words = hit.chat ? chatHitAt(hit) : null;
+      if (words) chatMarked.push(...wordRanges(words, pattern));
+    }
+    for (const range of chatMarked) foundMarks.add(range);
   }
 
   // What a hit stands on in a built card, or null: the row of a line, or the words of a remark or a reply. The semantic
@@ -5582,6 +5615,7 @@
 
   function markAll() {
     for (const card of document.querySelectorAll("section.file")) markFile(card);
+    markChat();
   }
 
   function unmarkHit() {
@@ -5603,6 +5637,25 @@
     const none = pattern === undefined ? "?" : "0/0";
     els.fcount.textContent = hit ? `${finding.at + 1}/${finding.hits.length}` : none;
     if (!hit) return;
+    if (hit.chat) {
+      // A hit in the chat opens it on its thread, and puts the message in view in the chat alone.
+      if (!document.body.classList.contains("chat-open")) showChat(true);
+      if (chat.open !== hit.thread) {
+        chat.open = hit.thread;
+        drawChat();
+        markChat();
+      }
+      const words = chatHitAt(hit);
+      if (!words) return;
+      words.classList.add("hit");
+      if (canMark) for (const range of wordRanges(words, pattern)) hitMarks.add(range);
+      const box = words.getBoundingClientRect();
+      const room = els.chatrows.getBoundingClientRect();
+      if (box.top < room.top || box.bottom > room.bottom) {
+        els.chatrows.scrollTop += box.top - room.top - (room.height - box.height) / 2;
+      }
+      return;
+    }
     const card = document.querySelector(`section.file[data-path="${CSS.escape(hit.path)}"]`);
     if (!card) return;
     // A file folded away, or hidden because it is reviewed, is opened and shown for the line found in it, and its rows
@@ -5651,17 +5704,25 @@
     showHit();
   }
 
-  function openFind() {
-    // Hung under the header's own edge, read now: the header folds onto two rows in a narrow window, and a bar placed
-    // by the header's nominal height then stands across it. Below the file head standing under it too, whose tick is
-    // what the reader presses on their way through the hits: pinned there, or a little lower at the top of the page.
+  // The box stands over the diff it reads, at its right edge whatever the chat beside it takes, and always at the same
+  // height: under the header's own edge, read now since a narrow window folds the header onto two rows, and below
+  // where the first file head rests at the top of the page, so the tick of a head, resting there or pinned under the
+  // bar, stays within reach on the way through the hits.
+  function placeFind() {
     const header = document.querySelector("header").getBoundingClientRect().bottom;
-    const fileHead = [...document.querySelectorAll(".filehead")]
-      .map((head) => head.getBoundingClientRect())
-      .find((box) => box.height && box.bottom > header);
-    const isUnder = fileHead && fileHead.top <= header + fileHead.height;
-    const below = isUnder ? Math.max(fileHead.bottom, header + fileHead.height) : header;
-    els.find.style.top = `${below + 8}px`;
+    const card = document.querySelector("section.file");
+    const head = card && card.querySelector(".filehead");
+    const rest = card ? Math.max(0, card.getBoundingClientRect().top + window.scrollY - header) : 0;
+    const tall = head ? head.getBoundingClientRect().height : 0;
+    els.find.style.top = `${header + rest + tall + 8}px`;
+    els.find.style.right = `${Math.max(8, document.documentElement.clientWidth - els.main.getBoundingClientRect().right + 8)}px`;
+  }
+  addEventListener("resize", () => {
+    if (!els.find.hidden) placeFind();
+  });
+
+  function openFind() {
+    placeFind();
     els.find.hidden = false;
     els.fq.focus();
     els.fq.select();
@@ -7102,7 +7163,7 @@
       closeFind();
     }
     // By code rather than by key: the letter under Alt reads as another character on some keyboards.
-    const mode = { KeyC: "fcase", KeyW: "fword", KeyR: "fregex", KeyT: "fthreads" }[event.code];
+    const mode = { KeyC: "fcase", KeyW: "fword", KeyR: "fregex", KeyT: "fthreads", KeyM: "fchat" }[event.code];
     if (event.altKey && mode) {
       event.preventDefault();
       els[mode].click();
@@ -7166,6 +7227,12 @@
     els.fthreads.dataset.threads = modes.threads;
     els.fthreads.dataset.tip = `${THREAD_MODES[modes.threads].tip} (Alt+T)`;
     els.fthreads.setAttribute("aria-label", THREAD_MODES[modes.threads].tip);
+    els.fq.focus();
+    findAgain();
+  });
+  els.fchat.addEventListener("click", () => {
+    modes.chat = !modes.chat;
+    els.fchat.setAttribute("aria-pressed", String(modes.chat));
     els.fq.focus();
     findAgain();
   });

@@ -3331,6 +3331,44 @@ def test_what_the_threads_say_is_found_when_asked(page, desk):
         desk.post("/drop", {"seq": made})
 
 
+def test_the_chat_is_found_when_asked_by_a_box_standing_over_the_diff(page, desk):
+    words = f"quadrature residual {len(desk.get('/chat')['messages']) + 1}"
+    thread = desk.post("/chat", {"title": "Found in the chat", "text": f"the {words} holds"}, agent=AGENT)["thread"]
+    desk.post("/chat", {"thread": thread, "text": "said in between"})
+    desk.post("/chat", {"thread": thread, "text": f"and the {words} again"}, agent="astra")
+    page.evaluate("() => loadNotes()")
+    counted = "(want) => document.getElementById('fcount').textContent === want"
+
+    # The same height wherever the page stands, a file head pinned under the bar or not, and over the diff alone.
+    page.evaluate("() => window.scrollTo(0, 0)")
+    page.keyboard.press("Control+f")
+    page.wait_for_selector("#find:not([hidden])")
+    top = page.locator("#find").bounding_box()["y"]
+    page.locator("#fq").press("Escape")
+    page.evaluate("() => window.scrollTo(0, document.body.scrollHeight / 2)")
+    page.keyboard.press("Control+f")
+    assert page.locator("#find").bounding_box()["y"] == top
+
+    # The diff alone by default: the words are nowhere in it.
+    page.locator("#fq").fill(words)
+    page.wait_for_function(counted, arg="0/0")
+    # Asked, the chat is read too: it opens on the thread holding the words, marked where they are said.
+    page.locator("#fq").press("Alt+KeyM")
+    page.wait_for_function(counted, arg="1/2")
+    assert page.evaluate("() => document.body.classList.contains('chat-open')")
+    assert page.locator("#chattitle").inner_text() == "Found in the chat"
+    hit = page.locator("#chatrows .msg .text.hit")
+    assert words in hit.inner_text() and hit.is_visible()
+    page.locator("#fq").press("Enter")
+    page.wait_for_function(counted, arg="2/2")
+    assert "again" in page.locator("#chatrows .msg .text.hit").inner_text()
+    box, diff = page.locator("#find").bounding_box(), page.locator("#main").bounding_box()
+    assert box["x"] + box["width"] <= diff["x"] + diff["width"]
+    assert box["x"] + box["width"] <= page.locator("#chat").bounding_box()["x"]
+    page.locator("#fq").press("Escape")
+    assert page.locator("#chatrows .text.hit").count() == 0
+
+
 def test_the_find_box_widens_as_its_edge_is_dragged(page):
     page.keyboard.press("Control+f")
     page.wait_for_selector("#find:not([hidden])")
