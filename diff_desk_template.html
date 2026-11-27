@@ -933,14 +933,28 @@
   /* An overlay scrollbar takes no room of its own and is drawn over the last row it scrolls, flashed there as the
      table first shows: the padding is the room it is drawn into instead. */
   :is(.thread, .talk) .said .grid { margin-top: 6px; padding-bottom: 10px; overflow-x: auto; }
-  :is(.thread, .talk) .said table { border-collapse: collapse; font-size: 12px; }
+  /* Set as prose rather than as the diff's own table, whose rules (monospace, the whole width, lines that never wrap)
+     would leak in: a cell wraps at its spaces and nowhere else, so no column narrows below its longest word, and the
+     table takes the width its words need rather than all of it. Figures keep digits of one width, so a column of them
+     lines up. */
+  :is(.thread, .talk) .said table {
+    width: auto;
+    border-collapse: collapse;
+    font-family: var(--sans);
+    font-size: 12.5px;
+    font-variant-numeric: tabular-nums;
+  }
   :is(.thread, .talk) .said th, :is(.thread, .talk) .said td {
     padding: 3px 9px;
     text-align: left;
     vertical-align: top;
+    white-space: normal;
+    overflow-wrap: normal;
+    min-width: 4ch;
     border: 1px solid var(--rule-strong);
   }
   :is(.thread, .talk) .said th { font-weight: 600; background: var(--surface-sunk); }
+  :is(.thread, .talk) .said .figure { white-space: nowrap; }
   :is(.thread, .talk) .said tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--surface-sunk) 45%, transparent); }
   :is(.thread, .talk) .said pre {
     margin: 4px 0;
@@ -3830,6 +3844,21 @@
         const cell = line.appendChild(document.createElement(index ? "td" : "th"));
         if (aligns[column]) cell.style.textAlign = aligns[column];
         inline(cell, row[column] || "");
+        // A figure written with a sign or an exponent (1e-14, -0.82) holds together: a cell broken at its hyphen reads
+        // as two values. Measurements are what tables here mostly hold.
+        const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+        const texts = [];
+        while (walker.nextNode()) texts.push(walker.currentNode);
+        for (const text of texts) {
+          const pieces = text.data.split(/([-\u2212+]?\d[\d.,]*[eE][-\u2212+]?\d+|[-\u2212]\d[\d.,]*)/);
+          if (pieces.length === 1) continue;
+          const held = document.createDocumentFragment();
+          for (const [at, piece] of pieces.entries()) {
+            if (at % 2) held.append(Object.assign(document.createElement("span"), { className: "figure", textContent: piece }));
+            else if (piece) held.append(piece);
+          }
+          text.replaceWith(held);
+        }
       });
     }
   }
