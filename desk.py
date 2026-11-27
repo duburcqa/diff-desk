@@ -21,6 +21,7 @@ desk.py publish 3 4                                  send those threads to it wh
 desk.py sync                                         bring back what the pull request holds
 desk.py resolve 3 4 --answer "fixed in abc1234"      answer and close; --reopen puts them back
 desk.py refs --dir <repo> --base <ref>               the branches ahead of a base, and the open pull requests
+desk.py tailnet [--off]                              reach the desk from the other devices of your tailnet, or stop
 desk.py chat                                         the threads of the chat, newest last
 desk.py chat 3                                       one thread of the chat, as plain text to keep or read back
 desk.py say 3 "..."                                  say something in a thread of the chat
@@ -34,6 +35,7 @@ import json
 import os
 import pathlib
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -48,6 +50,8 @@ HERE = pathlib.Path(__file__).parent
 URL = f"http://127.0.0.1:{serve_diff.PORT}"
 # The agent this runs as, which --as overrides.
 AGENT = os.environ.get("DIFF_DESK_AGENT", "")
+# How Tailscale is run, which a test replaces with a stand-in, as it does `gh`.
+TAILSCALE = shlex.split(os.environ.get("DIFF_DESK_TAILSCALE", "tailscale"))
 
 
 def refresh():
@@ -316,6 +320,53 @@ def stop(args):
         )
     ask("/stop", {})
     print("stopped")
+    # A desk put down takes its address on the tailnet with it, which would otherwise answer with nothing.
+    if is_on_tailnet():
+        tailscale("serve", f"--https={serve_diff.PORT}", "off")
+        print("and taken off the tailnet")
+
+
+def tailscale(*words):
+    """Run Tailscale's command line, or None where it is not installed."""
+    try:
+        return subprocess.run([*TAILSCALE, *words], capture_output=True, text=True, timeout=60, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def is_on_tailnet():
+    """Whether Tailscale serves this desk's port on the tailnet."""
+    done = tailscale("serve", "status", "--json")
+    return done is not None and done.returncode == 0 and f":{serve_diff.PORT}" in done.stdout
+
+
+def tailnet(args):
+    """Reach the desk from the other devices of your tailnet, a phone included, or stop.
+
+    Tailscale serves the desk over HTTPS at this machine's name on the tailnet, on the desk's own port, which leaves
+    whatever else it serves alone and gives each desk an address of its own. The desk itself keeps answering on
+    127.0.0.1 alone: the devices of the tailnet reach it through Tailscale, and nothing else does. A page opened there
+    is the reader's, as a page opened here is.
+    """
+    port = serve_diff.PORT
+    if args.off:
+        done = tailscale("serve", f"--https={port}", "off")
+        if done is None or done.returncode != 0:
+            sys.exit(
+                f"Tailscale did not take it off: {(done.stderr if done else 'tailscale is not installed').strip()}"
+            )
+        print("no longer on the tailnet")
+        return
+    if ask("/data") is None:
+        sys.exit("nothing is serving; start with 'desk.py serve' first")
+    done = tailscale("serve", "--bg", f"--https={port}", f"http://127.0.0.1:{port}")
+    if done is None:
+        sys.exit("tailscale is not installed, or not on the PATH (DIFF_DESK_TAILSCALE names it otherwise)")
+    if done.returncode != 0:
+        sys.exit(f"Tailscale refused to serve it: {(done.stderr or done.stdout).strip()}")
+    status = tailscale("status", "--json")
+    name = json.loads(status.stdout)["Self"]["DNSName"].rstrip(".") if status and status.returncode == 0 else None
+    print(f"on the tailnet: https://{name}:{port}/" if name else f"on the tailnet, on port {port}")
 
 
 def resume_from(asked, stopped, waiting, latest):
@@ -768,6 +819,15 @@ job.add_argument(
 job.add_argument("--new", metavar="TITLE", help="open a new thread under this title")
 job.add_argument("--attach", action="append", metavar="PATH", help="a file the message carries, any kind; repeatable")
 job.set_defaults(run=say)
+
+job = jobs.add_parser(
+    "tailnet",
+    help="reach the desk from the other devices of your tailnet, a phone included",
+    description="Tailscale serves the running desk over HTTPS on this machine's name on the tailnet, to the devices "
+    "of the tailnet alone. 'desk.py stop' takes it off as well.",
+)
+job.add_argument("--off", action="store_true", help="take the desk off the tailnet")
+job.set_defaults(run=tailnet)
 
 job = jobs.add_parser("refs", help="the branches ahead of a base, and the open pull requests")
 job.add_argument("--dir", default=".")

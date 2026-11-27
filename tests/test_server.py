@@ -2143,6 +2143,22 @@ def test_a_link_of_the_chat_is_shown_by_what_it_says_of_itself(desk, site, shot,
     assert answer.value.code == 403
 
 
+def test_the_desk_is_reached_from_the_tailnet_through_tailscale(desk, tmp_path, monkeypatch):
+    monkeypatch.setenv("DIFF_DESK_TAILSCALE", f"{sys.executable} {ROOT / 'tests' / 'fake_tailscale.py'} {tmp_path}")
+    port = desk.url.rsplit(":", 1)[1]
+    asked = tmp_path / "asked.log"
+
+    # Served over HTTPS at this machine's name on the tailnet, on the desk's own port, forwarded to the desk on
+    # 127.0.0.1, which keeps answering there alone.
+    told = desk.cli("tailnet").communicate(timeout=60)[0]
+    assert f"https://desk.tail0.ts.net:{port}/" in told
+    assert f"serve --bg --https={port} http://127.0.0.1:{port}" in asked.read_text().splitlines()
+    # Taken off as asked, and nothing left served.
+    assert "no longer on the tailnet" in desk.cli("tailnet", "--off").communicate(timeout=60)[0]
+    assert asked.read_text().splitlines()[-1] == f"serve --https={port} off"
+    assert not (tmp_path / "serving").exists()
+
+
 def test_the_desk_updates_itself_over_https_when_ssh_cannot_be_reached(tmp_path):
     # A published copy of the desk to update from, and a checkout of it whose remote is an address SSH cannot reach.
     published, here = tmp_path / "published", tmp_path / "here"
