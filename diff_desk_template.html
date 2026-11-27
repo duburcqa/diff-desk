@@ -1096,7 +1096,15 @@
   .log[data-open="true"] { display: flex; }
   .log .head { display: flex; align-items: baseline; gap: 10px; }
   .log .head .ghost { margin-left: auto; }
-  .log .rows { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+  .log .rows { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; flex: 1; min-height: 0; }
+  /* The panel is moved by its grip and sized by its corner alone (see placeLog). */
+  .log .grip { flex: none; display: grid; place-items: center; width: 16px; height: 24px; margin: -4px 0 -4px -4px; border-radius: 4px; color: var(--faint); cursor: grab; touch-action: none; }
+  .log .grip svg { width: 8px; height: 13px; }
+  .log .grip:hover { color: var(--ink); background: var(--surface-sunk); }
+  .log .grip:active { cursor: grabbing; }
+  .log .corner { position: absolute; right: 3px; bottom: 3px; display: grid; place-items: center; width: 14px; height: 14px; color: var(--faint); cursor: nwse-resize; touch-action: none; }
+  .log .corner svg { width: 10px; height: 10px; }
+  .log .corner:hover { color: var(--ink); }
   .batch { display: flex; flex-direction: column; gap: 4px; }
   .batchhead { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
   .batchhead b { font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; }
@@ -1574,6 +1582,9 @@
 
 <div class="log" id="log" data-open="false">
   <div class="head">
+    <span class="grip" id="logmove" data-tip="Drag to move the panel, double-click to put it back" aria-label="Move the panel">
+      <svg viewBox="0 0 10 16" fill="currentColor" aria-hidden="true"><circle cx="3" cy="3" r="1.2"/><circle cx="7" cy="3" r="1.2"/><circle cx="3" cy="8" r="1.2"/><circle cx="7" cy="8" r="1.2"/><circle cx="3" cy="13" r="1.2"/><circle cx="7" cy="13" r="1.2"/></svg>
+    </span>
     <strong>Comments</strong>
     <span class="status" id="logcount"></span>
     <label class="seen" id="logorder" data-tip="Read the list by the submission each remark went out in, or by what moved last">
@@ -1593,6 +1604,9 @@
     <button class="ghost" id="logsync" data-tip="Bring back the replies, resolutions and comments the pull request holds">Bring back</button>
     <span class="status" id="logresult"></span>
   </div>
+  <span class="corner" id="logsize" data-tip="Drag to resize the panel" aria-label="Resize the panel">
+    <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true"><path d="M11 4 4 11M11 8 8 11"/></svg>
+  </span>
 </div>
 
 <div class="tray" id="tray" data-open="false" data-pending="false">
@@ -1706,7 +1720,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "goback", "foldreviewed", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "loading", "goto", "veil", "palette", "pq", "picks", "find", "fgrip", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "fthreads", "toast", "toastwhere", "toastsaid", "toastmark", "logdot", "chatopen", "chatdot", "chat", "chatgrip", "chatback", "chattitle", "chatcopy", "chatnew", "chatclose", "chatwho", "chatrows", "chatsay", "chatname", "chattext", "chatsend", "chatresult", "filesgrip", "railfold"]) {
+  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "goback", "foldreviewed", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "loading", "goto", "veil", "palette", "pq", "picks", "find", "fgrip", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "fthreads", "toast", "toastwhere", "toastsaid", "toastmark", "logdot", "chatopen", "chatdot", "chat", "chatgrip", "chatback", "chattitle", "chatcopy", "chatnew", "chatclose", "chatwho", "chatrows", "chatsay", "chatname", "chattext", "chatsend", "chatresult", "filesgrip", "railfold", "logmove", "logsize"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -1746,6 +1760,40 @@
   // How the page is being read: the comments panel open or closed, what its listing shows and how it is sorted, and
   // which files and comments the header hides. Kept so a reload shows the review as the reader left it, since the
   // refresh comes to a reload once the desk has been served over.
+  // Where the reader put the Comments panel and how large they made it, or null for its own corner and size. Kept within
+  // the window whatever it is resized to, so the grip that brings it back is always within reach.
+  let logPlace = null;
+  function placeLog() {
+    const style = els.log.style;
+    if (!logPlace) {
+      for (const key of ["left", "top", "right", "bottom", "width", "height", "maxHeight"]) style[key] = "";
+      return;
+    }
+    // Kept within the window as shown, the place kept being the one the reader left it at: a window that shrinks and
+    // grows back puts the panel back where it was.
+    const width = Math.min(Math.max(logPlace.width, 360), innerWidth - 16);
+    style.width = `${width}px`;
+    if (logPlace.height !== null) {
+      style.height = `${Math.min(Math.max(logPlace.height, 160), innerHeight - 16)}px`;
+      style.maxHeight = "none";
+    }
+    // Measured only once the panel is drawn, since a hidden one has no height to keep within the window.
+    const tall = els.log.dataset.open === "true" ? els.log.getBoundingClientRect().height : 0;
+    style.left = `${Math.min(Math.max(logPlace.left, 8), innerWidth - width - 8)}px`;
+    style.top = `${Math.min(Math.max(logPlace.top, 8), innerHeight - tall - 8)}px`;
+    style.right = "auto";
+    style.bottom = "auto";
+  }
+
+  function keepLogPlace() {
+    try {
+      if (logPlace) localStorage.setItem("diffdesk.logPlace", JSON.stringify(logPlace));
+      else localStorage.removeItem("diffdesk.logPlace");
+    } catch (error) {
+      // The place is the reader's for this page alone.
+    }
+  }
+
   function keepChoices() {
     const choices = {
       log: els.log.dataset.open === "true",
@@ -1776,6 +1824,13 @@
       choices = {};
     }
     els.log.dataset.open = String(Boolean(choices.log));
+    try {
+      logPlace = JSON.parse(localStorage.getItem("diffdesk.logPlace") || "null");
+    } catch (error) {
+      logPlace = null;
+    }
+    // Placed once the window has its size, which an engine may not have settled while the page is still loading.
+    requestAnimationFrame(placeLog);
     document.body.classList.toggle("chat-open", Boolean(choices.chat));
     els.chatopen.setAttribute("aria-pressed", String(Boolean(choices.chat)));
     try {
@@ -7332,8 +7387,53 @@
       );
     });
   }
+  // The Comments panel stands where the reader puts it, as large as they make it. A drag begun by mistake on a panel
+  // full of buttons is what costs most to undo, so it moves by its grip and sizes by its corner alone, and only once the
+  // pointer has gone a few pixels: a press that stays put moves nothing. A double click on the grip puts it back.
+  const PANEL_SLACK = 6;
+  for (const [grip, isMove] of [[els.logmove, true], [els.logsize, false]]) {
+    grip.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      grip.setPointerCapture(event.pointerId);
+      const box = els.log.getBoundingClientRect();
+      const fixed = logPlace && logPlace.height !== null ? logPlace.height : null;
+      let isMoving = false;
+      const follow = (moved) => {
+        const [dx, dy] = [moved.clientX - event.clientX, moved.clientY - event.clientY];
+        if (!isMoving && Math.hypot(dx, dy) < PANEL_SLACK) return;
+        isMoving = true;
+        logPlace = isMove
+          ? { left: box.left + dx, top: box.top + dy, width: box.width, height: fixed }
+          : { left: box.left, top: box.top, width: box.width + dx, height: box.height + dy };
+        placeLog();
+      };
+      grip.addEventListener("pointermove", follow);
+      // Ended by the release wherever it lands, or by the grip losing hold of the pointer, whichever comes first: an
+      // engine may drop the release of a drag that ends at the edge of the window.
+      const end = () => {
+        grip.removeEventListener("pointermove", follow);
+        removeEventListener("pointerup", end);
+        grip.removeEventListener("lostpointercapture", end);
+        if (!isMoving) return;
+        isMoving = false;
+        // What is kept is what the reader sees, wherever the window held the panel back from where they pulled it.
+        const shown = els.log.getBoundingClientRect();
+        logPlace = { left: shown.left, top: shown.top, width: shown.width, height: isMove ? fixed : shown.height };
+        keepLogPlace();
+      };
+      addEventListener("pointerup", end);
+      grip.addEventListener("lostpointercapture", end);
+    });
+  }
+  els.logmove.addEventListener("dblclick", () => {
+    logPlace = null;
+    placeLog();
+    keepLogPlace();
+  });
+  addEventListener("resize", placeLog);
   els.logopen.addEventListener("click", () => {
     els.log.dataset.open = els.log.dataset.open === "true" ? "false" : "true";
+    placeLog();
     keepChoices();
     drawLog();
   });
