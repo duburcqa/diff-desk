@@ -1413,7 +1413,9 @@
   .chat .msg .who .at { margin-left: 6px; color: var(--faint); font-weight: 400; }
   .chat .msg .said { color: var(--ink); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
   .chat .msg .said .text > p:first-child { margin-top: 2px; }
-  .chat .say { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-top: 1px solid var(--rule); }
+  /* A form keeps a margin under it in the quirks mode this page renders in, which would leave a strip of nothing below
+     the box. */
+  .chat .say { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 8px 12px; border-top: 1px solid var(--rule); }
   .chat .say input, .chat .say textarea {
     font: inherit;
     font-size: 13px;

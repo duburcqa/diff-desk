@@ -5040,6 +5040,9 @@ def test_the_chat_stands_beside_the_diff_and_names_its_lines(page, desk):
     # leaves the diff behind the chat where it is.
     box, send = page.locator("#chattext").bounding_box(), page.locator("#chatsend").bounding_box()
     assert send["x"] >= box["x"] + box["width"] and send["y"] < box["y"] + box["height"]
+    # And nothing under them but the padding of the box they stand in.
+    column = page.locator("#chat").bounding_box()
+    assert column["y"] + column["height"] - (box["y"] + box["height"]) <= 10
     page.locator("#chatrows").evaluate("(talk) => { talk.scrollTop = talk.scrollHeight; }")
     before = page.evaluate("() => scrollY")
     for turned in ("#chatrows", "#chattext", "#chatwho"):
