@@ -1,4 +1,4 @@
-"""The desk's endpoints: what it serves, what it records, and how a session reads the comments back out."""
+"""The desk's endpoints: what it serves, what it records, and how an agent reads the comments back out."""
 
 import concurrent.futures
 import json
@@ -16,7 +16,7 @@ import pytest
 
 import gen_diff_data
 import serve_diff
-from conftest import FILE_LINES, FIRST_EDIT, ROOT, SECOND_EDIT, free_port, until
+from conftest import AGENT, FILE_LINES, FIRST_EDIT, ROOT, SECOND_EDIT, free_port, until
 from desk import one_ref
 from serve_diff import is_refusal
 
@@ -196,7 +196,7 @@ def test_a_batch_is_recorded_numbered_and_read_back_past_a_cursor(desk):
     assert all(row["batch"] == first["batch"] for row in rows[-2:])
     assert all(row["state"] == "open" for row in rows[-2:])
 
-    # A cursor is what lets a session pick up only what it has not seen.
+    # A cursor is what lets an agent pick up only what it has not seen.
     assert desk.get(f"/comments?since={first['seq']}") == []
     assert [row["text"] for row in desk.get(f"/comments?since={first['seq'] - 2}")] == ["the range", "the removal"]
 
@@ -210,39 +210,39 @@ def test_a_batch_is_recorded_numbered_and_read_back_past_a_cursor(desk):
 def test_resolving_closes_only_what_was_named_and_can_be_undone(desk):
     marked = desk.post("/comments", {"branch": "feature", "path": "sample.py", "line": 8, "side": "new", "text": "one"})
     other = desk.post("/comments", {"branch": "feature", "path": "sample.py", "line": 9, "side": "new", "text": "two"})
-    outcome = desk.post("/resolve", {"seq": [marked["seq"]], "answer": "done in abc1234"})
+    outcome = desk.post("/resolve", {"seq": [marked["seq"]], "answer": "done in abc1234"}, agent=AGENT)
     assert outcome["resolved"] == 1
     rows = {row["seq"]: row for row in desk.get("/comments")}
     closed = rows[marked["seq"]]
     assert closed["state"] == "resolved"
     # Closing keeps the remark and files the answer as a reply of its own, so nothing about it is lost.
     assert closed["text"] == "one"
-    assert [(reply["who"], reply["text"]) for reply in closed["replies"]] == [("session", "done in abc1234")]
+    assert [(reply["who"], reply["text"]) for reply in closed["replies"]] == [(f"agent:{AGENT}", "done in abc1234")]
     assert rows[other["seq"]]["state"] == "open"
 
-    reopened = desk.post("/resolve", {"seq": [marked["seq"]], "resolved": False, "who": "you"})
+    reopened = desk.post("/resolve", {"seq": [marked["seq"]], "resolved": False})
     assert reopened["state"] == "open"
     again = {row["seq"]: row for row in desk.get("/comments")}[marked["seq"]]
     assert again["state"] == "open"
     assert len(again["replies"]) == 1
 
-    # Closed again with the very answer the thread already ends with, from the same side: closed, and said once.
-    assert desk.post("/resolve", {"seq": [marked["seq"]], "answer": "done in abc1234"})["resolved"] == 1
+    # Closed again with the very answer the thread already ends with, from the same author: closed, and said once.
+    assert desk.post("/resolve", {"seq": [marked["seq"]], "answer": "done in abc1234"}, agent=AGENT)["resolved"] == 1
     once = {row["seq"]: row for row in desk.get("/comments")}[marked["seq"]]
     assert once["state"] == "resolved"
     assert len(once["replies"]) == 1
 
 
-def test_either_side_can_reply_without_closing_the_thread(desk):
+def test_anyone_can_reply_without_closing_the_thread(desk):
     made = desk.post("/comments", {"branch": "feature", "path": "sample.py", "line": 11, "side": "new", "text": "why?"})
-    assert desk.post("/reply", {"seq": made["seq"], "text": "because of X", "who": "session"})["replies"] == 1
-    assert desk.post("/reply", {"seq": made["seq"], "text": "then what about Y", "who": "you"})["replies"] == 2
-    # Said again word for word by the same side, it is refused: a thread already ending with these words is a press
+    assert desk.post("/reply", {"seq": made["seq"], "text": "because of X"}, agent=AGENT)["replies"] == 1
+    assert desk.post("/reply", {"seq": made["seq"], "text": "then what about Y"})["replies"] == 2
+    # Said again word for word by the same author, it is refused: a thread already ending with these words is a press
     # repeated, never a second answer.
-    assert desk.post("/reply", {"seq": made["seq"], "text": "then what about Y", "who": "you"})["ok"] is False
+    assert desk.post("/reply", {"seq": made["seq"], "text": "then what about Y"})["ok"] is False
     row = {row["seq"]: row for row in desk.get("/comments")}[made["seq"]]
     assert [(reply["who"], reply["text"]) for reply in row["replies"]] == [
-        ("session", "because of X"),
+        (f"agent:{AGENT}", "because of X"),
         ("you", "then what about Y"),
     ]
     assert row["state"] == "open"
@@ -250,14 +250,14 @@ def test_either_side_can_reply_without_closing_the_thread(desk):
     assert desk.post("/reply", {"seq": 99999, "text": "nowhere"})["ok"] is False
 
 
-def test_a_session_opens_a_thread_of_its_own(desk):
+def test_an_agent_opens_a_thread_of_its_own(desk):
     opening = desk.cli("remark", "feature", f"sample.py:{FIRST_EDIT - 1}-{FIRST_EDIT}", "worth", "a", "look")
     said = opening.communicate(timeout=60)[0]
     assert opening.returncode == 0, said
     row = desk.get("/comments")[-1]
     assert said.startswith(f"opened [{row['seq']}]")
     assert (row["who"], row["text"], row["line"], row["endLine"], row["side"]) == (
-        "session",
+        f"agent:{AGENT}",
         "worth a look",
         FIRST_EDIT - 1,
         FIRST_EDIT,
@@ -267,25 +267,68 @@ def test_a_session_opens_a_thread_of_its_own(desk):
     assert row["anchor"] == f"line {FIRST_EDIT} rewritten"
     # Read from the hunk alone, which starts two lines above the range.
     assert row["around"]["above"] == [f"line {FIRST_EDIT - 3}", f"line {FIRST_EDIT - 2}"]
-    # The session's own word is no news to a session watching the review.
-    assert row["eventBy"] == "session"
+    # The agent's own word is no news to that agent watching the review.
+    assert row["eventBy"] == f"agent:{AGENT}"
 
     # Lines the diff does not show are refused rather than recorded where no thread can be drawn.
     missed = desk.cli("remark", "feature", "kept.py:1", "nowhere")
     assert "not in the diff" in missed.communicate(timeout=60)[0] and missed.returncode != 0
 
-    # Any other author is one a sync brings back from the pull request, which nothing posted here can claim to be.
+    # The author is the one the request is made by, whatever its body claims: a pull request's author is one a sync
+    # brings back, and another agent is one that names itself.
     claimed = desk.post(
         "/comments", {"branch": "feature", "path": "sample.py", "line": 8, "side": "new", "text": "x", "who": "octocat"}
     )
     assert "who" not in {held["seq"]: held for held in desk.get("/comments")}[claimed["seq"]]
+    posed = desk.post(
+        "/comments",
+        {"branch": "feature", "path": "sample.py", "line": 8, "side": "new", "text": "y", "who": "agent:other"},
+        agent=AGENT,
+    )
+    assert {held["seq"]: held for held in desk.get("/comments")}[posed["seq"]]["who"] == f"agent:{AGENT}"
 
-    # The session's remark is this desk's to reword and to send, as the reader's is.
+    # The agent's remark is this desk's to reword and to send, as the reader's is.
     assert desk.post("/edit", {"seq": row["seq"], "text": "worth a second look"})["ok"]
     desk.github_answers(out=json.dumps({"html_url": "https://github.com/x/y/pull/21#review-1"}))
     assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 21, "seq": [row["seq"]]})["ok"]
     sent = {held["seq"]: held for held in desk.get("/comments")}[row["seq"]]
-    assert (sent["github"], sent["who"]) == ("posted", "session")
+    assert (sent["github"], sent["who"]) == ("posted", f"agent:{AGENT}")
+
+
+def test_a_write_names_its_author_or_is_refused(desk):
+    made = desk.post(
+        "/comments", {"branch": "feature", "path": "sample.py", "line": 9, "side": "new", "text": "whose?"}
+    )
+    held = len(desk.get("/comments"))
+
+    # Nobody named, a name standing for someone else, or one no agent can carry: refused, and nothing written.
+    for headers in ({}, {"X-Desk-Agent": "you"}, {"X-Desk-Agent": "GitHub"}, {"X-Desk-Agent": "two words"}):
+        request = urllib.request.Request(
+            f"{desk.url}/reply",
+            data=json.dumps({"seq": made["seq"], "text": "from nowhere"}).encode(),
+            headers={"Content-Type": "application/json", **headers},
+            method="POST",
+        )
+        with pytest.raises(urllib.error.HTTPError) as refused:
+            urllib.request.urlopen(request, timeout=30)
+        assert refused.value.code == 403
+        assert json.loads(refused.value.read())["ok"] is False
+    assert len(desk.get("/comments")) == held
+    assert {row["seq"]: row for row in desk.get("/comments")}[made["seq"]]["replies"] == []
+
+    # The command line refuses the same way, with the desk's reason, rather than reading as a desk that is down.
+    unnamed = desk.cli("reply", str(made["seq"]), "from nowhere", agent="")
+    said = unnamed.communicate(timeout=60)[0]
+    assert unnamed.returncode != 0 and "say who is writing" in said
+
+    # A reaction goes out under the reader's account, so it is the reader's alone.
+    assert desk.post("/react", {"seq": made["seq"], "content": "EYES"}, agent=AGENT)["ok"] is False
+
+    # Two agents are two authors, each named as it named itself.
+    desk.post("/reply", {"seq": made["seq"], "text": "one view"}, agent=AGENT)
+    desk.post("/reply", {"seq": made["seq"], "text": "another view"}, agent="astra")
+    row = {row["seq"]: row for row in desk.get("/comments")}[made["seq"]]
+    assert [answer["who"] for answer in row["replies"]] == [f"agent:{AGENT}", "agent:astra"]
 
 
 def test_rewriting_a_comment_or_one_of_its_replies_keeps_what_it_said_before(desk):
@@ -299,8 +342,8 @@ def test_rewriting_a_comment_or_one_of_its_replies_keeps_what_it_said_before(des
     assert [earlier["text"] for earlier in row["edits"]] == ["first", "second"]
     assert desk.post("/edit", {"seq": made["seq"], "text": " "})["ok"] is False
 
-    desk.post("/reply", {"seq": made["seq"], "text": "the plain answer", "who": "session"})
-    desk.post("/reply", {"seq": made["seq"], "text": "a second answer", "who": "you"})
+    desk.post("/reply", {"seq": made["seq"], "text": "the plain answer"}, agent=AGENT)
+    desk.post("/reply", {"seq": made["seq"], "text": "a second answer"})
     heard = {row["seq"]: row for row in desk.get("/comments")}[made["seq"]]["event"]
     # A reply is named by its place in the thread, which is how dropping one already names it.
     assert desk.post("/edit", {"seq": made["seq"], "reply": 0, "text": "the answer, better worded"})["edits"] == 1
@@ -310,13 +353,13 @@ def test_rewriting_a_comment_or_one_of_its_replies_keeps_what_it_said_before(des
     assert [earlier["text"] for earlier in threaded["replies"][0]["edits"]] == ["the plain answer"]
     assert [earlier["text"] for earlier in threaded["edits"]] == ["first", "second"]
     assert threaded["text"] == "third"
-    # Stamped as the latest news, so a session watching the thread hears the rewording as it hears a reply.
+    # Stamped as the latest news, so an agent watching the thread hears the rewording as it hears a reply.
     assert threaded["event"] > heard
     assert desk.post("/edit", {"seq": made["seq"], "reply": 2, "text": "no such reply"})["ok"] is False
     assert desk.post("/edit", {"seq": made["seq"], "reply": 0, "text": " "})["ok"] is False
 
     printed = desk.cli("comments", "--all").communicate(timeout=60)[0]
-    assert "[0] session" in printed
+    assert f"[0] agent:{AGENT}" in printed
     assert "the answer, better worded" in printed
     # What it said before, under the reply that said it.
     assert "the plain answer" in printed
@@ -495,7 +538,7 @@ def test_sending_a_thread_closed_here_resolves_it_on_the_pull_request(desk):
     assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 3, "seq": [seq]})["ok"]
 
     # Closing it here says nothing to the pull request: what goes out is what the reader sends, when they send it.
-    desk.post("/resolve", {"seq": [seq], "who": "you"})
+    desk.post("/resolve", {"seq": [seq]})
     rows = {row["seq"]: row for row in desk.get("/comments")}
     assert rows[seq]["state"] == "resolved"
     assert rows[seq]["prResolve"] == "none"
@@ -596,7 +639,7 @@ def test_sending_a_thread_closed_here_resolves_it_on_the_pull_request(desk):
 
     # Reopening it here leaves the record of the pull request alone: the thread there is resolved, and saying
     # otherwise would be this desk claiming a state GitHub does not hold.
-    desk.post("/resolve", {"seq": [seq], "resolved": False, "who": "you"})
+    desk.post("/resolve", {"seq": [seq], "resolved": False})
     assert {row["seq"]: row for row in desk.get("/comments")}[seq]["prResolve"] == "done"
 
 
@@ -676,7 +719,7 @@ def test_one_review_never_reaches_another_review_comments(desk):
     far = elsewhere["seqs"][0]
     desk.github_answers(out=json.dumps({"html_url": "https://github.com/x/other/pull/11#review-1"}))
     desk.post("/publish", {"repo": "x/other", "pr": 11, "branch": "other/branch", "seq": [far]})
-    desk.post("/resolve", {"seq": [far], "who": "you"})
+    desk.post("/resolve", {"seq": [far]})
 
     here = desk.post(
         "/comments",
@@ -833,7 +876,7 @@ def test_a_send_says_so_when_the_thread_is_nowhere_to_be_found(desk):
             },
         ]
     )
-    desk.post("/resolve", {"seq": [seq], "who": "you"})
+    desk.post("/resolve", {"seq": [seq]})
     assert desk.post("/publish", {"seq": [seq], "repo": "someone/somewhere", "pr": 9})["resolved"] == 1
 
     # The thread has gone from under the record. A sync says nothing of it, since what it reads is somebody else's copy
@@ -844,7 +887,7 @@ def test_a_send_says_so_when_the_thread_is_nowhere_to_be_found(desk):
     assert {row["seq"]: row for row in desk.get("/comments")}[seq]["prResolve"] == "done"
 
     # Sending it there is where it comes out: the reader asked for something to happen, so they are told it did not.
-    desk.post("/reply", {"seq": seq, "text": "into thin air", "who": "session"})
+    desk.post("/reply", {"seq": seq, "text": "into thin air"}, agent=AGENT)
     desk.github_answers(rules=[{"match": "reviewThreads", "out": json.dumps(empty)}])
     outcome = desk.post("/publish", {"seq": [seq], "repo": "someone/somewhere", "pr": 9})
     assert outcome["ok"] is False
@@ -866,7 +909,7 @@ def test_sending_a_thread_resolves_there_what_was_closed_here(desk):
     seq = made["seqs"][0]
     desk.github_answers(out=json.dumps({"html_url": "https://github.com/x/y/pull/6#review-1"}))
     desk.post("/publish", {"repo": "someone/somewhere", "pr": 6, "seq": [seq]})
-    desk.post("/resolve", {"seq": [seq], "who": "you"})
+    desk.post("/resolve", {"seq": [seq]})
 
     threads = {
         "data": {
@@ -925,8 +968,8 @@ def test_a_send_posts_each_reply_alone_and_answers_for_each(desk):
     desk.github_answers(out=json.dumps({"html_url": "https://github.com/x/y/pull/21#review-1"}))
     assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 21, "seq": [seq]})["ok"]
     for text in ("first of three", "second of three", "third of three"):
-        desk.post("/reply", {"seq": seq, "text": text, "who": "session"})
-    desk.post("/resolve", {"seq": [seq], "who": "you"})
+        desk.post("/reply", {"seq": seq, "text": text}, agent=AGENT)
+    desk.post("/resolve", {"seq": [seq]})
 
     thread = {
         "id": "T_pack",
@@ -988,7 +1031,7 @@ def test_a_send_whose_first_attempt_never_reached_github_says_nothing_of_it(desk
     seq = made["seqs"][0]
     desk.github_answers(out=json.dumps({"html_url": "https://github.com/x/y/pull/22#review-1"}))
     assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 22, "seq": [seq]})["ok"]
-    desk.post("/resolve", {"seq": [seq], "who": "you"})
+    desk.post("/resolve", {"seq": [seq]})
 
     thread = {
         "id": "T_again",
@@ -1036,7 +1079,7 @@ def test_a_lost_answer_is_asked_again_only_where_asking_twice_is_harmless(desk):
     seq = made["seqs"][0]
     desk.github_answers(out=json.dumps({"html_url": "https://github.com/x/y/pull/23#review-1"}))
     assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 23, "seq": [seq]})["ok"]
-    desk.post("/reply", {"seq": seq, "text": "one copy of this is enough", "who": "session"})
+    desk.post("/reply", {"seq": seq, "text": "one copy of this is enough"}, agent=AGENT)
 
     thread = {
         "id": "T_once",
@@ -1074,7 +1117,7 @@ def test_a_lost_answer_is_asked_again_only_where_asking_twice_is_harmless(desk):
     assert {row["seq"]: row for row in desk.get("/comments")}[seq]["replies"][0]["github"] == "failed"
 
     # Resolutions are asked again, since a thread resolved twice is resolved all the same.
-    desk.post("/resolve", {"seq": [seq], "who": "you"})
+    desk.post("/resolve", {"seq": [seq]})
     desk.github_answers(
         rules=[
             {"match": "reviewThreads", "out": json.dumps(threads)},
@@ -1111,7 +1154,7 @@ def test_closing_a_comment_that_never_reached_the_pull_request_owes_it_nothing(d
     made = desk.post(
         "/comments", [{"branch": "feature", "path": "sample.py", "line": 17, "side": "new", "text": "here only"}]
     )
-    desk.post("/resolve", {"seq": [made["seq"]], "who": "session"})
+    desk.post("/resolve", {"seq": [made["seq"]]}, agent=AGENT)
     row = {row["seq"]: row for row in desk.get("/comments")}[made["seq"]]
     assert row["state"] == "resolved"
     assert row["prResolve"] == "none"
@@ -1130,7 +1173,7 @@ def test_a_sync_brings_replies_back_and_a_send_carries_ours_out(desk):
     seq = made["seqs"][0]
     desk.github_answers(out=json.dumps({"html_url": "https://github.com/x/y/pull/4#review-1"}))
     assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 4, "seq": [seq]})["ok"]
-    desk.post("/reply", {"seq": seq, "text": "written here, not there yet", "who": "session"})
+    desk.post("/reply", {"seq": seq, "text": "written here, not there yet"}, agent=AGENT)
 
     # The pull request holds the remark, plus a reply from someone else, and someone resolved the thread there.
     threads = {
@@ -1181,7 +1224,7 @@ def test_a_sync_brings_replies_back_and_a_send_carries_ours_out(desk):
     assert not any("/replies" in call for call in desk.github_calls()[before:])
     row = {row["seq"]: row for row in desk.get("/comments")}[seq]
     said = [(reply["who"], reply["text"], reply["github"]) for reply in row["replies"]]
-    assert ("session", "written here, not there yet", "none") in said
+    assert (f"agent:{AGENT}", "written here, not there yet", "none") in said
     assert ("someone", "said on the PR", "posted") in said
 
     # Sent, it goes out against the comment that opened the thread, and stands as being on the pull request.
@@ -1202,7 +1245,7 @@ def test_a_sync_brings_replies_back_and_a_send_carries_ours_out(desk):
     assert (reworded["ok"], reworded["edits"]) == (True, 1)
     kept = {row["seq"]: row for row in desk.get("/comments")}[seq]
     assert [(reply["who"], reply["text"]) for reply in kept["replies"]] == [
-        ("session", "written here, better worded"),
+        (f"agent:{AGENT}", "written here, better worded"),
         ("someone", "said on the PR"),
     ]
     assert [earlier["text"] for earlier in kept["replies"][0]["edits"]] == ["written here, not there yet"]
@@ -1309,7 +1352,7 @@ def test_a_comment_settled_here_is_not_sent_unless_it_is_asked_for(desk):
         },
     )
     seq = made["seqs"][0]
-    desk.post("/resolve", {"seq": [seq], "answer": "dealt with", "who": "session"})
+    desk.post("/resolve", {"seq": [seq], "answer": "dealt with"}, agent=AGENT)
 
     # Bound for the pull request, but settled here before it went: sending leaves it alone.
     desk.github_answers(out=json.dumps({"html_url": "https://github.com/x/y/pull/14#review-1"}))
@@ -1606,7 +1649,7 @@ def test_a_desk_is_put_down_by_whoever_opened_it(repo, tmp_path_factory):
 
 
 def test_a_refresh_collects_what_the_desk_serves_rather_than_what_the_page_holds(desk):
-    # A session points the desk at another review while a page built on the first one is open.
+    # An agent points the desk at another review while a page built on the first one is open.
     gen_diff_data.run(desk.repo, "branch", "spur", "feature")
     try:
         moved = desk.post("/scan", {"dir": str(desk.repo), "base": "main", "refs": ["spur"]})
@@ -1645,7 +1688,7 @@ def test_a_dropped_comment_is_deleted_on_the_pull_request_and_leaves_the_log_beh
     seq = made["seqs"][0]
     desk.github_answers(out=json.dumps({"html_url": "https://github.com/someone/somewhere/pull/7#review-1"}))
     desk.post("/publish", {"repo": "someone/somewhere", "pr": 7, "seq": [seq]})
-    desk.post("/reply", {"seq": seq, "text": "answered before it went", "who": "session"})
+    desk.post("/reply", {"seq": seq, "text": "answered before it went"}, agent=AGENT)
 
     threads = {
         "data": {
@@ -1701,14 +1744,14 @@ def test_a_drop_says_whose_doing_it_was_like_every_other_change(desk):
     made = desk.post(
         "/comments", [{"branch": "feature", "path": "sample.py", "line": 31, "side": "new", "text": "dropped by whom"}]
     )["seq"]
-    desk.post("/reply", {"seq": made, "text": "an answer to let go of", "who": "session"})
-    # A session dropping its own words is its own doing, so the watch it armed is not woken by what it just did.
-    desk.post("/drop", {"seq": made, "reply": True})
-    assert {row["seq"]: row for row in desk.get("/comments")}[made]["eventBy"] == "session"
+    desk.post("/reply", {"seq": made, "text": "an answer to let go of"}, agent=AGENT)
+    # An agent dropping its own words is its own doing, so the watch it armed is not woken by what it just did.
+    desk.post("/drop", {"seq": made, "reply": True}, agent=AGENT)
+    assert {row["seq"]: row for row in desk.get("/comments")}[made]["eventBy"] == f"agent:{AGENT}"
 
-    # The reader's press is theirs, and news for this side.
-    desk.post("/reply", {"seq": made, "text": "another to let go of", "who": "session"})
-    desk.post("/drop", {"seq": made, "reply": True, "who": "you"})
+    # The reader's press is theirs, and news for every agent.
+    desk.post("/reply", {"seq": made, "text": "another to let go of"}, agent=AGENT)
+    desk.post("/drop", {"seq": made, "reply": True})
     assert {row["seq"]: row for row in desk.get("/comments")}[made]["eventBy"] == "you"
 
 
@@ -1723,8 +1766,8 @@ def test_dropping_the_last_reply_leaves_the_comment_and_what_was_said_before_it(
     seq = made["seqs"][0]
     assert desk.post("/drop", {"seq": seq, "reply": True})["ok"] is False
 
-    desk.post("/reply", {"seq": seq, "text": "first answer", "who": "session"})
-    desk.post("/reply", {"seq": seq, "text": "second answer", "who": "you"})
+    desk.post("/reply", {"seq": seq, "text": "first answer"}, agent=AGENT)
+    desk.post("/reply", {"seq": seq, "text": "second answer"})
     outcome = desk.post("/drop", {"seq": seq, "reply": True})
     assert outcome["ok"]
     kept = {row["seq"]: row for row in desk.get("/comments")}[seq]
@@ -1833,20 +1876,23 @@ def test_a_reply_is_news_even_on_a_comment_already_read(desk):
     read_up_to = rows[made]["event"]
     assert rows[made]["eventBy"] == "you"
 
-    # The session answers and settles nothing: its own word must not read as news for itself.
-    desk.post("/reply", {"seq": made, "text": "answered it", "who": "session"})
-    after_session = [row for row in desk.get(f"/comments?event={read_up_to}") if row.get("eventBy") == "you"]
-    assert after_session == []
+    # The agent answers and settles nothing: its own word is no news to itself, and news to every other agent.
+    desk.post("/reply", {"seq": made, "text": "answered it"}, agent=AGENT)
+    assert desk.get(f"/news?since={read_up_to}", agent=AGENT)["rows"] == []
+    assert [row["seq"] for row in desk.get(f"/news?since={read_up_to}", agent="astra")["rows"]] == [made]
 
-    # The reviewer answers back, on a comment whose number the session has long since passed.
-    desk.post("/reply", {"seq": made, "text": "not convinced", "who": "you"})
-    news = [row for row in desk.get(f"/comments?event={read_up_to}") if row.get("eventBy") == "you"]
+    # The reviewer answers back, on a comment whose number the agent has long since passed.
+    desk.post("/reply", {"seq": made, "text": "not convinced"})
+    news = desk.get(f"/news?since={read_up_to}", agent=AGENT)["rows"]
     assert [row["seq"] for row in news] == [made]
     assert news[0]["replies"][-1]["text"] == "not convinced"
 
     # Read now, so it is behind the cursor again.
     caught_up = news[0]["event"]
-    assert not [row for row in desk.get(f"/comments?event={caught_up}") if row.get("eventBy") == "you"]
+    assert desk.get(f"/news?since={caught_up}", agent=AGENT)["rows"] == []
+    # News is an agent's to wait for: asked by nobody, or by the reader, it is refused.
+    with pytest.raises(urllib.error.HTTPError):
+        desk.get(f"/news?since={caught_up}")
 
 
 def test_the_branch_has_moved_on_when_a_modified_file_changes_again(desk):
@@ -1874,17 +1920,15 @@ def test_the_branch_has_moved_on_when_a_modified_file_changes_again(desk):
 
 
 def test_a_watch_on_one_review_leaves_what_is_said_about_the_others(desk):
-    stopped = desk.home / "watched.json"
+    stopped = desk.home / "heard.json"
     kept = stopped.read_text() if stopped.exists() else None
     try:
         # Started past everything already said, so what this test says is the only thing that can wake it.
         spoken = max((row["event"] for row in desk.get("/comments")), default=0)
         stopped.unlink(missing_ok=True)
-        watching = desk.cli(
-            "watch", "--branch", "feature", "--once", "--every", "0.2", "--since", str(spoken), "--timeout", "25"
-        )
+        watching = desk.cli("watch", "--branch", "feature", "--once", "--since", str(spoken), "--timeout", "25")
         try:
-            # One desk holds every review it was given. What is said about another is another session's to answer.
+            # One desk holds every review it was given. What is said about another is another agent's to answer.
             desk.post(
                 "/comments",
                 [
@@ -1906,13 +1950,11 @@ def test_a_watch_on_one_review_leaves_what_is_said_about_the_others(desk):
             watching.terminate()
         assert "on this review" in said
         assert "on the other review" not in said
-        # And it left that one where it stood: a session watching the other review still hears it, which it would not
-        # if a cursor shared between them had been carried past it.
-        # Reading where a watch of that review stopped, which is nowhere: told from the one just held on this review,
-        # it hears what was said. Sharing one cursor between them, it would be carried past it and hear nothing.
-        other = desk.cli("watch", "--branch", "elsewhere", "--once", "--every", "0.2", "--timeout", "25").communicate(
-            timeout=40
-        )[0]
+        # And it left that one where it stood: an agent watching the other review still hears it, which it would not
+        # if a cursor shared between them had been carried past it. Reading where a watch of that review stopped, which
+        # is nowhere: told from the one just held on this review, it hears what was said. Sharing one cursor between
+        # them, it would be carried past it and hear nothing.
+        other = desk.cli("watch", "--branch", "elsewhere", "--once", "--timeout", "25").communicate(timeout=40)[0]
         assert "on the other review" in other
     finally:
         if kept is None:
@@ -1922,14 +1964,18 @@ def test_a_watch_on_one_review_leaves_what_is_said_about_the_others(desk):
 
 
 def test_watching_hears_everything_said_not_only_the_first(desk):
-    # Where a watch stopped is written down, so what it has heard is asked of that rather than guessed at from a pause.
-    stopped = desk.home / "watched.json"
+    # Where a watch stopped is written down by the desk, per agent, so what it has heard is asked of that rather than
+    # guessed at from a pause.
+    stopped = desk.home / "heard.json"
+    mine = f"agent:{AGENT}|"
 
     def reached(event):
-        return stopped.exists() and json.loads(stopped.read_text())["event"] >= event
+        return stopped.exists() and json.loads(stopped.read_text()).get(mine, {}).get("event", 0) >= event
 
-    watching = desk.cli("watch", "--every", "0.2", "--timeout", "20")
+    watching = desk.cli("watch", "--timeout", "20")
     try:
+        # Waiting on the desk, so the page can say who is watching it.
+        until(lambda: AGENT in desk.get("/watching")["agents"])
         # Two things said one after the other: a watch that stopped at the first left the second unheard.
         first = desk.post(
             "/comments",
@@ -1937,7 +1983,8 @@ def test_watching_hears_everything_said_not_only_the_first(desk):
         )["seqs"][0]
         spoken = {row["seq"]: row for row in desk.get("/comments")}[first]["event"]
         until(lambda: reached(spoken))
-        desk.post("/reply", {"seq": first, "text": "and the second word", "who": "you"})
+        desk.post("/reply", {"seq": first, "text": "my own answer"}, agent=AGENT)
+        desk.post("/reply", {"seq": first, "text": "and the second word"})
         answered = {row["seq"]: row for row in desk.get("/comments")}[first]["event"]
         until(lambda: reached(answered))
     finally:
@@ -1945,17 +1992,19 @@ def test_watching_hears_everything_said_not_only_the_first(desk):
         said = watching.communicate(timeout=30)[0]
     assert "the first word" in said
     assert "and the second word" in said
-    # Its own writes are not news to it, so a session's reply never wakes it.
+    # Its own writes are not news to it, so an agent's reply never wakes it.
     assert said.count("comment(s) with news") == 2
-    # A thread is printed whole, so the line that woke it is marked: what has already been answered reads as read.
-    assert "*[0] you" in said
+    # A thread is printed whole, so the line that woke it is marked: what has already been answered reads as read, and
+    # what the agent said itself is never news to it, however recent.
+    assert "*[1] you" in said
+    assert f" [0] agent:{AGENT}" in said and f"*[0] agent:{AGENT}" not in said
 
     # Watching again carries on from where that one stopped: what has been heard once does not wake anything twice, and
     # a watch that stops at the first word can therefore be armed again after answering it.
-    again = desk.cli("watch", "--once", "--every", "0.2", "--timeout", "3")
+    again = desk.cli("watch", "--once", "--timeout", "3")
     assert "the first word" not in again.communicate(timeout=30)[0]
-    desk.post("/reply", {"seq": first, "text": "and a third word", "who": "you"})
-    heard = desk.cli("watch", "--once", "--every", "0.2", "--timeout", "20").communicate(timeout=40)[0]
+    desk.post("/reply", {"seq": first, "text": "and a third word"})
+    heard = desk.cli("watch", "--once", "--timeout", "20").communicate(timeout=40)[0]
     assert "and a third word" in heard
     assert heard.count("comment(s) with news") == 1
 
@@ -1963,13 +2012,13 @@ def test_watching_hears_everything_said_not_only_the_first(desk):
     # desk now answering, so it reads what exists rather than the run before it, and hears what was said meanwhile
     # instead of spending itself on the restart.
     armed = json.loads(stopped.read_text())
-    assert armed["desk"] == desk.get("/serving")["desk"]
-    stopped.write_text(json.dumps({**armed, "desk": "some run before this one"}))
-    desk.post("/reply", {"seq": first, "text": "and a fourth word", "who": "you"})
-    told = desk.cli("watch", "--once", "--every", "0.2", "--timeout", "20").communicate(timeout=40)[0]
+    assert armed[mine]["desk"] == desk.get("/serving")["desk"]
+    stopped.write_text(json.dumps({**armed, mine: {**armed[mine], "desk": "some run before this one"}}))
+    desk.post("/reply", {"seq": first, "text": "and a fourth word"})
+    told = desk.cli("watch", "--once", "--timeout", "20").communicate(timeout=40)[0]
     assert "the desk has been restarted" in told
     assert "and a fourth word" in told
-    assert json.loads(stopped.read_text())["desk"] == desk.get("/serving")["desk"]
+    assert json.loads(stopped.read_text())[mine]["desk"] == desk.get("/serving")["desk"]
 
 
 def test_the_desk_updates_itself_over_https_when_ssh_cannot_be_reached(tmp_path):
@@ -2121,21 +2170,22 @@ def test_syncing_takes_in_the_comments_written_on_the_pull_request(desk):
     assert (brought["path"], brought["line"], brought["endLine"], brought["side"]) == ("sample.py", 10, 12, "new")
     assert brought["who"] == "Milotrince"
     assert [(answer["who"], answer["text"]) for answer in brought["replies"]] == [("someone-else", "seconded")]
-    # Recorded as posted and as news, which is what lets a session answer it and hear about it in the first place.
-    assert (brought["github"], brought["state"], brought["eventBy"]) == ("posted", "open", "you")
+    # Recorded as posted and as the pull request's news, which is what lets an agent answer it and hear about it in the
+    # first place.
+    assert (brought["github"], brought["state"], brought["eventBy"]) == ("posted", "open", "github")
     # A thread the pull request places nowhere is a remark on the file, and one resolved there arrives closed.
     assert rows["a report already dealt with"]["side"] == "file"
     assert rows["a report already dealt with"]["state"] == "resolved"
 
     # The remark is its author's word: this desk answers in the thread and leaves the wording and the thread to them.
-    said = desk.post("/reply", {"seq": brought["seq"], "text": "documented now", "who": "session"})
+    said = desk.post("/reply", {"seq": brought["seq"], "text": "documented now"}, agent=AGENT)
     assert said["ok"]
     assert not desk.post("/edit", {"seq": brought["seq"], "text": "something else entirely"})["ok"]
     assert not desk.post("/drop", {"seq": brought["seq"], "repo": "someone/somewhere", "pr": 14})["ok"]
 
     # What this desk wrote in somebody else's thread is still this desk's to send: the answer and the resolution go,
     # and the remark that opened it is left where it stands.
-    desk.post("/resolve", {"seq": [brought["seq"]], "who": "you"})
+    desk.post("/resolve", {"seq": [brought["seq"]]})
     desk.github_answers(
         rules=[
             {"match": "reviewThreads", "out": answer},
@@ -2156,7 +2206,7 @@ def test_syncing_takes_in_the_comments_written_on_the_pull_request(desk):
     carried = {row["seq"]: row for row in desk.get("/comments")}[brought["seq"]]
     assert [reply["github"] for reply in carried["replies"]] == ["posted", "posted"]
     assert carried["prResolve"] == "done"
-    desk.post("/resolve", {"seq": [brought["seq"]], "reopen": True, "who": "you"})
+    desk.post("/resolve", {"seq": [brought["seq"]], "reopen": True})
 
     # A second sync finds them already here rather than recording them twice.
     desk.github_answers(rules=[{"match": "reviewThreads", "out": answer}])
@@ -2194,7 +2244,7 @@ def test_a_sync_follows_what_is_edited_held_back_and_deleted_on_the_pull_request
     desk.github_answers(rules=[{"match": "reviewThreads", "out": json.dumps(threads)}])
     assert desk.post("/sync", {"repo": "someone/somewhere", "pr": 15})["took"] == 1
     seq = next(row["seq"] for row in desk.get("/comments") if row["text"] == "a bot's report")
-    desk.post("/reply", {"seq": seq, "text": "fixed now", "who": "session"})
+    desk.post("/reply", {"seq": seq, "text": "fixed now"}, agent=AGENT)
     desk.github_answers(
         rules=[{"match": "reviewThreads", "out": json.dumps(threads)}, {"match": "/replies", "out": "{}"}]
     )
@@ -2213,7 +2263,7 @@ def test_a_sync_follows_what_is_edited_held_back_and_deleted_on_the_pull_request
     assert row["text"] == "a bot's report\n\nAddressed in abc1234"
     assert [(reply["who"], reply["text"], reply["github"]) for reply in row["replies"]] == [
         ("someone-else", "agreed, twice", "posted"),
-        ("session", "fixed now", "failed"),
+        (f"agent:{AGENT}", "fixed now", "failed"),
     ]
     assert "pending" in row["replies"][1]["error"]
 
@@ -2262,9 +2312,9 @@ def test_a_whisper_stays_on_the_desk_whatever_the_thread_sends(desk):
     desk.github_answers(out=json.dumps({"html_url": "https://github.com/x/y/pull/31#review-1"}))
     assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 31, "seq": [seq]})["ok"]
 
-    desk.post("/reply", {"seq": seq, "text": "come back to this after the rebase", "who": "you", "whisper": True})
-    desk.post("/reply", {"seq": seq, "text": "answered on the pull request", "who": "session"})
-    desk.post("/reply", {"seq": seq, "text": "and the session is to widen the test", "who": "you", "whisper": True})
+    desk.post("/reply", {"seq": seq, "text": "come back to this after the rebase", "whisper": True})
+    desk.post("/reply", {"seq": seq, "text": "answered on the pull request"}, agent=AGENT)
+    desk.post("/reply", {"seq": seq, "text": "and the agent is to widen the test", "whisper": True})
 
     thread = {
         "id": "T_note",
@@ -2300,13 +2350,13 @@ def test_a_whisper_stays_on_the_desk_whatever_the_thread_sends(desk):
     # A note stands on the remark or on a reply, and one more note on a note carries that sub-thread on rather than
     # standing inside it. A reply is never turned into a note: it cannot hang on what the pull request has never seen.
     # An anchor naming a note is read through it, so a thread written before that rule reads as it did.
-    assert desk.post("/reply", {"seq": seq, "text": "done.", "who": "session", "whisper": True, "on": 1})["ok"]
-    assert desk.post("/reply", {"seq": seq, "text": "and again", "who": "you", "whisper": True, "on": 0})["ok"]
-    assert not desk.post("/reply", {"seq": seq, "text": "out loud", "who": "session", "on": 0})["ok"]
-    assert not desk.post("/reply", {"seq": seq, "text": "nowhere", "who": "you", "on": 9})["ok"]
+    assert desk.post("/reply", {"seq": seq, "text": "done.", "whisper": True, "on": 1}, agent=AGENT)["ok"]
+    assert desk.post("/reply", {"seq": seq, "text": "and again", "whisper": True, "on": 0})["ok"]
+    assert not desk.post("/reply", {"seq": seq, "text": "out loud", "on": 0}, agent=AGENT)["ok"]
+    assert not desk.post("/reply", {"seq": seq, "text": "nowhere", "on": 9})["ok"]
 
     # A note never left, so it is forgotten without asking the pull request anything - but only the last of them, as
-    # for a reply: letting go of one further up leaves what stands under it standing against nothing. A session says
+    # for a reply: letting go of one further up leaves what stands under it standing against nothing. An agent says
     # which comment and the desk works out which note that is, since the last is the only one it could mean.
     assert not desk.post("/forget", {"seq": seq, "whisper": 0})["ok"]
     told = desk.cli("forget", str(seq)).communicate(timeout=30)[0]
@@ -2314,7 +2364,7 @@ def test_a_whisper_stays_on_the_desk_whatever_the_thread_sends(desk):
     assert [reply["text"] for reply in {row["seq"]: row for row in desk.get("/comments")}[seq]["replies"]] == [
         "come back to this after the rebase",
         "answered on the pull request",
-        "and the session is to widen the test",
+        "and the agent is to widen the test",
         "done.",
     ]
 
@@ -2322,7 +2372,11 @@ def test_a_whisper_stays_on_the_desk_whatever_the_thread_sends(desk):
     row = {row["seq"]: row for row in desk.get("/comments")}[seq]
     # What each note is about: the reply it was written on, and the ones with no anchor at all, which stand on the
     # remark.
-    assert (row["replies"][3]["who"], row["replies"][3]["whisper"], row["replies"][3]["on"]) == ("session", True, 1)
+    assert (row["replies"][3]["who"], row["replies"][3]["whisper"], row["replies"][3]["on"]) == (
+        f"agent:{AGENT}",
+        True,
+        1,
+    )
     assert (row["replies"][0]["who"], row["replies"][0]["whisper"], "on" in row["replies"][0]) == ("you", True, False)
     assert [(reply.get("whisper", False), reply["github"]) for reply in row["replies"]] == [
         (True, "none"),
@@ -2345,13 +2399,13 @@ def test_a_whisper_stays_on_the_desk_whatever_the_thread_sends(desk):
 
     # What may be forgotten is read as the page lays the thread out: the last note on the reply it stands on goes,
     # whatever was said to the thread after it, while a note with a later one standing beside it on the remark stays.
-    assert desk.post("/reply", {"seq": seq, "text": "out loud, later", "who": "session"})["ok"]
+    assert desk.post("/reply", {"seq": seq, "text": "out loud, later"}, agent=AGENT)["ok"]
     assert not desk.post("/forget", {"seq": seq, "whisper": 0})["ok"]
     assert desk.post("/forget", {"seq": seq, "whisper": 3})["ok"]
     assert [reply["text"] for reply in {row["seq"]: row for row in desk.get("/comments")}[seq]["replies"]] == [
         "come back to this after the rebase",
         "answered on the pull request",
-        "and the session is to widen the test",
+        "and the agent is to widen the test",
         "out loud, later",
     ]
 
@@ -2367,7 +2421,7 @@ def test_sending_a_thread_carries_what_it_holds_and_leaves_what_comes_after(desk
     seq = made["seqs"][0]
     desk.github_answers(out=json.dumps({"html_url": "https://github.com/x/y/pull/31#review-1"}))
     assert desk.post("/publish", {"repo": "someone/somewhere", "pr": 31, "seq": [seq]})["ok"]
-    desk.post("/reply", {"seq": seq, "text": "said before the send", "who": "session"})
+    desk.post("/reply", {"seq": seq, "text": "said before the send"}, agent=AGENT)
 
     thread = {
         "id": "T_turn",
@@ -2396,7 +2450,7 @@ def test_sending_a_thread_carries_what_it_holds_and_leaves_what_comes_after(desk
     assert any("said before the send" in call for call in desk.github_calls())
 
     # What the thread came to hold afterwards is the reader's to send, so a sync leaves it alone however often it runs.
-    desk.post("/reply", {"seq": seq, "text": "said after the send", "who": "session"})
+    desk.post("/reply", {"seq": seq, "text": "said after the send"}, agent=AGENT)
     before = len(desk.github_calls())
     desk.github_answers(rules=answers)
     assert desk.post("/sync", {"repo": "someone/somewhere", "pr": 31})["ok"]
@@ -2467,7 +2521,7 @@ def test_a_comment_carries_a_file_to_the_pull_request_and_keeps_a_local_one_here
     # A reply carries what it was written with, the thread is found by the body it was posted with rather than by its
     # words alone, and the repository an upload is filed under is asked for once however many go out.
     answered = desk.attach("after.png", shot + b"\n\n")["image"]
-    desk.post("/reply", {"seq": seq, "text": "and here it is again", "who": "you", "images": [answered]})
+    desk.post("/reply", {"seq": seq, "text": "and here it is again", "images": [answered]})
     second = "https://github.com/user-attachments/assets/c0ffee02"
     thread = {
         "id": "T_shot",
@@ -2525,7 +2579,7 @@ def test_a_comment_carries_a_file_to_the_pull_request_and_keeps_a_local_one_here
     assert kept["github"] == "failed"
     assert "404" in kept["error"]
 
-    # Where to open what the reviewer saw, so a session reads the picture rather than a word about it.
+    # Where to open what the reviewer saw, so an agent reads the picture rather than a word about it.
     printed = desk.cli("comments", "--all").communicate(timeout=60)[0]
     assert f"{desk.home / 'media' / held['file']} (shot.window.png, on the pull request)" in printed
     assert f"({alone['name']}, here only)" in printed
@@ -2569,7 +2623,7 @@ def test_a_thread_named_by_number_reaches_the_pull_request_as_a_link_to_it(desk)
 
     # A remark that went out in a review is placed by its thread, read before the reply naming it goes out, and the
     # thread of the remark naming the first is found again by the body it was posted with.
-    desk.post("/reply", {"seq": naming, "text": f"and [{second}] too", "who": "session"})
+    desk.post("/reply", {"seq": naming, "text": f"and [{second}] too"}, agent=AGENT)
 
     def thread(name, line, number, body):
         node = {"databaseId": number, "url": f"https://github.com/x/y/pull/34#r{number}", "body": body}
@@ -2917,7 +2971,7 @@ def test_a_reaction_on_a_comment_only_here_stays_here_until_it_is_sent(desk):
             "github": True,
         },
     )["seqs"][0]
-    desk.post("/reply", {"seq": seq, "text": "an answer", "who": "session"})
+    desk.post("/reply", {"seq": seq, "text": "an answer"}, agent=AGENT)
     desk.github_answers(code=1, err="gh must not be asked")
     for reply, content in ((None, "HEART"), (0, "ROCKET")):
         assert desk.post("/react", {"seq": seq, "reply": reply, "content": content})["ok"]

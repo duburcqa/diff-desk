@@ -19,6 +19,8 @@ import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+# The agent the suite writes and watches as, wherever a test plays the part of one rather than of the reader.
+AGENT = "scribe"
 
 # Git may reach nothing but the disk here, so the fetch a pull request ref asks for fails at once instead of spending
 # the better part of a minute resolving a repository that only the stand-in for gh knows about.
@@ -136,16 +138,31 @@ class Desk:
         told = self.home / "fake_gh.log"
         return told.read_text().splitlines() if told.exists() else []
 
-    def get(self, route):
-        with urllib.request.urlopen(f"{self.url}{route}", timeout=30) as answer:
+    def get(self, route, agent=None):
+        """Ask the desk something, as the agent named where the question is an agent's own."""
+        request = urllib.request.Request(f"{self.url}{route}", headers={"X-Desk-Agent": agent} if agent else {})
+        with urllib.request.urlopen(request, timeout=30) as answer:
             return json.loads(answer.read() or b"null")
 
-    def cli(self, *words):
-        """Run desk.py against this desk, as a session would from the command line."""
+    def as_reader(self):
+        """The cookie the page carries, which is what makes a request the reader's, read once the page has been
+        served."""
+        key = self.home / "reader.key"
+        if not key.exists():
+            self.page()
+        return f"diff_desk_reader_{self.url.rsplit(':', 1)[1]}={key.read_text().strip()}"
+
+    def cli(self, *words, agent=AGENT):
+        """Run desk.py against this desk, as an agent would from the command line."""
         return subprocess.Popen(
             [sys.executable, str(ROOT / "desk.py"), *words],
             cwd=ROOT,
-            env={**os.environ, "DIFF_DESK_HOME": str(self.home), "DIFF_DESK_PORT": self.url.rsplit(":", 1)[1]},
+            env={
+                **os.environ,
+                "DIFF_DESK_HOME": str(self.home),
+                "DIFF_DESK_PORT": self.url.rsplit(":", 1)[1],
+                "DIFF_DESK_AGENT": agent,
+            },
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -167,11 +184,13 @@ class Desk:
         with urllib.request.urlopen(request, timeout=60) as answer:
             return json.loads(answer.read())
 
-    def post(self, route, payload):
+    def post(self, route, payload, agent=None):
+        """Ask the desk to change something, as the reader by default, or as the agent named."""
+        named = {"X-Desk-Agent": agent} if agent else {"Cookie": self.as_reader()}
         request = urllib.request.Request(
             f"{self.url}{route}",
             data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", **named},
             method="POST",
         )
         with urllib.request.urlopen(request, timeout=60) as answer:

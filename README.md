@@ -1,6 +1,6 @@
 # Diff desk
 
-A local review page for any git range, and a way to hand the comments left on it to an AI coding session or to a pull request.
+A local review page for any git range, and a way to hand the comments left on it to AI agents or to a pull request.
 
 ![The review page: the file tree, a diff with a comment thread open, and the Comments panel](media/desk.png)
 
@@ -8,10 +8,10 @@ A local review page for any git range, and a way to hand the comments left on it
 
 Any range of commits, whoever wrote them. These are typical uses, not the only ones:
 
-- Read what a session just wrote, before any of it becomes a pull request.
+- Read what an agent just wrote, before any of it becomes a pull request.
 - Review an open pull request locally, holding every remark until you decide to send it.
-- Hand the remarks to a session locally, and put only the settled outcome on the pull request.
-- Let a session review someone else's pull request, then audit and edit its remarks before they go out.
+- Hand the remarks to agents locally, and put only the settled outcome on the pull request.
+- Let an agent review someone else's pull request, then audit and edit its remarks before they go out.
 
 It needs `git`, `gh` and python3. No build step, no packages, no service.
 
@@ -47,7 +47,7 @@ The page comes up on `127.0.0.1:8787`, each ref a tab, scoped to the whole range
 - **A file header comments on the file as a whole**, for a remark that belongs to no line of it.
 - **Add to review** hands a comment to the tray, which submits the batch with **Submit review** and an optional overall note. A submission records the remarks here; **Also post to PR #N** in the tray is what sends them out with it.
 - **Every comment is a thread.** Either side replies, resolves or reopens. Resolving folds the thread to its remark and keeps the replies one click away.
-- **Every remark and reply says whose it is**, in the ink its words are read in - yours, the session's, or the author who wrote it on the pull request, your own login among them read back as "you". Hovering says when and where it was written.
+- **Every remark and reply says whose it is**, in the ink its words are read in - yours, an agent's under the name it gave, or the author who wrote it on the pull request, your own login among them read back as "you". Hovering says when and where it was written.
 - **Edit** rewrites a remark, or a reply written here, keeping what it said before. A reply carried back from a pull request stands as its author wrote it.
 - **Delete** takes a thread, or its last reply, from the `x` on either. It is the one thing that discards, so it is asked for each time; one already posted goes from the pull request too.
 - **A comment follows its line** when the diff moves under it, reading "moved from L<n>". One whose line has left the diff is kept, marked "code moved on", at the end of the file it belonged to. Neither is ever resolved or deleted on your behalf.
@@ -74,11 +74,14 @@ Nothing leaves this desk on its own.
 - **What GitHub refuses is said where you are**, as a notice carrying the reason that stays until dismissed.
 - **The panel reads by batch or by what moved last.** A batch names the submission a remark went out in; a reply belongs to its thread and carries no batch, so recency is where the answer just written into an old batch is found.
 
-## Working with a session
+## Working with agents
+
+The desk is shared between the reader and any number of agents, each with the same standing as the others: reviewing, answering, resolving, sending. Every write is recorded under who made it, and the desk decides that rather than the request: the page is the reader's by a cookie the desk serves it with, and an agent names itself on every command, with `--as <name>` or `DIFF_DESK_AGENT`. A write naming nobody is refused, so nothing an agent writes is ever recorded as the reader's. Reactions stay the reader's, since they go out under the reader's GitHub account. Everything on the machine can read the desk's state, so this keeps authors apart by mistake rather than against intent.
 
 Every comment is recorded to `~/.claude/diff-desk/comments.jsonl`, numbered, with an event cursor every write bumps.
 
-    python3 desk.py watch                                     # block until something is said, print it, exit
+    export DIFF_DESK_AGENT=astra
+    python3 desk.py watch                                     # block until someone else says something, print it
     python3 desk.py comments                                  # what is outstanding, with replies and GitHub standing
     python3 desk.py reply 3 "it happens because ..."          # answer, leaving it open
     python3 desk.py resolve 3 4 --answer "fixed in abc1234"   # answer and close
@@ -87,13 +90,13 @@ Every comment is recorded to `~/.claude/diff-desk/comments.jsonl`, numbered, wit
     python3 desk.py edit 3 --reply 0 "worded better ..."      # rewrite one reply, by its place in the thread
     python3 desk.py sync                                      # bring the pull request's comments in
 
-`desk.py comments` prints where to open every file a comment carries, so a session reads the picture rather than a word about it.
+`desk.py comments` prints where to open every file a comment carries, so an agent reads the picture rather than a word about it.
 
-The watch follows the cursor, so an answer written on a comment read long ago arrives exactly as a new comment does, and each event says which side made it, so a session never mistakes its own reply for news. It reports to stdout and nowhere else. The page picks all of it up on its own, threading the replies under the comment.
+The watch follows the cursor, so an answer written on a comment read long ago arrives exactly as a new comment does, and each event says who made it, so an agent never mistakes its own reply for news and hears the reader and every other agent alike. The desk holds the watch's request open until there is news, keeps where each agent stopped, and shows on the page which agents are watching. The watch reports to stdout and nowhere else. The page picks all of it up on its own, threading the replies under the comment.
 
-A sync brings the pull request's own comments in, each carrying its author, so a remark a reviewer or a bot wrote there reaches the session through the watch and can be answered. Those the desk answers rather than rewrites: the remark stays its author's word.
+A sync brings the pull request's own comments in, each carrying its author, so a remark a reviewer or a bot wrote there reaches every agent through its watch and can be answered. Those the desk answers rather than rewrites: the remark stays its author's word.
 
-Dropped into `~/.claude/skills/diff-desk/`, this is a Claude Code skill and the flow above needs no explaining - `SKILL.md` tells the session how to serve a review, wait for comments, and close them out.
+Dropped into an agent's skills directory (`~/.claude/skills/diff-desk/`, `~/.codex/skills/diff-desk/`), the flow above needs no explaining - `SKILL.md` tells the agent how to serve a review, wait for comments, and close them out. The desk answers on `127.0.0.1` only, so an agent running in a sandbox needs loopback network access.
 
 ## Where things live
 
@@ -112,7 +115,7 @@ A local branch is the pull request opened from where it is pushed, the owner and
 | `serve_diff.py` | the local server: the page, rescans, file slices, comments, resolutions, pull request posts |
 | `semantic.py` | the semantic view: Python statements matched across the old and new files, laid out in two columns |
 | `diff_desk_template.html` | the page itself, with `__DIFF_DATA__` and `__BUILD__` substituted at build time |
-| `SKILL.md` | how a Claude Code session drives all of the above |
+| `SKILL.md` | how an agent drives all of the above |
 
     pip install pytest pytest-xdist playwright && playwright install chromium firefox webkit
     python3 -m pytest

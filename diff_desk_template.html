@@ -843,10 +843,11 @@
      to tell the first two apart, so the number reads as a reference - lighter and italic - and the place as a place. */
   .thread .who .seq { color: var(--faint); font-weight: 600; }
   .thread .who .at { font-style: italic; letter-spacing: 0.2px; }
-  /* Whose it is, in the voice their replies are read in: the reader's own, or somebody else's from the pull request. */
+  /* Whose it is, in the voice their replies are read in: the reader's own, an agent's, or somebody else's from the pull
+     request. */
   .thread .who .by.you { color: var(--add-ink); }
   .thread .who .by.them { color: var(--stale); }
-  .thread .who .by.session { color: var(--accent); }
+  .thread .who .by.agent { color: var(--accent); }
   .thread .said { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: normal; color: var(--ink); }
   .thread .reacts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
   .thread .react {
@@ -954,18 +955,18 @@
   .thread .reply { padding-left: 10px; border-left: 1px solid currentColor; }
   /* A reply laid out in blocks would otherwise run into the next one, whose name is all that tells them apart. */
   .thread .reply + .reply { margin-top: 5px; }
-  .thread .reply.session { color: var(--accent); }
+  .thread .reply.agent { color: var(--accent); }
   /* A whisper is set apart from the answers around it: it stays on this desk whatever the thread sends. */
   .thread .reply.aside { border-left-style: dashed; }
   .thread .reply.aside .who { font-style: italic; }
   .thread .mark.aside { color: var(--muted); background: var(--stale-bg); font-style: italic; }
   .thread .reply.you { color: var(--add-ink); }
-  .thread .reply:not(.you):not(.session) { color: var(--stale); }
+  .thread .reply.them { color: var(--stale); }
   /* Whose reply it is, said in its own voice: the line's colour draws the rule down its side, and the words inside it
      are read in the page's ink, so the name cannot take either of them for its own. */
-  .thread .reply.session .who { color: var(--accent); }
+  .thread .reply.agent .who { color: var(--accent); }
   .thread .reply.you .who { color: var(--add-ink); }
-  .thread .reply:not(.you):not(.session) .who { color: var(--stale); }
+  .thread .reply.them .who { color: var(--stale); }
   .thread .reply .said { color: var(--ink); }
   .thread .mark { flex: none; font-family: var(--mono); font-size: 10.5px; padding: 0 6px; border-radius: 999px; }
   .thread .mark.pending { color: var(--stale); background: var(--stale-bg); }
@@ -1520,7 +1521,8 @@
 <script>
   let data = JSON.parse(document.getElementById("data").textContent);
   const state = { branch: 0, scope: "all", current: 0, reached: null };
-  const notes = { sent: [], drafts: [], live: false };
+  // `watching` names the agents the desk says are waiting on it, read with the comments.
+  const notes = { sent: [], drafts: [], live: false, watching: [] };
   // A selection is a span of rendered rows, held as the row order within the file rather than as line numbers on one
   // side, which is what lets one range cover removed and added lines together.
   const sel = { path: null, from: null, to: null };
@@ -1537,7 +1539,7 @@
   // this, words typed into a reply go with the box they were typed into.
   const writing = new Map();
   // Which comments the reader folded away themselves, by resolving one here or by folding it by hand. A resolution
-  // reaching the page from the session leaves a thread as it stands, so nothing being read closes under the reader.
+  // reaching the page from an agent leaves a thread as it stands, so nothing being read closes under the reader.
   // Kept, or a reload would show every thread settled long ago in full again.
   // Threads the reader has asked to see whole. A resolved one they have read folds away on its own, which is
   // what a thread is once it has been dealt with, so what is remembered is the asking rather than the folding.
@@ -1819,13 +1821,16 @@
   // endpoints it has never had. Nothing the page does can cure that - the process has to be started again - so it is
   // said in those words wherever it is met, rather than as whatever the failed request came back as.
   const RESTART = "this desk is running older code than the page it served: stop it and serve the review again";
+  // The page is the reader's by the cookie the desk served it with, which a page loaded before the desk had one lacks.
+  const STRANGER = "the desk does not know this page as the reader's: reload it";
 
   // What the desk said, or why nothing it said could be read. A body is only parsed once the answer says there is one:
   // an empty refusal parsed as an answer raises whatever each engine calls a broken document, and that is what a reader
   // was being shown in place of what went wrong.
   async function asked(answer) {
     if (answer.ok) return answer.json();
-    return { ok: false, error: answer.status === 404 ? RESTART : `the desk answered ${answer.status}` };
+    const why = { 403: STRANGER, 404: RESTART }[answer.status];
+    return { ok: false, error: why || `the desk answered ${answer.status}` };
   }
 
   // What is already on its way, keyed by what it says. A page waiting on the server looks frozen, which invites a
@@ -2144,9 +2149,13 @@
   async function loadNotes() {
     if (leaving) return;
     try {
-      const response = await ask("comments", { cache: "no-store" });
+      const [response, watched] = await Promise.all([
+        ask("comments", { cache: "no-store" }),
+        ask("watching", { cache: "no-store" }),
+      ]);
       if (!response.ok) throw new Error("no endpoint");
       notes.sent = await response.json();
+      notes.watching = watched.ok ? (await watched.json()).agents : [];
       notes.live = true;
     } catch (error) {
       // The desk is not answering. What it said last stays on screen, and the next round asks again.
@@ -2162,7 +2171,10 @@
     // A native tooltip is plain text, so the count stands on its own rather than being marked up.
     if (rows.length) bits.push(`${rows.length} comment${rows.length === 1 ? "" : "s"}, ${closed} resolved`);
     if (owed) bits.push(`${owed} waiting for GitHub`);
-    bits.push(notes.live ? "watched by Claude" : "kept in this browser");
+    // Said as the desk knows it: who is waiting on it now, nobody when no agent is, and the browser alone once the desk
+    // has stopped answering.
+    const watchers = notes.watching.length ? `watched by ${notes.watching.join(", ")}` : "no agent watching";
+    bits.push(notes.live ? watchers : "kept in this browser");
     if (staleCount) bits.push(`${staleCount} reopened`);
     els.logopen.dataset.tip = bits.join(" \u00b7 ");
   }
@@ -2179,14 +2191,18 @@
   // Who GitHub takes the reader for, so a remark or a reply they wrote over there is not read back at them as a login.
   const mine_ = () => data.viewer || "";
   const isReader = (who) => who === "you" || (Boolean(mine_()) && who === mine_());
-  const spokenBy = (who) => (isReader(who) ? "you" : who === "session" ? "claude" : who);
-  // Who opened a thread: a remark written here names nobody and is the reader's own, unless the session wrote it.
+  // An agent is recorded as `agent:<name>`, which no login of the pull request can read as.
+  const isAgent = (who) => typeof who === "string" && who.startsWith("agent:");
+  const spokenBy = (who) => (isReader(who) ? "you" : isAgent(who) ? who.slice("agent:".length) : who);
+  // Which voice words are read in: the reader's, an agent's, or that of an author on the pull request.
+  const voiceOf = (who) => (!who || isReader(who) ? "you" : isAgent(who) ? "agent" : "them");
+  // Who opened a thread: a remark written here by the reader names nobody.
   const authorOf = (note) => (note.who && !isReader(note.who) ? note.who : "you");
-  // A remark this desk can reword, delete and send: the reader's, or the session's.
-  const writtenHere = (note) => !note.who || note.who === "session";
+  // A remark this desk can reword, delete and send: the reader's, or an agent's.
+  const writtenHere = (note) => !note.who || isAgent(note.who);
 
   const saidWhen = (when, who) => {
-    const from = who && who !== "you" && who !== "session" ? "submitted on the pull request" : "submitted here";
+    const from = who && who !== "you" && !isAgent(who) ? "submitted on the pull request" : "submitted here";
     return when ? `${said(when)}, ${from}` : from;
   };
 
@@ -2240,7 +2256,7 @@
       keep.addEventListener("click", async () => {
         const wanted = written.value.trim();
         if (!wanted) return writing.remove();
-        await post("reply", { seq: note.seq, text: wanted, who: "you", whisper: true, on, images: attached() });
+        await post("reply", { seq: note.seq, text: wanted, whisper: true, on, images: attached() });
         writing.remove();
         await loadNotes();
         drawLog();
@@ -3654,7 +3670,7 @@
     head.className = "line";
     const who = document.createElement("span");
     who.className = "who";
-    // The number a session refers to a comment by, right where the comment is: "[58]" in an answer means this thread.
+    // The number an agent refers to a comment by, right where the comment is: "[58]" in an answer means this thread.
     if (note.pending) {
       who.textContent = `${span(note)} pending`;
     } else {
@@ -3668,7 +3684,7 @@
       // Whose remark it is, said where a reply says whose it is. Where it was written is the one thing left to hovering:
       // a thread reads the same either way, and this desk is where the reader is reading it.
       const from = document.createElement("span");
-      from.className = `by ${!note.who || isReader(note.who) ? "you" : note.who === "session" ? "session" : "them"}`;
+      from.className = `by ${voiceOf(note.who)}`;
       from.textContent = note.who ? spokenBy(note.who) : "you";
       who.append(document.createTextNode(" "), from);
       // Said by the tag alone, as a reply's is: the line holds the words and the buttons, which say their own.
@@ -3823,7 +3839,7 @@
         const answers = (note.replies || []).length;
         const also = answers ? ` and ${answers} repl${answers === 1 ? "y" : "ies"}` : "";
         if (!window.confirm(`Delete this comment${also}${posted ? ", on the pull request as well" : ""}?`)) return;
-        const outcome = await post("drop", { seq: note.seq, who: "you", ...where() });
+        const outcome = await post("drop", { seq: note.seq, ...where() });
         if (!outcome.ok) window.alert(`It is still there: ${outcome.error || "GitHub unreachable"}`);
         await loadNotes();
         drawLog();
@@ -3860,7 +3876,7 @@
       const said = document.createElement("div");
       // Read as the reader's own where they wrote it, whichever side of the pull request they were on at the time. A
       // note is nobody's word to the pull request: it is written for this side of the desk, so it opens as one.
-      said.className = `line reply ${isReader(answer.who) ? "you" : answer.who}${answer.whisper ? " aside" : ""}`;
+      said.className = `line reply ${voiceOf(answer.who)}${answer.whisper ? " aside" : ""}`;
       // A note stands one step in, however deep the notes it answers go, and what is said to the pull request is read
       // back at the margin: a run of notes reads as an aside, and the thread resumes where it left off.
       said.style.marginLeft = answer.whisper ? "12px" : "0";
@@ -3907,7 +3923,7 @@
       // Only what was written here can be reworded: a reply carried back from the pull request is its author's word,
       // said on the copy everyone else reads, so this desk shows it and leaves it alone.
       if (!note.pending && notes.live && carries) said.append(whisperOn(note, groupOf(entry)));
-      if (!note.pending && notes.live && (isReader(answer.who) || answer.who === "session")) {
+      if (!note.pending && notes.live && (isReader(answer.who) || isAgent(answer.who))) {
         const change = document.createElement("button");
         change.className = "tiny";
         change.textContent = "edit";
@@ -3972,7 +3988,7 @@
         undo.dataset.tip = note.github === "posted" ? "Delete this reply, here and on the pull request" : "Delete this reply";
         undo.addEventListener("click", async () => {
           if (!window.confirm("Delete the last reply?")) return;
-          const outcome = await post("drop", { seq: note.seq, reply: true, who: "you", ...where() });
+          const outcome = await post("drop", { seq: note.seq, reply: true, ...where() });
           if (!outcome.ok) window.alert(`It is still there: ${outcome.error || "GitHub unreachable"}`);
           await loadNotes();
           drawLog();
@@ -4000,7 +4016,7 @@
         if (!say.value.trim() || send.disabled) return;
         send.disabled = true;
         try {
-          await post("reply", { seq: note.seq, text: say.value.trim(), who: "you", images: attached() });
+          await post("reply", { seq: note.seq, text: say.value.trim(), images: attached() });
         } finally {
           send.disabled = false;
         }
@@ -4020,7 +4036,6 @@
           seq: [note.seq],
           answer: say.value.trim(),
           resolved: shutting,
-          who: "you",
           images: attached(),
         });
         writing.delete(note.seq);

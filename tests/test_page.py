@@ -11,7 +11,7 @@ import re
 import pytest
 
 import gen_diff_data
-from conftest import FIRST_EDIT, SECOND_EDIT, until
+from conftest import AGENT, FIRST_EDIT, SECOND_EDIT, until
 
 playwright = pytest.importorskip("playwright.sync_api")
 
@@ -1082,7 +1082,7 @@ def test_the_comments_panel_reads_by_batch_or_by_what_moved_last(page, desk):
     assert numbered == sorted(numbered, reverse=True)
 
     # A reply carries no batch of its own: answering the older thread leaves the batches as they were.
-    desk.post("/reply", {"seq": made[0], "text": "answered long after", "who": "session"})
+    desk.post("/reply", {"seq": made[0], "text": "answered long after"}, agent=AGENT)
     page.evaluate("() => loadNotes()")
     page.wait_for_function(
         """(seq) => [...document.querySelectorAll('.logrow')].length > 0 &&
@@ -1143,7 +1143,7 @@ def test_a_comment_resolved_here_does_not_claim_the_pull_request_agrees(page, de
     desk.post("/publish", {"repo": "someone/somewhere", "pr": 3, "seq": [seq]})
     # Whatever the page sweeps in the background cannot reach GitHub, so the pull request is left unasked.
     desk.github_answers(code=1, err="dial tcp: lookup api.github.com: no such host")
-    desk.post("/resolve", {"seq": [seq], "who": "session"})
+    desk.post("/resolve", {"seq": [seq]}, agent=AGENT)
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
 
@@ -1476,7 +1476,7 @@ def test_a_thread_named_by_its_number_is_a_link_and_lists_the_threads_naming_it(
     also = desk.post(
         "/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": "another"}]
     )["seq"]
-    desk.post("/reply", {"seq": also, "text": f"as in [{named}], unlike `[{naming}]`", "who": "session"})
+    desk.post("/reply", {"seq": also, "text": f"as in [{named}], unlike `[{naming}]`"}, agent=AGENT)
     page.reload(wait_until="load")
     page.wait_for_selector(f"#note-{named} .thread")
     try:
@@ -1513,7 +1513,7 @@ def test_a_thread_named_by_its_number_is_a_link_and_lists_the_threads_naming_it(
         )
     finally:
         for seq in (named, naming, also):
-            desk.post("/drop", {"seq": seq, "who": "you"})
+            desk.post("/drop", {"seq": seq})
 
 
 def test_comments_are_filtered_by_their_author_and_stepped_through(page, desk):
@@ -1626,7 +1626,7 @@ def test_the_comments_panel_lists_what_the_filters_keep(page, desk):
     finally:
         page.locator("#sentfilter .chip", has_text="All").click()
         for seq in (kept, sent):
-            desk.post("/drop", {"seq": seq, "who": "you"})
+            desk.post("/drop", {"seq": seq})
 
 
 def test_the_next_step_leaves_a_thread_answered_where_it_was_reached(page, desk):
@@ -1640,7 +1640,7 @@ def test_the_next_step_leaves_a_thread_answered_where_it_was_reached(page, desk)
     page.evaluate(f"() => goTo('{first}')")
     page.wait_for_function(f"() => reaching === null && state.reached && state.reached.seq === {first}")
     # Answered where it was reached, the thread grows under the reader, who is still on it.
-    desk.post("/reply", {"seq": first, "text": "answered where it was reached", "who": "you"})
+    desk.post("/reply", {"seq": first, "text": "answered where it was reached"})
     page.evaluate("() => loadNotes()")
     page.locator(f"#note-{first}").get_by_text("answered where it was reached").wait_for()
     at_rest(page)
@@ -1754,7 +1754,7 @@ def test_a_comment_sent_while_the_desk_is_down_waits_in_the_tray_and_goes_once_i
         ]
         assert len(recorded) == 1
         page.wait_for_selector(f"#note-{recorded[0]['seq']} .thread:not(.draft)")
-        desk.post("/drop", {"seq": recorded[0]["seq"], "who": "you"})
+        desk.post("/drop", {"seq": recorded[0]["seq"]})
     finally:
         gen_diff_data.run(desk.repo, "checkout", "-q", "main")
 
@@ -1906,7 +1906,7 @@ def test_a_resolved_thread_answered_since_opens_itself(page, desk):
     page.wait_for_selector("section.file")
     assert page.locator(f"#note-{made} .thread.folded").count() == 1
 
-    desk.post("/reply", {"seq": made, "text": "one more thing about it", "who": "session"})
+    desk.post("/reply", {"seq": made, "text": "one more thing about it"}, agent=AGENT)
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
     # Answered since, which the reader has not read: the thread shows what was said rather than hiding it.
@@ -1920,7 +1920,7 @@ def test_a_resolved_thread_answered_since_opens_itself(page, desk):
 
     # Folded by hand before coming back: the press is the reader saying they have read it, so it folds at once and
     # stays folded, with the reply still one click away.
-    desk.post("/reply", {"seq": made, "text": "and another, while they read", "who": "session"})
+    desk.post("/reply", {"seq": made, "text": "and another, while they read"}, agent=AGENT)
     page.wait_for_function(f"() => document.querySelector('#note-{made}')?.textContent.includes('and another')")
     page.locator(f"#note-{made} button.tiny").filter(has_text="fold").click()
     page.wait_for_selector(f"#note-{made} .thread.folded")
@@ -1972,14 +1972,14 @@ def test_what_changes_above_the_reader_leaves_them_where_they_are(page, desk):
     try:
         for said in (None, "and answered\nat length\nover lines"):
             if said:
-                desk.post("/reply", {"seq": made, "text": said, "who": "session"})
+                desk.post("/reply", {"seq": made, "text": said}, agent=AGENT)
             before = page.evaluate(top, line)
             page.evaluate("() => tick()")
             page.wait_for_selector(f"#note-{made}", state="attached")
             at_rest(page)
             assert abs(page.evaluate(top, line) - before) < 1
     finally:
-        desk.post("/drop", {"seq": made, "who": "you"})
+        desk.post("/drop", {"seq": made})
 
 
 def test_a_redraw_leaves_the_reader_where_they_were(page, desk):
@@ -1991,7 +1991,7 @@ def test_a_redraw_leaves_the_reader_where_they_were(page, desk):
     # Four screens of answer, read from well inside it.
     rows = page.evaluate("() => Math.ceil(window.innerHeight / 18) * 4")
     answer = "\n\n".join(f"paragraph {index} of the answer" for index in range(rows))
-    desk.post("/reply", {"seq": made, "text": answer, "who": "session"})
+    desk.post("/reply", {"seq": made, "text": answer}, agent=AGENT)
     page.evaluate("() => loadNotes().then(() => drawNews())")
     page.wait_for_function(
         "(seq) => document.querySelector(`#note-${seq} .thread`).getBoundingClientRect().height"
@@ -2231,7 +2231,7 @@ def test_a_thread_taller_than_the_screen_counts_as_read_once_it_fills_it(page, d
     # Four screens of answer: a thread that tall never has 40% of itself on screen at once.
     rows = page.evaluate("() => Math.ceil(window.innerHeight / 18) * 4")
     answer = "\n\n".join(f"paragraph {index} of the answer" for index in range(rows))
-    desk.post("/reply", {"seq": made, "text": answer, "who": "session"})
+    desk.post("/reply", {"seq": made, "text": answer}, agent=AGENT)
     page.evaluate("() => loadNotes()")
     page.wait_for_function(
         "(seq) => document.querySelector(`#note-${seq} .thread`).getBoundingClientRect().height"
@@ -2268,7 +2268,7 @@ def test_a_thread_with_nowhere_to_go_is_read_in_the_panel(page, desk):
     seq = made["seqs"][0]
     desk.cli("reply", str(seq), "and answered afterwards").communicate(timeout=180)
     # Resolved, which is how a thread reads once it has been dealt with, and how it is folded away to an outline.
-    desk.post("/resolve", {"seq": [seq], "resolved": True, "who": "you"})
+    desk.post("/resolve", {"seq": [seq], "resolved": True})
     page.wait_for_function(f"() => ((mine().find((note) => note.seq === {seq}) || {{}}).replies || []).length === 1")
 
     page.locator("#logopen").click()
@@ -2358,7 +2358,7 @@ def test_a_thread_with_nowhere_to_go_is_read_in_the_panel(page, desk):
     assert stood["said"] > 0
     assert stood["holder"] >= stood["said"]
     for gone in filling:
-        desk.post("/drop", {"seq": gone, "who": "you"})
+        desk.post("/drop", {"seq": gone})
     page.locator("#logsort").select_option("batch")
     # Pressed once the page has let go of every dropped row: the poll removes them as it hears of them, and a row
     # moving under the press lands it on another one.
@@ -2368,7 +2368,7 @@ def test_a_thread_with_nowhere_to_go_is_read_in_the_panel(page, desk):
 
     row.click()
     assert page.locator(".logthread").count() == 0
-    desk.post("/drop", {"seq": seq, "who": "you"})
+    desk.post("/drop", {"seq": seq})
     page.locator("#logclose").click()
 
 
@@ -2455,7 +2455,7 @@ def test_a_review_keeps_its_comments_and_ticks_however_it_is_opened(page, desk):
 
         # GitHub stops answering, which is also what a merged pull request leaves behind: the listing no longer names
         # one for this ref. The desk holds on to the number it was told, so the same work is still the same review. A
-        # tick left under the branch name meanwhile - by a session that ran before the pull request was known - is older
+        # tick left under the branch name meanwhile - by an agent that ran before the pull request was known - is older
         # news than the review's own, so the file still reads as read, and ticking it settles it under one name.
         desk.post("/reviewed", {"marks": {f"{branch} {name}": "0000stale0000"}})
         desk.github_answers(code=1, err="gh: Not Found (HTTP 404)")
@@ -2542,7 +2542,7 @@ def test_the_log_reaches_a_comment_and_leaves_what_is_settled_out(page, desk):
     assert page.evaluate(off, made)
 
     # Settled here, it stays listed, as it stays in the diff.
-    desk.post("/resolve", {"seq": [made], "who": "session"})
+    desk.post("/resolve", {"seq": [made]}, agent=AGENT)
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
     page.locator("#logopen").click()
@@ -2573,7 +2573,7 @@ def test_a_resolved_thread_with_news_stays_until_read_and_scrolled_past(page, de
     made = desk.post(
         "/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": saying}]
     )["seq"]
-    desk.post("/resolve", {"seq": [made], "who": "session"})
+    desk.post("/resolve", {"seq": [made]}, agent=AGENT)
     page.reload(wait_until="load")
     page.wait_for_selector(f"#note-{made} .thread")
     thread = page.locator(f"#note-{made}")
@@ -2597,7 +2597,7 @@ def test_a_resolved_thread_with_news_stays_until_read_and_scrolled_past(page, de
             " || !document.getElementById(`note-${seq}`).getClientRects().length",
             made,
         )
-        desk.post("/reply", {"seq": made, "text": "news on a settled thread", "who": "session"})
+        desk.post("/reply", {"seq": made, "text": "news on a settled thread"}, agent=AGENT)
         page.evaluate("() => tick()")
         thread.wait_for(state="visible")
         page.locator("#logopen").click()
@@ -2628,7 +2628,7 @@ def test_a_resolved_thread_with_news_stays_until_read_and_scrolled_past(page, de
         thread.wait_for(state="hidden")
         assert abs(page.evaluate("() => window.held.getBoundingClientRect().top") - anchored) < 1
     finally:
-        desk.post("/drop", {"seq": made, "who": "you"})
+        desk.post("/drop", {"seq": made})
 
 
 def test_the_log_says_where_every_comment_stands(page, desk):
@@ -3234,7 +3234,7 @@ def test_what_the_threads_say_is_found_when_asked(page, desk):
     words = f"line {FIRST_EDIT} rewritten"
     said = {"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": f"{words}, and why"}
     made = desk.post("/comments", [said])["seq"]
-    desk.post("/reply", {"seq": made, "text": f"{words} twice over", "who": "session"})
+    desk.post("/reply", {"seq": made, "text": f"{words} twice over"}, agent=AGENT)
     page.reload(wait_until="load")
     page.wait_for_selector(f"#note-{made} .thread")
     counted = "(want) => document.getElementById('fcount').textContent === want"
@@ -3274,7 +3274,7 @@ def test_what_the_threads_say_is_found_when_asked(page, desk):
         assert page.locator("#fthreads").get_attribute("aria-pressed") == "false"
         page.locator("#fq").press("Escape")
     finally:
-        desk.post("/drop", {"seq": made, "who": "you"})
+        desk.post("/drop", {"seq": made})
 
 
 def test_the_find_box_widens_as_its_edge_is_dragged(page):
@@ -3456,8 +3456,8 @@ def test_a_reply_can_be_rewritten_and_a_comment_and_its_last_reply_deleted_from_
     saying = f"written to be deleted, number {len(desk.get('/comments')) + 1}"
     submit(page, saying)
     made = desk.get("/comments")[-1]["seq"]
-    desk.post("/reply", {"seq": made, "text": "first answer", "who": "session"})
-    desk.post("/reply", {"seq": made, "text": "second answer", "who": "session"})
+    desk.post("/reply", {"seq": made, "text": "first answer"}, agent=AGENT)
+    desk.post("/reply", {"seq": made, "text": "second answer"}, agent=AGENT)
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
     thread = page.locator(f"#note-{made}")
@@ -3768,7 +3768,7 @@ def test_a_reply_being_written_survives_the_page_redrawing_itself(page, desk):
     # pull request holds, which is news of its own.
     standing = "async () => { const it = document.querySelector('section.file'); await tick(); return it.isConnected; }"
     assert any(page.evaluate(standing) for _ in range(4))
-    desk.post("/reply", {"seq": made, "text": "said from elsewhere meanwhile", "who": "session"})
+    desk.post("/reply", {"seq": made, "text": "said from elsewhere meanwhile"}, agent=AGENT)
     assert not page.evaluate(standing)
     assert "said from elsewhere meanwhile" in thread.inner_text()
 
@@ -3781,7 +3781,7 @@ def test_a_reply_being_written_survives_the_page_redrawing_itself(page, desk):
     page.keyboard.press("ControlOrMeta+f")
     page.locator("#fq").fill("def")
     try:
-        desk.post("/reply", {"seq": made, "text": "heard mid-review", "who": "session"})
+        desk.post("/reply", {"seq": made, "text": "heard mid-review"}, agent=AGENT)
         page.evaluate("() => tick()")
         assert "heard mid-review" in thread.inner_text()
         assert page.locator("tr[data-composer='true'] textarea").input_value() == "still being written"
@@ -3790,7 +3790,7 @@ def test_a_reply_being_written_survives_the_page_redrawing_itself(page, desk):
         # A reply typed in a thread is built anew by a redraw, which would take the keyboard from it: what is heard
         # meanwhile is drawn by the first round after the keyboard has left it.
         page.locator(f"#note-{made} .line.actions:not(.aside) textarea").first.focus()
-        desk.post("/reply", {"seq": made, "text": "heard while typing", "who": "session"})
+        desk.post("/reply", {"seq": made, "text": "heard while typing"}, agent=AGENT)
         page.evaluate("() => tick()")
         assert "heard while typing" not in thread.inner_text()
         page.evaluate("() => document.activeElement.blur()")
@@ -3830,7 +3830,7 @@ def test_a_box_takes_the_height_of_what_is_written_into_it(page, desk):
     aim(page, "built hidden")
     submit(page, "built hidden")
     made = desk.get("/comments")[-1]["seq"]
-    desk.post("/resolve", {"seq": [made], "who": "session"})
+    desk.post("/resolve", {"seq": [made]}, agent=AGENT)
     flip(page, "hideclosed")
     page.evaluate("() => loadNotes().then(render)")
     page.wait_for_selector(f"#note-{made} textarea", state="attached")
@@ -3839,7 +3839,7 @@ def test_a_box_takes_the_height_of_what_is_written_into_it(page, desk):
     page.wait_for_selector(f"#note-{made} textarea")
     settle(page)
     assert page.locator(f"#note-{made} textarea").bounding_box()["height"] >= 24
-    desk.post("/drop", {"seq": made, "who": "you"})
+    desk.post("/drop", {"seq": made})
 
 
 def test_a_reply_quoting_a_passage_shows_it_as_a_quote(page, desk):
@@ -3859,8 +3859,8 @@ def test_a_reply_quoting_a_passage_shows_it_as_a_quote(page, desk):
                 "> copied from the middle of a line\n        and carried on below it\n          one step further\n\n"
                 "and the last word"
             ),
-            "who": "session",
         },
+        agent=AGENT,
     )
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
@@ -3888,7 +3888,7 @@ def test_a_recorded_comment_shows_the_number_it_is_referred_to_by(page, desk):
     submit(page, saying)
     made = desk.get("/comments")[-1]["seq"]
 
-    # A session answers by number, so the number is on the thread rather than only in the panel.
+    # An agent answers by number, so the number is on the thread rather than only in the panel.
     head = page.locator(f"#note-{made} .thread > .line .who").first
     assert head.inner_text().startswith(f"[{made}]")
 
@@ -3946,7 +3946,7 @@ def test_a_comment_being_written_out_of_sight_is_listed_in_the_tray(page, desk):
     finally:
         reply.fill("")
         page.locator("tr[data-composer='true'] button.ghost", has_text="Cancel").first.click()
-        desk.post("/drop", {"seq": made, "who": "you"})
+        desk.post("/drop", {"seq": made})
 
 
 def test_a_file_comment_being_written_outlives_the_poll(page, desk):
@@ -3981,7 +3981,7 @@ def test_a_comment_can_be_reached_by_its_number(page, desk):
     page.reload(wait_until="load")
     page.wait_for_selector("section.file")
 
-    # '#' from anywhere asks for a number, and the number is the one a session refers to the comment by.
+    # '#' from anywhere asks for a number, and the number is the one an agent refers to the comment by.
     page.keyboard.press("#")
     assert page.evaluate("() => document.activeElement.id") == "goto"
     page.keyboard.type(str(made))
@@ -4075,7 +4075,7 @@ def test_a_file_holding_an_unread_comment_opens_itself(page, desk):
         "/comments",
         [{"branch": branch, "path": "added.py", "line": 1, "side": "new", "text": "settled before you saw it"}],
     )["seqs"][0]
-    desk.post("/resolve", {"seq": [made], "who": "session"})
+    desk.post("/resolve", {"seq": [made]}, agent=AGENT)
     page.go_back(wait_until="load")
     page.wait_for_selector("section.file")
     comments_reach(page)
@@ -4195,10 +4195,10 @@ def test_a_reply_below_the_fold_is_not_taken_for_read(page, desk):
     saying = f"answered out of sight, number {len(desk.get('/comments')) + 1}"
     submit(page, saying)
     made = desk.get("/comments")[-1]["seq"]
-    # Resolved by the reader, so folded, then answered by the session: it shows itself again until they have had it.
+    # Resolved by the reader, so folded, then answered by an agent: it shows itself again until they have had it.
     page.locator(f"#note-{made} button.solid").filter(has_text="Resolve").click()
     page.wait_for_selector(f"#note-{made} .thread.folded")
-    desk.post("/reply", {"seq": made, "text": "settled it", "who": "session"})
+    desk.post("/reply", {"seq": made, "text": "settled it"}, agent=AGENT)
     page.evaluate("() => loadNotes()")
 
     # Redrawn twice with the thread out of the reader's view: building it is what used to count as reading it, so the
@@ -4291,25 +4291,19 @@ def test_a_comment_written_on_the_pull_request_shows_whose_it_is_and_is_answered
         desk.github_answers(code=1, err="gh: Not Found (HTTP 404)")
 
 
-def test_a_remark_the_session_wrote_reads_as_its_own_and_stays_this_desks_to_change(page, desk):
+def test_a_remark_an_agent_wrote_reads_as_its_own_and_stays_this_desks_to_change(page, desk):
     branch = page.evaluate("() => data.branches[0].ref")
     seq = desk.post(
         "/comments",
-        {
-            "branch": branch,
-            "path": "sample.py",
-            "line": SECOND_EDIT,
-            "side": "new",
-            "text": "seen by Claude",
-            "who": "session",
-        },
+        {"branch": branch, "path": "sample.py", "line": SECOND_EDIT, "side": "new", "text": "seen by an agent"},
+        agent=AGENT,
     )["seq"]
     page.evaluate("() => loadNotes()")
     page.wait_for_selector(f"#note-{seq}")
 
     head = page.locator(f"#note-{seq} .thread > .line").first
-    assert head.locator(".who .by").inner_text() == "claude"
-    assert "session" in head.locator(".who .by").get_attribute("class")
+    assert head.locator(".who .by").inner_text() == AGENT
+    assert "agent" in head.locator(".who .by").get_attribute("class")
     assert head.locator(".who").get_attribute("data-tip").endswith("submitted here")
     # Written on this desk, so the reader may reword it or take it back before anything sends it.
     assert head.locator("button.tiny").filter(has_text="Edit").count() == 1
@@ -4331,7 +4325,7 @@ def test_a_thread_says_what_it_owes_the_pull_request_and_sends_it_when_asked(pag
             "/comments",
             [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": "a thread to send"}],
         )["seq"]
-        desk.post("/reply", {"seq": made, "text": "answered here first", "who": "session"})
+        desk.post("/reply", {"seq": made, "text": "answered here first"}, agent=AGENT)
         page.reload(wait_until="load")
         page.wait_for_selector(f"#note-{made} .line.reply")
 
@@ -4476,7 +4470,7 @@ def test_the_comments_panel_sends_one_thread_from_its_row_and_every_thread_the_p
         for seq in made:
             assert desk.post("/publish", {"seq": [seq], "repo": "someone/somewhere", "pr": 42})["ok"]
         for seq in made:
-            desk.post("/reply", {"seq": seq, "text": f"answered after the send, {seq}", "who": "session"})
+            desk.post("/reply", {"seq": seq, "text": f"answered after the send, {seq}"}, agent=AGENT)
         page.reload(wait_until="load")
         page.locator("#logopen").click()
         page.wait_for_selector("#log[data-open='true']")
@@ -4591,7 +4585,7 @@ def test_a_note_being_written_survives_the_poll_redrawing_its_thread(page, desk)
     page.locator(f"#note-{made} .line.actions.aside textarea").fill("half a note, and worth keeping")
     # A reply landing meanwhile, and the poll that reads it once the box has lost the keyboard: the thread is drawn
     # again around the reply, and the box has to come through with its words, still on the remark.
-    desk.post("/reply", {"seq": made, "text": "answered from elsewhere", "who": "session"})
+    desk.post("/reply", {"seq": made, "text": "answered from elsewhere"}, agent=AGENT)
     # On the bar's own padding: a press on the bar is what drops the keyboard, and one landing in the filter would
     # only move it there.
     page.locator("header").click(position={"x": 4, "y": 4})
@@ -4670,8 +4664,8 @@ def test_reaching_a_comment_in_a_file_far_from_the_reader_lands_on_it(page, desk
     # A thread taller than the view is reached at what was said last, which stands in the middle: centring the whole
     # thread leaves its latest reply below the view.
     for number in range(6):
-        desk.post("/reply", {"seq": made, "text": f"answer {number}\n\nwith\n\nseveral\n\nlines", "who": "session"})
-    desk.post("/reply", {"seq": made, "text": "said last", "who": "session"})
+        desk.post("/reply", {"seq": made, "text": f"answer {number}\n\nwith\n\nseveral\n\nlines"}, agent=AGENT)
+    desk.post("/reply", {"seq": made, "text": "said last"}, agent=AGENT)
     page.evaluate("() => tick()")
     page.wait_for_selector(f"#note-{made} .line.reply:has-text('said last')")
     assert page.evaluate(
@@ -4752,7 +4746,7 @@ def test_going_back_from_a_comment_returns_to_the_place_left(page, desk):
         assert page.locator("#goback").is_disabled()
     finally:
         for seq in passing:
-            desk.post("/drop", {"seq": seq, "who": "you"})
+            desk.post("/drop", {"seq": seq})
 
 
 def test_a_remark_and_a_reply_both_say_when_they_were_said_and_where_they_were_written(page, desk):
@@ -4761,7 +4755,7 @@ def test_a_remark_and_a_reply_both_say_when_they_were_said_and_where_they_were_w
     made = desk.post(
         "/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": saying}]
     )["seq"]
-    desk.post("/reply", {"seq": made, "text": "answered here", "who": "session"})
+    desk.post("/reply", {"seq": made, "text": "answered here"}, agent=AGENT)
     page.reload(wait_until="load")
     page.wait_for_selector(f"#note-{made} .line.reply")
 
@@ -4799,8 +4793,8 @@ def test_a_reply_says_whose_it_is_in_its_own_voice(page, desk):
     made = desk.post(
         "/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": saying}]
     )["seq"]
-    desk.post("/reply", {"seq": made, "text": "said by the session", "who": "session"})
-    desk.post("/reply", {"seq": made, "text": "> quoted\n\nsaid by the reader", "who": "you"})
+    desk.post("/reply", {"seq": made, "text": "said by an agent"}, agent=AGENT)
+    desk.post("/reply", {"seq": made, "text": "> quoted\n\nsaid by the reader"})
     page.reload(wait_until="load")
     page.wait_for_selector(f"#note-{made} .line.reply")
 
@@ -4919,7 +4913,7 @@ def test_a_remark_and_a_reply_are_reacted_to_from_the_page(page, desk):
     made = desk.post(
         "/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": saying}]
     )["seq"]
-    desk.post("/reply", {"seq": made, "text": "said by the session", "who": "session"})
+    desk.post("/reply", {"seq": made, "text": "said by an agent"}, agent=AGENT)
     desk.post("/react", {"seq": made, "reply": 0, "content": "EYES"})
     page.reload(wait_until="load")
     thread = page.locator(f"#note-{made}")

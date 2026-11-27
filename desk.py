@@ -1,11 +1,15 @@
 """One entry point for the diff desk: serve a branch for review, then pick up the comments it collects.
 
+Every command that writes, and the watch, is made by an agent naming itself, with --as <name> before the command or
+DIFF_DESK_AGENT in the environment: what it writes is recorded as that agent's, and its watch wakes on what everyone
+else says.
+
 desk.py serve --dir <repo> --base <ref> [refs ...]   collect the diffs and serve them (blocks)
 desk.py serve --stack <tip> [--local]                serve a stack, each branch against the one below it
 desk.py serve ... --take                             serve it even where a desk holds another review
-desk.py watch [--since N] [--once]                   print whatever the reviewer says, as they say it
+desk.py --as astra watch [--since N] [--once]        print whatever anyone else says, as they say it
 desk.py comments [--all]                             what has been submitted, unresolved unless --all
-desk.py remark '#3243' path.py:12-14 "..."           open a thread on lines of a review, as the session's [--old]
+desk.py remark '#3243' path.py:12-14 "..."           open a thread on lines of a review, as the agent's [--old]
 desk.py reply 3 "why it happens ..."                 answer a comment without closing it
 desk.py reply 3 --whisper "look at this again"       leave a whisper, which never reaches the pull request
 desk.py reply 3 --whisper --on 0 "done."             answer what was said at [0], here and nowhere else
@@ -20,6 +24,7 @@ desk.py refs --dir <repo> --base <ref>               the branches ahead of a bas
 """
 
 import argparse
+import http
 import json
 import os
 import pathlib
@@ -36,6 +41,8 @@ import serve_diff
 
 HERE = pathlib.Path(__file__).parent
 URL = f"http://127.0.0.1:{serve_diff.PORT}"
+# The agent this runs as, which --as overrides.
+AGENT = os.environ.get("DIFF_DESK_AGENT", "")
 
 
 def refresh():
@@ -91,16 +98,27 @@ def refresh():
 
 
 def ask(route, payload=None):
-    """One request to the running desk, or None when nothing is serving."""
+    """One request to the running desk, as the agent this runs as, or None when nothing is serving.
+
+    A request the desk refuses for the author it names, or names none, stops here with the desk's reason: nothing
+    else this could do would be recorded under the right name.
+    """
+    headers = {"Content-Type": "application/json"}
+    if AGENT:
+        headers["X-Desk-Agent"] = AGENT
     request = urllib.request.Request(
         f"{URL}{route}",
         data=json.dumps(payload).encode() if payload is not None else None,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST" if payload is not None else "GET",
     )
     try:
         with urllib.request.urlopen(request, timeout=90) as answer:
             return json.loads(answer.read() or b"null")
+    except urllib.error.HTTPError as refusal:
+        if refusal.code == http.HTTPStatus.FORBIDDEN:
+            sys.exit(json.loads(refusal.read() or b"{}").get("error", "the desk refused who this runs as"))
+        return None
     except (urllib.error.URLError, OSError):
         return None
 
@@ -113,7 +131,7 @@ def span(note):
 
 
 def carried(item, indent):
-    """Where to open every file one remark or reply carries, so a session reads the picture and not a word about it."""
+    """Where to open every file one remark or reply carries, so an agent reads the picture and not a word about it."""
     for image in item.get("images") or ():
         where = "on the pull request" if image.get("url") else "here only"
         print(f"{indent}{serve_diff.MEDIA / image['file']} ({image['name']}, {where})", flush=True)
@@ -137,7 +155,7 @@ def show(note, since=None):
         marks.append(f"error {note['error'][:60]}")
     if held := reacted(note):
         marks.append(f"reactions {held}")
-    # Flushed as it goes: a watch that keeps running holds its output in a buffer otherwise, and a session reading
+    # Flushed as it goes: a watch that keeps running holds its output in a buffer otherwise, and an agent reading
     # along sees a heading with nothing under it.
     print(
         f"[{note['seq']}] {note.get('branch', '?')} {note['path']}:{span(note)} ({note.get('side')}) {text}", flush=True
@@ -151,9 +169,10 @@ def show(note, since=None):
         kind = "whisper " if answer.get("whisper") else ""
         on = f" on [{answer['on']}]" if answer.get("on") is not None else ""
         said = f"{kind}{answer['who']}{on}"
-        # What woke the session, marked: a thread is printed whole, so without this the line that is news reads like
-        # the ones it has already answered.
-        news = "*" if since is not None and answer.get("event", 0) > since else " "
+        # What woke the agent, marked: a thread is printed whole, so without this the line that is news reads like
+        # the ones it has already answered. Its own words are never news to it.
+        is_news = since is not None and answer.get("event", 0) > since and answer["who"] != f"agent:{AGENT}"
+        news = "*" if is_news else " "
         print(f"     {news}[{index}] {said} {answer['at']}: {' '.join(answer['text'].split())}", flush=True)
         carried(answer, "          ")
         if held := reacted(answer):
@@ -164,39 +183,10 @@ def show(note, since=None):
         print(f"      was {earlier['at']}: {' '.join(earlier['text'].split())[:80]}", flush=True)
 
 
-def watched_key(branches):
-    """What a watch of these branches is held under: one desk holds every review, and a session watching one of them
-    must not carry the others past what another session has yet to hear."""
-    return "|".join(sorted(branches)) if branches else "event"
-
-
-def heard_upto(branches=()):
-    """The event the last watch of these branches stopped at, or None if none ever has."""
-    kept = gen_diff_data.home() / "watched.json"
-    if not kept.exists():
-        return None
-    held = json.loads(kept.read_text())
-    return held.get(watched_key(branches))
-
-
-def stop_at(event, desk=None, branches=()):
-    kept = gen_diff_data.home() / "watched.json"
-    held = json.loads(kept.read_text()) if kept.exists() else {}
-    held[watched_key(branches)] = event
-    held["desk"] = desk if desk is not None else held.get("desk")
-    gen_diff_data.write_whole(kept, json.dumps(held))
-
-
 def serving():
     """Which run of the desk is answering, or None where it does not say - an older desk than this one."""
     answer = ask("/serving")
     return (answer or {}).get("desk")
-
-
-def armed_against():
-    """The run of the desk the last watch was armed against."""
-    kept = gen_diff_data.home() / "watched.json"
-    return json.loads(kept.read_text()).get("desk") if kept.exists() else None
 
 
 PULL_REF = re.compile(r"^refs/diffdesk/pull/(\d+)$")
@@ -205,7 +195,7 @@ PULL_REF = re.compile(r"^refs/diffdesk/pull/(\d+)$")
 def one_ref(ref):
     """A ref as the review it names, so the several ways of asking for one pull request compare as one thing.
 
-    A pull request is served from a ref fetched by number, so the same review is asked for as '3243' by a session, comes
+    A pull request is served from a ref fetched by number, so the same review is asked for as '3243' by an agent, comes
     back as 'refs/diffdesk/pull/3243' in the payload, and is sent as either by the page. Compared verbatim, a desk would
     read as holding somebody else's review every time it was asked for its own.
     """
@@ -222,7 +212,7 @@ def held_elsewhere(root, base, refs):
     page away from whoever was reading the first, and says nothing to either of them. What is already being shown is
     therefore asked for before anything is collected.
 
-    Only what a session runs is held this way. The reader switching source from the page is the point of that panel, so
+    Only what an agent runs is held this way. The reader switching source from the page is the point of that panel, so
     a scan asked for there is never refused.
     """
     held = (ask("/state") or {}).get("source")
@@ -234,7 +224,7 @@ def held_elsewhere(root, base, refs):
 
 
 def _said(payload):
-    """What was collected, branch by branch, which is what a session reads to know the review it just served."""
+    """What was collected, branch by branch, which is what an agent reads to know the review it just served."""
     files = sum(len(entry["files"]) for entry in payload["branches"])
     print(f"{files} file diffs across {len(payload['branches'])} branch(es), base {payload['base']}")
     for entry in payload["branches"]:
@@ -302,7 +292,7 @@ def stop(args):
     """Stop the desk, which is how one is put down: a signal leaves whoever is reading it with a page that answers
     nothing, and takes with it every other review the same desk holds.
 
-    An owner names whoever started a desk, so a lifecycle that ends - a shell, a session, a job - stops the desk it
+    An owner names whoever started a desk, so a lifecycle that ends - a shell, an agent, a job - stops the desk it
     opened and leaves alone one that somebody else is still reading.
     """
     state = ask("/state")
@@ -336,58 +326,63 @@ def resume_from(asked, stopped, waiting, sent):
 
 
 def watch(args):
-    """Block until the reviewer says something, then print it. This is how a session picks up a review.
+    """Block until someone other than this agent says something, then print it. This is how an agent picks up a review.
 
-    What it follows is the log's event cursor rather than the comment numbers, so a reply on a comment the session has
+    What it follows is the log's event cursor rather than the comment numbers, so a reply on a comment the agent has
     already read wakes it just as a new comment does - and the reviewer's answer to a question is not lost because the
-    comment it hangs on is old news.
+    comment it hangs on is old news. The reader, every other agent and the pull request are all someone else.
 
-    Where it stopped is written down, so watching again carries on from there. That is what makes a watch that stops at
-    the first word usable: a session arms it, is woken, answers, and arms it again, with the same reply never waking it
-    twice - whereas one starting over from the oldest open comment reported what had just been dealt with, each time.
+    Where it stopped is kept by the desk, per agent, so watching again carries on from there. That is what makes a watch
+    that stops at the first word usable: an agent arms it, is woken, answers, and arms it again, with the same reply
+    never waking it twice - whereas one starting over from the oldest open comment reported what had just been dealt
+    with, each time. Waiting is the desk's: it holds each request open until there is news, so a word wakes the watch
+    the moment it is written, and the page shows the agent as watching meanwhile.
     """
     if ask("/data") is None:
         sys.exit("nothing is serving; start with 'desk.py serve' first")
     sent = ask("/comments") or []
-    # One desk holds every review it was given, so a session works one of them: what the others say is another
-    # session's to answer, and waking on it would carry that session's news past it unheard.
+    # One desk holds every review it was given, so an agent works one of them: what the others say is another agent's
+    # to answer, and waking on it would carry that agent's news past it unheard.
     branches = tuple(args.branch or ())
     if branches:
         sent = [row for row in sent if row.get("branch") in branches]
+    named = "".join(f"&branch={urllib.parse.quote(branch)}" for branch in branches)
+    stopped = ask(f"/heard?{named[1:]}")
     # Anything still open is unaddressed, whenever it arrived, so a first watch starts before it rather than after: a
     # cursor set to the end swallows whatever was written while the last batch was being worked on.
     waiting = [row.get("event", row["seq"]) for row in sent if row.get("state") == "open"]
-    since = resume_from(args.since, heard_upto(branches), waiting, sent)
+    since = resume_from(args.since, (stopped or {}).get("event"), waiting, sent)
     # A desk restarted since the last watch is said once and then watched: this one is being armed now, against the
     # desk now answering, so it is reading what exists rather than the run before it. Stopping here instead would
-    # cost every session an arming cycle after each restart, and a session that does not spend it hears nothing.
+    # cost every agent an arming cycle after each restart, and an agent that does not spend it hears nothing.
     running = serving()
-    restarted = running is not None and armed_against() not in (None, running)
     reviews = ", ".join(branches) if branches else "every review"
-    if restarted:
+    if (stopped or {}).get("restarted"):
         print("the desk has been restarted since the last watch; this one follows the desk now serving", flush=True)
-    print(f"watching {reviews} for anything said past event {since}", flush=True)
-    stop_at(since, running, branches)
+    print(f"watching {reviews} as {AGENT} for anything said past event {since}", flush=True)
     deadline = time.monotonic() + args.timeout if args.timeout else None
     # Never returns of its own accord: a reviewer says one thing, then another, and a watch that stopped at the first
     # left every word after it unheard - which is what happened before it kept going.
     while deadline is None or time.monotonic() < deadline:
-        # The session's own writes bump the cursor too, so what it is waiting for is told from what it just did.
-        fresh = [row for row in (ask(f"/comments?event={since}") or []) if row.get("eventBy") == "you"]
-        if branches:
-            fresh = [row for row in fresh if row.get("branch") in branches]
+        if serving() not in (None, running):
+            print("the desk has been restarted; arm the watch again", flush=True)
+            return
+        left = serve_diff.WAIT_LONGEST
+        if deadline is not None:
+            left = min(left, deadline - time.monotonic())
+        answer = ask(f"/news?since={since}&wait={max(left, 0):.1f}{named}")
+        if answer is None:
+            # Gone for a moment, a restart in progress or a desk put down: asked again once it answers.
+            time.sleep(1)
+            continue
+        fresh = answer["rows"]
         if fresh:
             print(f"{len(fresh)} comment(s) with news:", flush=True)
             for note in fresh:
                 show(note, since)
-            since = max(row.get("event", row["seq"]) for row in fresh)
-            stop_at(since, running, branches)
+            since = max(row["event"] for row in fresh)
             if args.once:
                 return
-        if serving() not in (None, running):
-            print("the desk has been restarted; arm the watch again", flush=True)
-            return
-        time.sleep(args.every)
     print("nothing said within the timeout")
 
 
@@ -457,10 +452,10 @@ def edit(args):
 
 
 def remark(args):
-    """Open a thread on a range of lines of a served review, written as the session's.
+    """Open a thread on a range of lines of a served review, written as the agent's.
 
-    The thread reads as Claude's on the page, wakes no watch, and is sent to the pull request only by a press on its
-    Sync, as a remark of the reader's is.
+    The thread reads as the agent's on the page, wakes the watches of everyone else, and is sent to the pull request
+    only by a press on its Sync, as a remark of the reader's is.
     """
     data = ask("/data")
     if data is None:
@@ -499,7 +494,6 @@ def remark(args):
         },
         "text": " ".join(args.text),
         "images": [],
-        "who": "session",
     }
     outcome = ask("/comments", {"comments": [note], "github": False})
     if outcome is None:
@@ -508,7 +502,7 @@ def remark(args):
 
 
 def reply(args):
-    order = {"seq": args.seq, "text": " ".join(args.text), "who": "session", "whisper": args.whisper}
+    order = {"seq": args.seq, "text": " ".join(args.text), "whisper": args.whisper}
     if args.on is not None:
         order["on"] = args.on
     outcome = ask("/reply", order)
@@ -536,7 +530,7 @@ def forget(args):
 
 
 def resolve(args):
-    outcome = ask("/resolve", {"seq": args.seq, "answer": args.answer, "resolved": not args.reopen, "who": "session"})
+    outcome = ask("/resolve", {"seq": args.seq, "answer": args.answer, "resolved": not args.reopen})
     if outcome is None:
         sys.exit("nothing is serving")
     print(f"{'reopened' if args.reopen else 'closed'} {outcome['resolved']} comment(s)")
@@ -557,6 +551,12 @@ def refs(args):
 
 
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+parser.add_argument(
+    "--as",
+    dest="agent",
+    default=AGENT,
+    help="the agent running this, whose name what it writes is recorded under; DIFF_DESK_AGENT by default",
+)
 jobs = parser.add_subparsers(dest="job", required=True)
 
 job = jobs.add_parser("serve", help="collect the diffs and serve the review page")
@@ -603,8 +603,8 @@ job.set_defaults(run=stop)
 
 job = jobs.add_parser(
     "watch",
-    help="block until a review batch is submitted",
-    description="Reports to stdout, so a session has to be reading that stream: redirected to a file, the watch runs "
+    help="block until someone else says something",
+    description="Reports to stdout, so an agent has to be reading that stream: redirected to a file, the watch runs "
     "and reports to nobody.",
 )
 job.add_argument(
@@ -616,7 +616,6 @@ job.add_argument(
     help="only wake on what is said about this review, and leave the rest to whoever is watching it; repeatable",
 )
 job.add_argument("--once", action="store_true", help="stop after the first thing said, rather than keeping watch")
-job.add_argument("--every", type=float, default=10.0, help="seconds between polls")
 job.add_argument("--timeout", type=float, default=0.0, help="give up after this many seconds; 0 waits forever")
 job.set_defaults(run=watch)
 
@@ -644,7 +643,7 @@ job.add_argument(
 )
 job.set_defaults(run=edit)
 
-job = jobs.add_parser("remark", help="open a thread on lines of a review, as the session's")
+job = jobs.add_parser("remark", help="open a thread on lines of a review, as the agent's")
 job.add_argument("branch", help="the review, as its ref or its pull request (#3243)")
 job.add_argument("at", help="the lines, as path:line or path:line-endLine")
 job.add_argument("text", nargs="+", help="the remark, shown on the page")
@@ -677,4 +676,5 @@ job.set_defaults(run=refs)
 
 if __name__ == "__main__":
     known = parser.parse_args()
+    AGENT = known.agent
     known.run(known)
