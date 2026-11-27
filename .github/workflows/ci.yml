@@ -17,9 +17,11 @@ env:
   GIT_COMMITTER_NAME: desk
   GIT_COMMITTER_EMAIL: desk@example.com
 
+# Every job runs on arm64, the architecture the desk is developed on: a page laid out by the same browser build as on a
+# developer's machine fails on CI only where it fails there too, so a failure is reproduced locally rather than probed.
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -33,7 +35,7 @@ jobs:
 
   # Everything but the page, which needs no browser.
   desk:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -48,7 +50,7 @@ jobs:
       fail-fast: false
       matrix:
         engine: [chromium, webkit, firefox]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -62,6 +64,6 @@ jobs:
   tests:
     if: always()
     needs: [lint, desk, page]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     steps:
       - run: test "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}" = false

@@ -3590,6 +3590,9 @@ def test_a_comment_does_not_shift_the_columns_of_the_diff_it_hangs_under(page, d
           card.dataset.open = "false";
           await new Promise((done) => setTimeout(done, 150));
           card.dataset.open = "true";
+          // Opened this way, the rows come back when the card is next seen to be near the reader, a frame or several
+          // later on a slow machine: what is sampled is the card once it holds them again.
+          for (let i = 0; i < 120 && !card.querySelector('td.ln'); i++) await new Promise(requestAnimationFrame);
           const seen = [];
           for (let i = 0; i < 12; i++) {
             await new Promise(requestAnimationFrame);
