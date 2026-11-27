@@ -47,7 +47,7 @@ The page comes up on `127.0.0.1:8787`, each ref a tab, scoped to the whole range
 - **A file header comments on the file as a whole**, for a remark that belongs to no line of it.
 - **Add to review** hands a comment to the tray, which submits the batch with **Submit review** and an optional overall note. A submission records the remarks here; **Also post to PR #N** in the tray is what sends them out with it.
 - **Every comment is a thread.** Either side replies, resolves or reopens. Resolving folds the thread to its remark and keeps the replies one click away.
-- **Every remark and reply says whose it is**, in the ink its words are read in - yours, an agent's under the name it gave, or the author who wrote it on the pull request, your own login among them read back as "you". Hovering says when and where it was written.
+- **Every remark and reply says whose it is**, in the ink its words are read in - yours, an agent's under the name it gave, or the author who wrote it on the pull request, each of them in a colour of their own and yours in one nobody else is given, your own login among them read back as "you". Hovering says when and where it was written.
 - **Edit** rewrites a remark, or a reply written here, keeping what it said before. A reply carried back from a pull request stands as its author wrote it.
 - **Delete** takes a thread, or its last reply, from the `x` on either. It is the one thing that discards, so it is asked for each time; one already posted goes from the pull request too.
 - **A comment follows its line** when the diff moves under it, reading "moved from L<n>". One whose line has left the diff is kept, marked "code moved on", at the end of the file it belonged to. Neither is ever resolved or deleted on your behalf.

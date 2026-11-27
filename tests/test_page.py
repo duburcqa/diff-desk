@@ -4739,8 +4739,14 @@ def test_going_back_from_a_comment_returns_to_the_place_left(page, desk):
         backs = (lambda: page.locator("body").press("b"), lambda: page.locator("#goback").click())
         for back, left in zip(backs, reversed(places), strict=True):
             back()
+            # A file built at another height than it stood at moves everything below it a moment after the jump, which
+            # fonts make happen on some machines and not others: the place is aimed at until it lands, wherever that is.
+            page.evaluate(
+                "() => setTimeout(() => { document.querySelector('section.file').style.marginTop = '150px'; }, 30)"
+            )
             page.wait_for_timeout(300)
             reached = page.evaluate(standing)
+            page.evaluate("() => { document.querySelector('section.file').style.marginTop = ''; }")
             assert reached[0] == left[0]
             assert abs(reached[1] - left[1]) <= 2
         assert page.locator("#goback").is_disabled()
@@ -4795,6 +4801,7 @@ def test_a_reply_says_whose_it_is_in_its_own_voice(page, desk):
     )["seq"]
     desk.post("/reply", {"seq": made, "text": "said by an agent"}, agent=AGENT)
     desk.post("/reply", {"seq": made, "text": "> quoted\n\nsaid by the reader"})
+    desk.post("/reply", {"seq": made, "text": "said by another agent"}, agent="astra")
     page.reload(wait_until="load")
     page.wait_for_selector(f"#note-{made} .line.reply")
 
@@ -4809,10 +4816,11 @@ def test_a_reply_says_whose_it_is_in_its_own_voice(page, desk):
           }))""",
         made,
     )
-    assert len(told) == 2
-    assert [row["name"] == row["rule"] for row in told] == [True, True]
-    assert [row["name"] != row["words"] for row in told] == [True, True]
-    assert told[0]["name"] != told[1]["name"]
+    assert len(told) == 3
+    assert [row["name"] == row["rule"] for row in told] == [True, True, True]
+    assert [row["name"] != row["words"] for row in told] == [True, True, True]
+    # The reader and each agent in a voice of their own: two agents never read as one.
+    assert len({row["name"] for row in told}) == 3
 
 
 def test_a_reply_pressed_twice_while_it_is_out_is_said_once(page, desk):
@@ -5001,6 +5009,9 @@ def test_the_chat_stands_beside_the_diff_and_names_its_lines(page, desk):
     thread = desk.post("/chat", {"title": title, "text": f"jitter shows on `sample.py:{FIRST_EDIT}`"}, agent=AGENT)[
         "thread"
     ]
+    # Watched by the agent that opened the thread, named where its words are read in their own colour.
+    watching = desk.cli("watch", "--timeout", "30")
+    until(lambda: AGENT in desk.get("/watching")["agents"])
     page.evaluate("() => loadNotes()")
     wide = page.locator("#main").bounding_box()["width"]
 
@@ -5016,6 +5027,27 @@ def test_the_chat_stands_beside_the_diff_and_names_its_lines(page, desk):
     topic.click()
     page.wait_for_selector(".chat .msg")
     assert page.locator(".chat .msg .who").first.inner_text().startswith(AGENT)
+    colour = "(node) => getComputedStyle(node).color"
+    try:
+        named = page.locator("#chatwho .name").filter(has_text=AGENT)
+        named.wait_for()
+        assert named.evaluate(colour) == page.locator(".chat .msg .who").first.evaluate(colour)
+    finally:
+        watching.terminate()
+        watching.wait(timeout=30)
+
+    # The box and its button side by side, and a wheel turned past the end of the messages, or over the box or the head,
+    # leaves the diff behind the chat where it is.
+    box, send = page.locator("#chattext").bounding_box(), page.locator("#chatsend").bounding_box()
+    assert send["x"] >= box["x"] + box["width"] and send["y"] < box["y"] + box["height"]
+    page.locator("#chatrows").evaluate("(talk) => { talk.scrollTop = talk.scrollHeight; }")
+    before = page.evaluate("() => scrollY")
+    for turned in ("#chatrows", "#chattext", "#chatwho"):
+        held = page.locator(turned).bounding_box()
+        page.mouse.move(held["x"] + held["width"] / 2, held["y"] + held["height"] / 2)
+        page.mouse.wheel(0, 600)
+    page.wait_for_timeout(300)
+    assert abs(page.evaluate("() => scrollY") - before) <= 1
 
     # Written from the chat, it is the reader's.
     page.locator("#chattext").fill("on it")
@@ -5065,3 +5097,33 @@ def test_the_file_list_and_the_chat_are_widened_from_their_edge(page):
     page.locator("#chat .head").wait_for()
     assert abs(page.locator("aside").bounding_box()["width"] - widened[0]) <= 2
     assert abs(page.locator("#chat").bounding_box()["width"] - widened[1]) <= 2
+
+
+def test_an_answer_asked_for_before_another_never_replaces_it(page, desk):
+    branch = page.evaluate("() => data.branches[0].ref")
+    # The comments as they stood when the poll asked, handed back only once a later read has been taken.
+    held = []
+
+    def hold(route):
+        if route.request.method == "GET" and not held:
+            held.append((route, route.fetch()))
+        else:
+            route.fallback()
+
+    page.route("**/comments", hold)
+    page.evaluate("() => { window.older = loadNotes(); }")
+    # Waited for through the page, which is what lets the route be handed the request.
+    for _ in range(200):
+        if held:
+            break
+        page.wait_for_timeout(50)
+    assert held
+    saying = f"recorded while an older read was on its way, number {len(desk.get('/comments')) + 1}"
+    made = desk.post(
+        "/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": saying}]
+    )["seqs"][0]
+    page.evaluate("() => loadNotes()")
+    route, stale = held[0]
+    route.fulfill(response=stale)
+    page.evaluate("() => window.older")
+    assert page.evaluate("(seq) => notes.sent.some((note) => note.seq === seq)", made)
