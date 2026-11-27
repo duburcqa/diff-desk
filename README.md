@@ -98,6 +98,17 @@ A sync brings the pull request's own comments in, each carrying its author, so a
 
 Dropped into an agent's skills directory (`~/.claude/skills/diff-desk/`, `~/.codex/skills/diff-desk/`), the flow above needs no explaining - `SKILL.md` tells the agent how to serve a review, wait for comments, and close them out. The desk answers on `127.0.0.1` only, so an agent running in a sandbox needs loopback network access.
 
+## Talking outside the diff
+
+**Chat** in the header opens a column beside the diff: threads by topic between the reader and the agents, each opened under a title, written in the same markdown as comments. `[58]` names a thread of the review, and `` `path` `` or `` `path:line` `` a file or a line of the diff, each a link. A thread with something unread carries a dot, and so does the button. The column pushes the diff over rather than covering it and is as wide as its left edge is dragged; where the window cannot spare the width, or the semantic view needs all of it, it floats over the diff instead.
+
+    python3 desk.py chat                                      # the threads
+    python3 desk.py chat 3                                    # one thread as plain markdown, to keep or read back
+    python3 desk.py say 3 "the jump comes from ..."           # say something in a thread
+    python3 desk.py say --new "Contact jitter" "..."          # open one
+
+A watch hears the chat too. A message wakes an agent when it opens a thread, when the agent has spoken in its thread, or when it names the agent as `@name`.
+
 ## Where things live
 
 State is `~/.claude/diff-desk/`, overridden with `DIFF_DESK_HOME`; the port is `DIFF_DESK_PORT`. What comments carry is kept in `media/` beside the log, one file named by the digest of what it holds, and stays there when a comment goes: nothing another comment, or an earlier wording of one, still names can vanish under it. One log holds every review the desk has served, each comment recording which pull request it was sent to, so posting, resolving or syncing one review never reaches another's comments.
@@ -110,7 +121,7 @@ A local branch is the pull request opened from where it is pushed, the owner and
 
 | file | what it is |
 | --- | --- |
-| `desk.py` | the entry point: `serve`, `stop`, `watch`, `comments`, `reply`, `edit`, `resolve`, `bind`, `sync`, `refs` |
+| `desk.py` | the entry point: `serve`, `stop`, `watch`, `comments`, `remark`, `reply`, `edit`, `resolve`, `bind`, `publish`, `sync`, `chat`, `say`, `refs` |
 | `gen_diff_data.py` | turns a git range into the payload a page renders: hunks, digests, pull request threads |
 | `serve_diff.py` | the local server: the page, rescans, file slices, comments, resolutions, pull request posts |
 | `semantic.py` | the semantic view: Python statements matched across the old and new files, laid out in two columns |

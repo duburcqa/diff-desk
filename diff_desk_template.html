@@ -848,7 +848,7 @@
   .thread .who .by.you { color: var(--add-ink); }
   .thread .who .by.them { color: var(--stale); }
   .thread .who .by.agent { color: var(--accent); }
-  .thread .said { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: normal; color: var(--ink); }
+  :is(.thread, .talk) .said { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: normal; color: var(--ink); }
   .thread .reacts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
   .thread .react {
     font: inherit;
@@ -868,27 +868,27 @@
   .thread .react:disabled { cursor: default; }
   /* What is said reads as text set in blocks: the first paragraph runs on from the name that opens it, and every block
      after it starts on a line of its own, a little apart from the one above. */
-  .thread .said p { margin: 6px 0 0; }
+  :is(.thread, .talk) .said p { margin: 6px 0 0; }
   /* The text box holds paragraphs, tables and code blocks, which an inline box can only hold split around them, and
      Safari sizes that split before a code block grows by its scrollbar, which then covers the line below. Without a
      box of its own, what it holds is laid out by the block saying it. */
-  .thread .said .text { display: contents; }
-  .thread .said .text > p:first-child { display: inline; }
-  .thread .said .heading { margin-top: 10px; font-weight: 600; }
-  .thread .said .heading.h1, .thread .said .heading.h2 { font-size: 13.5px; }
-  .thread .said > .text > .heading:first-child { margin-top: 2px; }
+  :is(.thread, .talk) .said .text { display: contents; }
+  :is(.thread, .talk) .said .text > p:first-child { display: inline; }
+  :is(.thread, .talk) .said .heading { margin-top: 10px; font-weight: 600; }
+  :is(.thread, .talk) .said .heading.h1, :is(.thread, .talk) .said .heading.h2 { font-size: 13.5px; }
+  :is(.thread, .talk) .said > .text > .heading:first-child { margin-top: 2px; }
   /* A list hangs its items off their markers, so a long item wraps under its own words rather than under the dash. */
-  .thread .said ul, .thread .said ol { margin: 4px 0 0; padding-left: 20px; }
-  .thread .said li { margin: 1px 0; padding-left: 2px; }
-  .thread .said li > ul, .thread .said li > ol { margin-top: 1px; }
+  :is(.thread, .talk) .said ul, :is(.thread, .talk) .said ol { margin: 4px 0 0; padding-left: 20px; }
+  :is(.thread, .talk) .said li { margin: 1px 0; padding-left: 2px; }
+  :is(.thread, .talk) .said li > ul, :is(.thread, .talk) .said li > ol { margin-top: 1px; }
   /* An item holding points of its own is a section of the list, so the next one is set a little apart from it. */
-  .thread .said li:has(> ul, > ol) + li { margin-top: 6px; }
-  .thread .said li > p { margin-top: 3px; }
-  .thread .said ul.loose > li + li, .thread .said ol.loose > li + li { margin-top: 5px; }
-  .thread .said ol > li::marker { color: var(--muted); font-variant-numeric: tabular-nums; }
-  .thread .said ul > li::marker { color: var(--muted); }
-  .thread .said li.task { list-style: none; margin-left: -18px; }
-  .thread .said .tick {
+  :is(.thread, .talk) .said li:has(> ul, > ol) + li { margin-top: 6px; }
+  :is(.thread, .talk) .said li > p { margin-top: 3px; }
+  :is(.thread, .talk) .said ul.loose > li + li, :is(.thread, .talk) .said ol.loose > li + li { margin-top: 5px; }
+  :is(.thread, .talk) .said ol > li::marker { color: var(--muted); font-variant-numeric: tabular-nums; }
+  :is(.thread, .talk) .said ul > li::marker { color: var(--muted); }
+  :is(.thread, .talk) .said li.task { list-style: none; margin-left: -18px; }
+  :is(.thread, .talk) .said .tick {
     display: inline-block;
     width: 11px;
     height: 11px;
@@ -899,26 +899,26 @@
     box-sizing: border-box;
     background: var(--surface);
   }
-  .thread .said .tick[data-checked="true"] {
+  :is(.thread, .talk) .said .tick[data-checked="true"] {
     border-color: var(--accent);
     background: var(--accent);
     box-shadow: inset 0 0 0 2px var(--surface);
   }
-  .thread .said .inset { white-space: pre; }
-  .thread .said hr { margin: 8px 0 2px; border: 0; border-top: 1px solid var(--rule-strong); }
+  :is(.thread, .talk) .said .inset { white-space: pre; }
+  :is(.thread, .talk) .said hr { margin: 8px 0 2px; border: 0; border-top: 1px solid var(--rule-strong); }
   /* An overlay scrollbar takes no room of its own and is drawn over the last row it scrolls, flashed there as the
      table first shows: the padding is the room it is drawn into instead. */
-  .thread .said .grid { margin-top: 6px; padding-bottom: 10px; overflow-x: auto; }
-  .thread .said table { border-collapse: collapse; font-size: 12px; }
-  .thread .said th, .thread .said td {
+  :is(.thread, .talk) .said .grid { margin-top: 6px; padding-bottom: 10px; overflow-x: auto; }
+  :is(.thread, .talk) .said table { border-collapse: collapse; font-size: 12px; }
+  :is(.thread, .talk) .said th, :is(.thread, .talk) .said td {
     padding: 3px 9px;
     text-align: left;
     vertical-align: top;
     border: 1px solid var(--rule-strong);
   }
-  .thread .said th { font-weight: 600; background: var(--surface-sunk); }
-  .thread .said tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--surface-sunk) 45%, transparent); }
-  .thread .said pre {
+  :is(.thread, .talk) .said th { font-weight: 600; background: var(--surface-sunk); }
+  :is(.thread, .talk) .said tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--surface-sunk) 45%, transparent); }
+  :is(.thread, .talk) .said pre {
     margin: 4px 0;
     /* Room below the last line for an overlay scrollbar, as for a table (see .grid). */
     padding: 6px 8px 12px;
@@ -928,8 +928,8 @@
     border-radius: 6px;
   }
   /* The padding of inline code stands before the first line of a block alone, which would set it apart from the rest. */
-  .thread .said pre code { padding: 0; font-family: var(--mono); font-size: 11.5px; white-space: pre; }
-  .thread .said pre[data-label]::before {
+  :is(.thread, .talk) .said pre code { padding: 0; font-family: var(--mono); font-size: 11.5px; white-space: pre; }
+  :is(.thread, .talk) .said pre[data-label]::before {
     content: attr(data-label);
     display: block;
     margin-bottom: 4px;
@@ -937,9 +937,9 @@
     font-family: var(--sans);
     font-size: 11px;
   }
-  .thread .said details { margin: 4px 0; }
-  .thread .said summary { color: var(--muted); cursor: pointer; }
-  .thread .said code {
+  :is(.thread, .talk) .said details { margin: 4px 0; }
+  :is(.thread, .talk) .said summary { color: var(--muted); cursor: pointer; }
+  :is(.thread, .talk) .said code {
     padding: 0 3px;
     font-family: var(--mono);
     font-size: 11.5px;
@@ -1008,14 +1008,14 @@
     opacity: 0;
   }
   .dot[data-on="true"] { opacity: 1; }
-  .thread blockquote, .whisper blockquote {
+  :is(.thread, .talk) blockquote, .whisper blockquote {
     display: block;
     margin: 4px 0;
     padding: 1px 0 1px 9px;
     border-left: 2px solid var(--rule-strong);
     color: var(--muted);
   }
-  .thread blockquote > p:first-child, .whisper blockquote > p:first-child { margin-top: 0; }
+  :is(.thread, .talk) blockquote > p:first-child, .whisper blockquote > p:first-child { margin-top: 0; }
   .thread.stale { border-style: dotted; background: var(--stale-bg); }
   .thread.found { outline: 2px solid var(--accent); outline-offset: 1px; }
   body.hide-done .file[data-done="true"][data-reveal="true"] { display: block; }
@@ -1321,6 +1321,79 @@
   .empty { padding: 40px 8px; color: var(--muted); text-align: center; }
   kbd { font-family: var(--mono); font-size: 10.5px; padding: 1px 5px; border: 1px solid var(--rule-strong); border-bottom-width: 2px; border-radius: 4px; background: var(--surface); color: var(--muted); }
   .hint { padding: 8px 4px 10px; color: var(--faint); font-size: 11px; line-height: 1.8; }
+
+  /* The chat: a column of its own beside the diff, pushing it over rather than covering it, as wide as the reader drags
+     it. Where the window cannot spare the width, or the semantic view needs all of it, it floats over the diff instead. */
+  .chat { display: none; }
+  body.chat-open .shell { grid-template-columns: minmax(240px, 300px) minmax(0, 1fr) var(--chat-width, 420px); }
+  body.chat-open.hide-files .shell { grid-template-columns: 28px minmax(0, 1fr) var(--chat-width, 420px); }
+  body.chat-open .chat {
+    position: sticky;
+    top: var(--head);
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - var(--head));
+    min-width: 0;
+    background: var(--surface);
+    border-left: 1px solid var(--rule);
+  }
+  @media (max-width: 1100px) {
+    body.chat-open .shell { grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); }
+    body.chat-open.hide-files .shell { grid-template-columns: 28px minmax(0, 1fr); }
+    body.chat-open .chat { position: fixed; right: 0; bottom: 0; z-index: 44; width: min(var(--chat-width, 420px), 100vw); height: auto; box-shadow: var(--shadow); }
+  }
+  @media (max-width: 900px) {
+    body.chat-open .shell, body.chat-open.hide-files .shell { grid-template-columns: minmax(0, 1fr); }
+  }
+  body.chat-open.semantic .shell { grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); }
+  body.chat-open.semantic.hide-files .shell { grid-template-columns: 28px minmax(0, 1fr); }
+  body.chat-open.semantic .chat { position: fixed; right: 0; bottom: 0; z-index: 44; width: min(var(--chat-width, 420px), 100vw); height: auto; box-shadow: var(--shadow); }
+  .chat .grip { position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 1; }
+  .chat .grip:hover, .chat .grip.held { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+  .chat .head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--rule); }
+  .chat .head strong { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
+  .chat .present { padding: 6px 12px; color: var(--muted); font-size: 11.5px; border-bottom: 1px solid var(--rule); }
+  .chat .talk { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
+  .chat .topic {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    position: relative;
+    padding: 8px 10px;
+    text-align: left;
+    font: inherit;
+    color: var(--ink);
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .chat .topic:hover { border-color: var(--accent); }
+  .chat .topic b { font-size: 13px; font-weight: 600; }
+  .chat .topic small { color: var(--muted); font-size: 11.5px; }
+  .chat .topic .dot { top: 8px; right: 8px; }
+  .chat .msg { padding-left: 10px; border-left: 2px solid currentColor; }
+  .chat .msg.you { color: var(--add-ink); }
+  .chat .msg.agent { color: var(--accent); }
+  .chat .msg.them { color: var(--stale); }
+  .chat .msg .who { font-size: 11.5px; font-weight: 600; }
+  .chat .msg .who .at { margin-left: 6px; color: var(--faint); font-weight: 400; }
+  .chat .msg .said { color: var(--ink); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+  .chat .msg .said .text > p:first-child { margin-top: 2px; }
+  .chat .say { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-top: 1px solid var(--rule); }
+  .chat .say input, .chat .say textarea {
+    font: inherit;
+    font-size: 13px;
+    color: var(--ink);
+    background: var(--surface);
+    border: 1px solid var(--rule-strong);
+    border-radius: 6px;
+    padding: 6px 8px;
+  }
+  .chat .say textarea { min-height: 64px; resize: vertical; }
+  .chat .say .actions { display: flex; align-items: center; gap: 8px; }
+  .chat .say .status { flex: 1; min-width: 0; color: var(--muted); font-size: 11.5px; }
+  .chat .empty { padding: 24px 8px; }
 </style>
 
 <header data-built="__BUILD__">
@@ -1374,6 +1447,7 @@
       </svg>
     </button>
   </span>
+  <button class="toggle" id="chatopen" aria-pressed="false" data-tip="Talk with the agents on this desk">Chat<i class="dot" id="chatdot" aria-hidden="true"></i></button>
   <button class="toggle" id="logopen" data-tip="Every comment recorded, and where each one stands">Comments<i class="dot" id="logdot" aria-hidden="true"></i></button>
   <button class="solid" id="moved" disabled data-tip="Refresh the diffs once the branch has moved on">Refresh</button>
   <div id="loading" aria-hidden="true"></div>
@@ -1513,6 +1587,26 @@
     </div>
   </aside>
   <main id="main"></main>
+  <section class="chat" id="chat" aria-label="Chat">
+    <div class="grip" id="chatgrip" data-tip="Drag to widen the chat"></div>
+    <div class="head">
+      <button class="ghost" id="chatback" hidden>Threads</button>
+      <strong id="chattitle">Chat</strong>
+      <button class="ghost" id="chatcopy" hidden data-tip="Copy this thread as plain text">Copy</button>
+      <button class="ghost" id="chatnew">New thread</button>
+      <button class="ghost" id="chatclose">Close</button>
+    </div>
+    <div class="present" id="chatwho"></div>
+    <div class="talk" id="chatrows"></div>
+    <form class="say" id="chatsay">
+      <input id="chatname" type="text" placeholder="What the thread is about" aria-label="Title of the new thread" hidden />
+      <textarea id="chattext" placeholder="Markdown. [N] names a comment, `path:line` a line of the diff, @name an agent" aria-label="Message"></textarea>
+      <div class="actions">
+        <span class="status" id="chatresult"></span>
+        <button class="solid" id="chatsend" type="submit">Send</button>
+      </div>
+    </form>
+  </section>
 </div>
 
 <script id="data" type="application/json">__DIFF_DATA__</script>
@@ -1523,6 +1617,9 @@
   const state = { branch: 0, scope: "all", current: 0, reached: null };
   // `watching` names the agents the desk says are waiting on it, read with the comments.
   const notes = { sent: [], drafts: [], live: false, watching: [] };
+  // The chat: every message the desk holds, the thread on screen (null for the list of threads, "new" while one is
+  // being opened), and per thread the last message the reader has had on screen, kept in this browser.
+  const chat = { messages: [], open: null, read: {}, drawn: null, drawnThread: null };
   // A selection is a span of rendered rows, held as the row order within the file rather than as line numbers on one
   // side, which is what lets one range cover removed and added lines together.
   const sel = { path: null, from: null, to: null };
@@ -1556,7 +1653,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "goback", "foldreviewed", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "loading", "goto", "veil", "palette", "pq", "picks", "find", "fgrip", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "fthreads", "toast", "toastwhere", "toastsaid", "toastmark", "logdot"]) {
+  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "goback", "foldreviewed", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "loading", "goto", "veil", "palette", "pq", "picks", "find", "fgrip", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "fthreads", "toast", "toastwhere", "toastsaid", "toastmark", "logdot", "chatopen", "chatdot", "chat", "chatgrip", "chatback", "chattitle", "chatcopy", "chatnew", "chatclose", "chatwho", "chatrows", "chatsay", "chatname", "chattext", "chatsend", "chatresult"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -1599,6 +1696,7 @@
   function keepChoices() {
     const choices = {
       log: els.log.dataset.open === "true",
+      chat: document.body.classList.contains("chat-open"),
       sort: els.logsort.value,
       hideDone: els.hidedone.getAttribute("aria-pressed") === "true",
       hideFiles: els.hidefiles.getAttribute("aria-pressed") === "true",
@@ -1625,6 +1723,15 @@
       choices = {};
     }
     els.log.dataset.open = String(Boolean(choices.log));
+    document.body.classList.toggle("chat-open", Boolean(choices.chat));
+    els.chatopen.setAttribute("aria-pressed", String(Boolean(choices.chat)));
+    try {
+      chat.read = JSON.parse(localStorage.getItem("diffdesk.chatRead") || "{}");
+      const width = Number(localStorage.getItem("diffdesk.chatWidth"));
+      if (width) document.documentElement.style.setProperty("--chat-width", `${width}px`);
+    } catch (error) {
+      chat.read = {};
+    }
     els.logsort.value = choices.sort === "thread" ? "thread" : "batch";
     els.hidedone.setAttribute("aria-pressed", String(Boolean(choices.hideDone)));
     document.body.classList.toggle("hide-done", Boolean(choices.hideDone));
@@ -2149,18 +2256,160 @@
   async function loadNotes() {
     if (leaving) return;
     try {
-      const [response, watched] = await Promise.all([
+      const [response, watched, talked] = await Promise.all([
         ask("comments", { cache: "no-store" }),
         ask("watching", { cache: "no-store" }),
+        ask("chat", { cache: "no-store" }),
       ]);
       if (!response.ok) throw new Error("no endpoint");
       notes.sent = await response.json();
       notes.watching = watched.ok ? (await watched.json()).agents : [];
+      if (talked.ok) chat.messages = (await talked.json()).messages;
       notes.live = true;
+      drawChat();
     } catch (error) {
       // The desk is not answering. What it said last stays on screen, and the next round asks again.
       notes.live = false;
     }
+  }
+
+  // The threads of the chat by number, each the list of its messages, the one opening it first.
+  function chatThreads() {
+    const threads = new Map();
+    for (const message of chat.messages) {
+      if (!threads.has(message.thread)) threads.set(message.thread, []);
+      threads.get(message.thread).push(message);
+    }
+    return threads;
+  }
+
+  // What in a thread the reader has not had on screen: what anyone else said past the last message they were shown.
+  const unreadIn = (thread) =>
+    thread.filter((message) => !isReader(message.who) && message.id > (chat.read[message.thread] || 0)).length;
+
+  function keepChatRead() {
+    try {
+      localStorage.setItem("diffdesk.chatRead", JSON.stringify(chat.read));
+    } catch (error) {
+      // Kept for the next reload alone: a storage that refuses it shows the chat's threads as unread once more.
+    }
+  }
+
+  function drawChat() {
+    const threads = chatThreads();
+    const isOpen = document.body.classList.contains("chat-open");
+    if (isOpen && typeof chat.open === "number" && threads.has(chat.open)) {
+      const thread = threads.get(chat.open);
+      chat.read[chat.open] = thread[thread.length - 1].id;
+      keepChatRead();
+    }
+    els.chatdot.dataset.on = String([...threads.values()].some((thread) => unreadIn(thread) > 0));
+    els.chatwho.textContent = !notes.live
+      ? "The desk is not answering"
+      : notes.watching.length
+        ? `Watching: ${notes.watching.join(", ")}`
+        : "No agent watching";
+    const isThread = typeof chat.open === "number" && threads.has(chat.open);
+    const isNew = chat.open === "new";
+    els.chatback.hidden = !isThread && !isNew;
+    els.chatcopy.hidden = !isThread;
+    // Within a thread the way to a new one is back through the list, which leaves the title the room to be read.
+    els.chatnew.hidden = isNew || isThread;
+    els.chatname.hidden = !isNew;
+    els.chattitle.textContent = isThread ? threads.get(chat.open)[0].title || "Untitled" : isNew ? "New thread" : "Chat";
+    // Drawn again only for what moved, so a thread being read keeps its place between two rounds that heard nothing.
+    const shown = JSON.stringify([chat.open, chat.messages.length, isThread ? null : chat.read, data.viewer]);
+    if (shown === chat.drawn) return;
+    const atFoot = els.chatrows.scrollHeight - els.chatrows.scrollTop - els.chatrows.clientHeight < 40;
+    chat.drawn = shown;
+    els.chatrows.replaceChildren();
+    if (isThread) {
+      for (const message of threads.get(chat.open)) {
+        const line = document.createElement("div");
+        line.className = `msg ${voiceOf(message.who)}`;
+        const who = line.appendChild(document.createElement("div"));
+        who.className = "who";
+        who.textContent = spokenBy(message.who);
+        const at = who.appendChild(document.createElement("span"));
+        at.className = "at";
+        at.textContent = said(message.at);
+        const words = line.appendChild(document.createElement("div"));
+        words.className = "said";
+        written(words.appendChild(spoke()), message.text);
+        els.chatrows.append(line);
+      }
+      // The latest word is what a thread is opened for, and where a reader at the foot of it stays as it grows.
+      if (atFoot || chat.drawnThread !== chat.open) els.chatrows.scrollTop = els.chatrows.scrollHeight;
+      chat.drawnThread = chat.open;
+      return;
+    }
+    chat.drawnThread = null;
+    if (isNew) return;
+    const listed = [...threads.values()].sort((first, second) => second.at(-1).id - first.at(-1).id);
+    if (!listed.length) {
+      const empty = els.chatrows.appendChild(document.createElement("div"));
+      empty.className = "empty";
+      empty.textContent = "Nothing said yet. A new thread is how a conversation starts.";
+    }
+    for (const thread of listed) {
+      const topic = document.createElement("button");
+      topic.type = "button";
+      topic.className = "topic";
+      topic.dataset.thread = String(thread[0].thread);
+      topic.append(Object.assign(document.createElement("b"), { textContent: thread[0].title || "Untitled" }));
+      const last = thread[thread.length - 1];
+      const count = `${thread.length} message${thread.length === 1 ? "" : "s"}`;
+      topic.append(
+        Object.assign(document.createElement("small"), {
+          textContent: `${count}, last by ${spokenBy(last.who)}, ${said(last.at)}`,
+        }),
+      );
+      const dot = topic.appendChild(document.createElement("i"));
+      dot.className = "dot";
+      dot.dataset.on = String(unreadIn(thread) > 0);
+      topic.addEventListener("click", () => openChat(thread[0].thread));
+      els.chatrows.append(topic);
+    }
+  }
+
+  function openChat(where) {
+    chat.open = where;
+    els.chatresult.textContent = "";
+    drawChat();
+    (where === "new" ? els.chatname : els.chattext).focus();
+  }
+
+  function showChat(open) {
+    document.body.classList.toggle("chat-open", open);
+    els.chatopen.setAttribute("aria-pressed", String(open));
+    keepChoices();
+    chat.drawn = null;
+    drawChat();
+  }
+
+  async function sayInChat(event) {
+    event.preventDefault();
+    const text = els.chattext.value.trim();
+    if (!text) return;
+    const isNew = chat.open === "new";
+    const title = els.chatname.value.trim();
+    if (isNew && !title) {
+      els.chatresult.textContent = "A new thread needs a title";
+      els.chatname.focus();
+      return;
+    }
+    els.chatsend.disabled = true;
+    const outcome = await post("chat", isNew ? { title, text } : { thread: chat.open, text });
+    els.chatsend.disabled = false;
+    if (!outcome.ok) {
+      els.chatresult.textContent = outcome.error || "not sent";
+      return;
+    }
+    els.chattext.value = "";
+    els.chatname.value = "";
+    els.chatresult.textContent = "";
+    chat.open = outcome.thread;
+    await loadNotes();
   }
 
   function showStatus(staleCount) {
@@ -2440,16 +2689,20 @@
     return draftKeys.get(draft);
   }
 
+  function keepPlace() {
+    // Where the reader stands, kept so that going back returns there. Taken only from a reader at rest: a jump made
+    // while the last one is still landing starts from nowhere they read.
+    if (reaching) return;
+    const covered = document.querySelector("header").getBoundingClientRect().bottom;
+    const under = [...document.querySelectorAll("section.file")].find(
+      (card) => card.getBoundingClientRect().bottom > covered,
+    );
+    if (under) returns.push({ path: under.dataset.path, into: covered - under.getBoundingClientRect().top });
+    els.goback.disabled = false;
+  }
+
   function reach(note) {
-    // Taken only from a reader at rest: a jump made while the last one is still landing starts from nowhere they read.
-    if (!reaching) {
-      const covered = document.querySelector("header").getBoundingClientRect().bottom;
-      const under = [...document.querySelectorAll("section.file")].find(
-        (card) => card.getBoundingClientRect().bottom > covered,
-      );
-      if (under) returns.push({ path: under.dataset.path, into: covered - under.getBoundingClientRect().top });
-      els.goback.disabled = false;
-    }
+    keepPlace();
     // The thread reached before is let go of, or it would stay shown whatever the header hides until it is drawn again.
     letGo();
     // Going to a thread is going to read it, so a resolved one is shown whole for as long as the reader keeps it.
@@ -3341,7 +3594,23 @@
       if (index % 2) {
         const code = document.createElement("code");
         code.textContent = codes[Number(piece)];
-        into.append(code);
+        // A file of the diff written as its path goes to that file, and `path:line` to that line of it.
+        const place = code.textContent.match(/^([\w./-]+)(?::(\d+)(?:-\d+)?)?$/);
+        const file = place && view().files.find((held) => held.path === place[1]);
+        if (file) {
+          const anchor = document.createElement("a");
+          anchor.className = "xref";
+          anchor.href = "#";
+          anchor.dataset.tip = place[2] ? `Go to line ${place[2]} of ${file.path}` : `Go to ${file.path}`;
+          anchor.append(code);
+          anchor.addEventListener("click", (event) => {
+            event.preventDefault();
+            reachLine(file.path, place[2] ? Number(place[2]) : null, "new");
+          });
+          into.append(anchor);
+        } else {
+          into.append(code);
+        }
       } else if (piece) {
         into.append(document.createTextNode(piece));
       }
@@ -5815,14 +6084,19 @@
     }
   }
 
-  // Takes the reader to a line of a file in the semantic view, unfolding whatever holds it.
+  // Takes the reader to a line of a file, in the semantic view or the line view, unfolding whatever holds it. Where the
+  // reader stood is kept, so going back returns there, and the file stays open through the redraws that follow.
   function reachLine(path, line, side) {
     const wrap = document.querySelector(`section.file[data-path="${CSS.escape(path)}"]`);
     if (!wrap) return;
+    keepPlace();
+    letGo();
     wrap.dataset.open = "true";
+    folds.set(path, { digest: wrap.dataset.digest, open: true, upTo: latest() });
     const held = drawn.get(wrap);
     if (held) fillBody(wrap, held.file, held.index);
-    const row = wrap.querySelector(`tr[data-${side}-no="${line}"]`);
+    const row =
+      wrap.querySelector(`tr[data-${side}-no="${line}"]`) || wrap.querySelector(`tr[data-line="${line}"][data-side="${side}"]`);
     if (!row) {
       wrap.scrollIntoView({ block: "start" });
       return;
@@ -6842,6 +7116,45 @@
   els.srcscan.addEventListener("click", () => rescan(false));
   els.moved.addEventListener("click", () => rescan(true));
   els.traysend.addEventListener("click", submitReview);
+  els.chatopen.addEventListener("click", () => showChat(!document.body.classList.contains("chat-open")));
+  els.chatclose.addEventListener("click", () => showChat(false));
+  els.chatnew.addEventListener("click", () => openChat("new"));
+  els.chatback.addEventListener("click", () => openChat(null));
+  els.chatsay.addEventListener("submit", sayInChat);
+  els.chattext.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) sayInChat(event);
+  });
+  els.chatcopy.addEventListener("click", async () => {
+    // The thread as the desk exports it, which is the text an agent keeps of a conversation.
+    try {
+      const answer = await ask(`chat/export?thread=${chat.open}`, { cache: "no-store" });
+      await navigator.clipboard.writeText(await answer.text());
+      els.chatresult.textContent = "Thread copied as text";
+    } catch (error) {
+      els.chatresult.textContent = `not copied: ${error.message}`;
+    }
+  });
+  els.chatgrip.addEventListener("pointerdown", (event) => {
+    // Dragged from its left edge, as the find box is, and kept for the next reload.
+    event.preventDefault();
+    els.chatgrip.setPointerCapture(event.pointerId);
+    els.chatgrip.classList.add("held");
+    const widen = (moved) => {
+      const width = Math.min(Math.max(window.innerWidth - moved.clientX, 300), Math.max(300, window.innerWidth - 480));
+      document.documentElement.style.setProperty("--chat-width", `${Math.round(width)}px`);
+    };
+    const leave = () => {
+      els.chatgrip.classList.remove("held");
+      els.chatgrip.removeEventListener("pointermove", widen);
+      try {
+        localStorage.setItem("diffdesk.chatWidth", String(parseFloat(getComputedStyle(els.chat).width)));
+      } catch (error) {
+        // The width is the reader's for this page alone.
+      }
+    };
+    els.chatgrip.addEventListener("pointermove", widen);
+    els.chatgrip.addEventListener("pointerup", leave, { once: true });
+  });
   els.logopen.addEventListener("click", () => {
     els.log.dataset.open = els.log.dataset.open === "true" ? "false" : "true";
     keepChoices();
@@ -6935,7 +7248,8 @@
   // loses it, and the fields of the bar and the find bar stand outside what is redrawn.
   function quiet() {
     const typing = document.activeElement;
-    if (!typing || !typing.matches("textarea")) return true;
+    // The chat stands outside what is redrawn, as the fields of the bar do.
+    if (!typing || !typing.matches("textarea") || els.chat.contains(typing)) return true;
     return els.main.contains(typing) && Boolean(typing.closest("tr[data-composer], .filenote.writing, .line.actions.aside"));
   }
 

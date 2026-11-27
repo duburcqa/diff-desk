@@ -4994,3 +4994,43 @@ def test_the_file_list_follows_the_file_scrolled_onto(page):
         page.wait_for_function(f"(path) => ({current})() === path", arg=first)
     finally:
         page.evaluate("() => document.body.classList.remove('hide-done')")
+
+
+def test_the_chat_stands_beside_the_diff_and_names_its_lines(page, desk):
+    title = f"Beside the diff, number {len(desk.get('/chat')['messages']) + 1}"
+    thread = desk.post("/chat", {"title": title, "text": f"jitter shows on `sample.py:{FIRST_EDIT}`"}, agent=AGENT)[
+        "thread"
+    ]
+    page.evaluate("() => loadNotes()")
+    wide = page.locator("#main").bounding_box()["width"]
+
+    # A column of its own, which pushes the diff over rather than covering any of it.
+    page.locator("#chatopen").click()
+    topic = page.locator(f".chat .topic[data-thread='{thread}']")
+    topic.wait_for()
+    narrow, beside = page.locator("#main").bounding_box(), page.locator("#chat").bounding_box()
+    assert narrow["width"] < wide - 300
+    assert narrow["x"] + narrow["width"] <= beside["x"] + 1
+    # What an agent said and the reader has not had on screen is marked, until the thread is opened.
+    assert topic.locator(".dot").get_attribute("data-on") == "true"
+    topic.click()
+    page.wait_for_selector(".chat .msg")
+    assert page.locator(".chat .msg .who").first.inner_text().startswith(AGENT)
+
+    # Written from the chat, it is the reader's.
+    page.locator("#chattext").fill("on it")
+    page.locator("#chatsend").click()
+    page.wait_for_function("() => document.querySelectorAll('.chat .msg').length === 2")
+    said = [message for message in desk.get("/chat")["messages"] if message["thread"] == thread]
+    assert (said[-1]["who"], said[-1]["text"]) == ("you", "on it")
+
+    # A line of the diff named in backticks goes to that line.
+    page.locator(".chat .msg a.xref").first.click()
+    page.wait_for_selector(f"section.file[data-path='sample.py'] tr.flash[data-line='{FIRST_EDIT}']")
+
+    page.locator("#chatback").click()
+    assert page.locator(f".chat .topic[data-thread='{thread}'] .dot").get_attribute("data-on") == "false"
+    # Left open, it is open again on the next load.
+    page.reload(wait_until="load")
+    page.wait_for_selector(f".chat .topic[data-thread='{thread}']")
+    assert page.locator("#chatopen").get_attribute("aria-pressed") == "true"

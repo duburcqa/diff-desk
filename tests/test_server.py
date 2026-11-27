@@ -2021,6 +2021,74 @@ def test_watching_hears_everything_said_not_only_the_first(desk):
     assert json.loads(stopped.read_text())[mine]["desk"] == desk.get("/serving")["desk"]
 
 
+def test_the_chat_holds_threads_between_the_reader_and_the_agents(desk):
+    start = max(
+        [row["event"] for row in desk.get("/comments")] + [said["event"] for said in desk.get("/chat")["messages"]],
+        default=0,
+    )
+    # A thread is opened under a title, by whoever writes its first message, and answered by anyone.
+    opened = desk.post(
+        "/chat", {"title": "Jitter on contact", "text": "| case | mm |\n|---|---|\n| a | 0.8 |"}, agent=AGENT
+    )
+    thread = opened["thread"]
+    assert opened["id"] == thread
+    desk.post("/chat", {"thread": thread, "text": "measured on main too?"})
+    desk.post("/chat", {"thread": thread, "text": "yes, same numbers", "who": "you"}, agent="astra")
+    said = [message for message in desk.get("/chat")["messages"] if message["thread"] == thread]
+    assert [(message["who"], message["text"]) for message in said[1:]] == [
+        ("you", "measured on main too?"),
+        ("agent:astra", "yes, same numbers"),
+    ]
+    assert said[0]["title"] == "Jitter on contact"
+    # Stamped on the cursor the comments move, so one watch follows both in order.
+    assert [message["event"] for message in said] == sorted(message["event"] for message in said)
+    assert said[0]["event"] > start
+
+    # A thread is found by its title, so one without is refused, as is a message for a thread that does not exist.
+    assert desk.post("/chat", {"text": "about what?"}, agent=AGENT)["ok"] is False
+    assert desk.post("/chat", {"thread": 99999, "text": "nowhere"}, agent=AGENT)["ok"] is False
+    assert desk.post("/chat", {"thread": thread, "text": "  "}, agent=AGENT)["ok"] is False
+
+    # A message wakes an agent that has spoken in its thread, every agent when it opens one, and an agent it names.
+    elsewhere = desk.post("/chat", {"title": "Naming", "text": "eventBy or author?"})["thread"]
+    woken = desk.get(f"/news?since={start}", agent=AGENT)["chat"]
+    assert [message["text"] for message in woken] == [
+        "measured on main too?",
+        "yes, same numbers",
+        "eventBy or author?",
+    ]
+    assert woken[0]["title"] == "Jitter on contact"
+    desk.post("/chat", {"thread": elsewhere, "text": "author reads better"}, agent="astra")
+    caught_up = max(message["event"] for message in woken)
+    assert desk.get(f"/news?since={caught_up}", agent=AGENT)["chat"] == []
+    desk.post("/chat", {"thread": elsewhere, "text": f"@{AGENT}, any view?"}, agent="astra")
+    assert [message["text"] for message in desk.get(f"/news?since={caught_up}", agent=AGENT)["chat"]] == [
+        f"@{AGENT}, any view?"
+    ]
+
+    # A thread reads back as plain text, which is what an agent keeps of a conversation.
+    exported = desk.cli("chat", str(thread)).communicate(timeout=60)[0]
+    assert exported.startswith("# Jitter on contact\n")
+    assert f"## {AGENT}, " in exported and "## you, " in exported and "## astra, " in exported
+    assert "| a | 0.8 |" in exported
+    listed = desk.cli("chat").communicate(timeout=60)[0]
+    assert f"[{thread}] Jitter on contact - 3 message(s), last by astra" in listed
+
+    # Said from the command line, and heard by a watch, which prints the message under its thread.
+    watching = desk.cli("watch", "--once", "--since", str(caught_up), "--timeout", "20", agent="astra")
+    try:
+        until(lambda: "astra" in desk.get("/watching")["agents"])
+        told = desk.cli("say", str(elsewhere), "settled:", "`author`")
+        assert told.communicate(timeout=60)[0].startswith("said [")
+        heard = watching.communicate(timeout=40)[0]
+    finally:
+        watching.terminate()
+    assert f"chat [{elsewhere}] Naming" in heard
+    assert f"{AGENT} " in heard and "settled: `author`" in heard
+    refused = desk.cli("say", "settled")
+    assert "name the thread" in refused.communicate(timeout=60)[0] and refused.returncode != 0
+
+
 def test_the_desk_updates_itself_over_https_when_ssh_cannot_be_reached(tmp_path):
     # A published copy of the desk to update from, and a checkout of it whose remote is an address SSH cannot reach.
     published, here = tmp_path / "published", tmp_path / "here"

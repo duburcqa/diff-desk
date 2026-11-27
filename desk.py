@@ -21,6 +21,10 @@ desk.py publish 3 4                                  send those threads to it wh
 desk.py sync                                         bring back what the pull request holds
 desk.py resolve 3 4 --answer "fixed in abc1234"      answer and close; --reopen puts them back
 desk.py refs --dir <repo> --base <ref>               the branches ahead of a base, and the open pull requests
+desk.py chat                                         the threads of the chat, newest last
+desk.py chat 3                                       one thread of the chat, as plain text to keep or read back
+desk.py say 3 "..."                                  say something in a thread of the chat
+desk.py say --new "title" "..."                      open a thread of the chat
 """
 
 import argparse
@@ -313,7 +317,7 @@ def stop(args):
     print("stopped")
 
 
-def resume_from(asked, stopped, waiting, sent):
+def resume_from(asked, stopped, waiting, latest):
     """Where a watch picks up: what it was told to read from, else where the last one stopped, else before the oldest
     thing still open, else the end of what has been said."""
     if asked is not None:
@@ -322,7 +326,7 @@ def resume_from(asked, stopped, waiting, sent):
         return stopped
     if waiting:
         return min(waiting) - 1
-    return max((row.get("event", row["seq"]) for row in sent), default=0)
+    return latest
 
 
 def watch(args):
@@ -351,7 +355,9 @@ def watch(args):
     # Anything still open is unaddressed, whenever it arrived, so a first watch starts before it rather than after: a
     # cursor set to the end swallows whatever was written while the last batch was being worked on.
     waiting = [row.get("event", row["seq"]) for row in sent if row.get("state") == "open"]
-    since = resume_from(args.since, (stopped or {}).get("event"), waiting, sent)
+    said = (ask("/chat") or {}).get("messages") or []
+    latest = max([row.get("event", row["seq"]) for row in sent] + [message["event"] for message in said], default=0)
+    since = resume_from(args.since, (stopped or {}).get("event"), waiting, latest)
     # A desk restarted since the last watch is said once and then watched: this one is being armed now, against the
     # desk now answering, so it is reading what exists rather than the run before it. Stopping here instead would
     # cost every agent an arming cycle after each restart, and an agent that does not spend it hears nothing.
@@ -375,15 +381,77 @@ def watch(args):
             # Gone for a moment, a restart in progress or a desk put down: asked again once it answers.
             time.sleep(1)
             continue
-        fresh = answer["rows"]
-        if fresh:
-            print(f"{len(fresh)} comment(s) with news:", flush=True)
-            for note in fresh:
-                show(note, since)
-            since = max(row["event"] for row in fresh)
+        heard = report(answer["rows"], answer.get("chat") or [], since)
+        if heard is not None:
+            since = heard
             if args.once:
                 return
     print("nothing said within the timeout")
+
+
+def report(fresh, said, since):
+    """Print the comments with news and the messages of the chat a watch was woken by, and answer with the last event
+    they reach, or None when there was nothing."""
+    if fresh:
+        print(f"{len(fresh)} comment(s) with news:", flush=True)
+        for note in fresh:
+            show(note, since)
+    if said:
+        print(f"{len(said)} chat message(s):", flush=True)
+        for message in said:
+            spoken(message)
+    return max((item["event"] for item in fresh + said), default=None)
+
+
+def spoken(message):
+    """One message of the chat, under the thread it was said in, as a watch reports it."""
+    opened = " (new thread)" if message["id"] == message["thread"] else ""
+    print(f"chat [{message['thread']}] {message['title']}{opened}", flush=True)
+    who = message["who"].removeprefix("agent:")
+    print(f"      {who} {message['at']}: {' '.join(message['text'].split())}", flush=True)
+    carried(message, "          ")
+
+
+def chat(args):
+    """The threads of the chat, or one of them whole as plain text, which is what is kept of a conversation."""
+    if args.thread is not None:
+        request = urllib.request.Request(f"{URL}/chat/export?thread={args.thread}")
+        try:
+            with urllib.request.urlopen(request, timeout=30) as answer:
+                print(answer.read().decode(), end="")
+        except urllib.error.HTTPError as refusal:
+            sys.exit(refusal.read().decode())
+        except (urllib.error.URLError, OSError):
+            sys.exit("nothing is serving")
+        return
+    held = ask("/chat")
+    if held is None:
+        sys.exit("nothing is serving")
+    threads = {}
+    for message in held["messages"]:
+        threads.setdefault(message["thread"], []).append(message)
+    print(f"{len(threads)} chat thread(s)")
+    for number, thread in threads.items():
+        last = thread[-1]
+        who = last["who"].removeprefix("agent:")
+        print(f"  [{number}] {thread[0]['title']} - {len(thread)} message(s), last by {who} {last['at']}")
+
+
+def say(args):
+    """Say something in a thread of the chat, or open a new one under a title."""
+    words = list(args.words)
+    order = {"title": args.new} if args.new is not None else {}
+    if args.new is None:
+        if not words[0].isdigit() or not words[1:]:
+            sys.exit("name the thread to say it in, then the message, or open a thread with --new <title>")
+        order["thread"] = int(words.pop(0))
+    order["text"] = " ".join(words)
+    outcome = ask("/chat", order)
+    if outcome is None:
+        sys.exit("nothing is serving")
+    if not outcome.get("ok"):
+        sys.exit(outcome.get("error", "the message was refused"))
+    print(f"said [{outcome['id']}] in chat thread [{outcome['thread']}]")
 
 
 def comments(args):
@@ -668,6 +736,17 @@ job.add_argument("seq", nargs="+", type=int)
 job.add_argument("--answer", default="", help="the closing reply, shown under the comment on the page")
 job.add_argument("--reopen", action="store_true", help="put the comments back to open instead")
 job.set_defaults(run=resolve)
+
+job = jobs.add_parser("chat", help="the threads of the chat, or one of them as plain text")
+job.add_argument("thread", nargs="?", type=int, help="the thread to print whole")
+job.set_defaults(run=chat)
+
+job = jobs.add_parser("say", help="say something in a thread of the chat, or open one")
+job.add_argument(
+    "words", nargs="+", help="the thread's number then the message in markdown, or the message alone with --new"
+)
+job.add_argument("--new", metavar="TITLE", help="open a new thread under this title")
+job.set_defaults(run=say)
 
 job = jobs.add_parser("refs", help="the branches ahead of a base, and the open pull requests")
 job.add_argument("--dir", default=".")
