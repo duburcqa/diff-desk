@@ -12,6 +12,16 @@
     --rule-strong: #cdd4de;
     --accent: #2f5aa8;
     --accent-soft: #e6ecf8;
+    /* One colour per author other than the reader, whose own is --add-ink: agents and the pull request's reviewers and
+       bots alike. */
+    --voice-0: #2f5aa8;
+    --voice-1: #8a5a12;
+    --voice-2: #0b6e75;
+    --voice-3: #a3285f;
+    --voice-4: #5b3cc4;
+    --voice-5: #66640f;
+    --voice-6: #b23a1a;
+    --voice-7: #8a2ea8;
     --add-ink: #17614a;
     --add-bg: #e8f3ed;
     --add-gutter: #bfe0cf;
@@ -44,6 +54,14 @@
       --rule-strong: #414b59;
       --accent: #93aeec;
       --accent-soft: #1b2536;
+      --voice-0: #93aeec;
+      --voice-1: #e0b567;
+      --voice-2: #6dd3d6;
+      --voice-3: #f29ac2;
+      --voice-4: #b3a6f5;
+      --voice-5: #d4d26a;
+      --voice-6: #f5a48a;
+      --voice-7: #d59ff0;
       --add-ink: #a8e6c3;
       --add-bg: #132d20;
       --add-gutter: #2c5340;
@@ -71,6 +89,14 @@
     --rule-strong: #414b59;
     --accent: #93aeec;
     --accent-soft: #1b2536;
+    --voice-0: #93aeec;
+    --voice-1: #e0b567;
+    --voice-2: #6dd3d6;
+    --voice-3: #f29ac2;
+    --voice-4: #b3a6f5;
+    --voice-5: #d4d26a;
+    --voice-6: #f5a48a;
+    --voice-7: #d59ff0;
     --add-ink: #a8e6c3;
     --add-bg: #132d20;
     --add-gutter: #2c5340;
@@ -852,8 +878,8 @@
   /* Whose it is, in the voice their replies are read in: the reader's own, an agent's, or somebody else's from the pull
      request. */
   .thread .who .by.you { color: var(--add-ink); }
-  .thread .who .by.them { color: var(--stale); }
-  .thread .who .by.agent { color: var(--accent); }
+  .thread .who .by.them { color: var(--voice, var(--stale)); }
+  .thread .who .by.agent { color: var(--voice, var(--accent)); }
   :is(.thread, .talk) .said { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: normal; color: var(--ink); }
   .thread .reacts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
   .thread .react {
@@ -961,18 +987,18 @@
   .thread .reply { padding-left: 10px; border-left: 1px solid currentColor; }
   /* A reply laid out in blocks would otherwise run into the next one, whose name is all that tells them apart. */
   .thread .reply + .reply { margin-top: 5px; }
-  .thread .reply.agent { color: var(--accent); }
+  .thread .reply.agent { color: var(--voice, var(--accent)); }
   /* A whisper is set apart from the answers around it: it stays on this desk whatever the thread sends. */
   .thread .reply.aside { border-left-style: dashed; }
   .thread .reply.aside .who { font-style: italic; }
   .thread .mark.aside { color: var(--muted); background: var(--stale-bg); font-style: italic; }
   .thread .reply.you { color: var(--add-ink); }
-  .thread .reply.them { color: var(--stale); }
+  .thread .reply.them { color: var(--voice, var(--stale)); }
   /* Whose reply it is, said in its own voice: the line's colour draws the rule down its side, and the words inside it
      are read in the page's ink, so the name cannot take either of them for its own. */
-  .thread .reply.agent .who { color: var(--accent); }
+  .thread .reply.agent .who { color: var(--voice, var(--accent)); }
   .thread .reply.you .who { color: var(--add-ink); }
-  .thread .reply.them .who { color: var(--stale); }
+  .thread .reply.them .who { color: var(--voice, var(--stale)); }
   .thread .reply .said { color: var(--ink); }
   .thread .mark { flex: none; font-family: var(--mono); font-size: 10.5px; padding: 0 6px; border-radius: 999px; }
   .thread .mark.pending { color: var(--stale); background: var(--stale-bg); }
@@ -1359,7 +1385,8 @@
   .chat .head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--rule); }
   .chat .head strong { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
   .chat .present { padding: 6px 12px; color: var(--muted); font-size: 11.5px; border-bottom: 1px solid var(--rule); }
-  .chat .talk { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
+  .chat .present .name { color: var(--voice, var(--accent)); font-weight: 600; }
+  .chat .talk { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
   .chat .topic {
     display: flex;
     flex-direction: column;
@@ -1380,8 +1407,8 @@
   .chat .topic .dot { top: 8px; right: 8px; }
   .chat .msg { padding-left: 10px; border-left: 2px solid currentColor; }
   .chat .msg.you { color: var(--add-ink); }
-  .chat .msg.agent { color: var(--accent); }
-  .chat .msg.them { color: var(--stale); }
+  .chat .msg.agent { color: var(--voice, var(--accent)); }
+  .chat .msg.them { color: var(--voice, var(--stale)); }
   .chat .msg .who { font-size: 11.5px; font-weight: 600; }
   .chat .msg .who .at { margin-left: 6px; color: var(--faint); font-weight: 400; }
   .chat .msg .said { color: var(--ink); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
@@ -1396,9 +1423,12 @@
     border-radius: 6px;
     padding: 6px 8px;
   }
-  .chat .say textarea { min-height: 64px; resize: vertical; }
-  .chat .say .actions { display: flex; align-items: center; gap: 8px; }
-  .chat .say .status { flex: 1; min-width: 0; color: var(--muted); font-size: 11.5px; }
+  /* The box and its button side by side, the button at the foot of a box grown taller, and the status under both only
+     once it has something to say. */
+  .chat .say textarea { flex: 1; min-width: 0; min-height: 64px; resize: vertical; }
+  .chat .say .actions { display: flex; align-items: flex-end; gap: 8px; }
+  .chat .say .status { color: var(--muted); font-size: 11.5px; }
+  .chat .say .status:empty { display: none; }
   .chat .empty { padding: 24px 8px; }
 </style>
 
@@ -1607,11 +1637,11 @@
     <div class="talk" id="chatrows"></div>
     <form class="say" id="chatsay">
       <input id="chatname" type="text" placeholder="What the thread is about" aria-label="Title of the new thread" hidden />
-      <textarea id="chattext" placeholder="Markdown. [N] names a comment, `path:line` a line of the diff, @name an agent" aria-label="Message"></textarea>
       <div class="actions">
-        <span class="status" id="chatresult"></span>
+        <textarea id="chattext" placeholder="Markdown. [N] names a comment, `path:line` a line of the diff, @name an agent" aria-label="Message"></textarea>
         <button class="solid" id="chatsend" type="submit">Send</button>
       </div>
+      <span class="status" id="chatresult"></span>
     </form>
   </section>
 </div>
@@ -2262,8 +2292,14 @@
     render();
   }
 
+  // How many reads of the comments have been asked for, and the latest one taken. The poll and a submission each read
+  // them, and the two overlap: an answer asked for before one already taken holds less than the page does.
+  let readsAsked = 0;
+  let readTaken = 0;
+
   async function loadNotes() {
     if (leaving) return;
+    const read = ++readsAsked;
     try {
       const [response, watched, talked] = await Promise.all([
         ask("comments", { cache: "no-store" }),
@@ -2271,9 +2307,16 @@
         ask("chat", { cache: "no-store" }),
       ]);
       if (!response.ok) throw new Error("no endpoint");
-      notes.sent = await response.json();
-      notes.watching = watched.ok ? (await watched.json()).agents : [];
-      if (talked.ok) chat.messages = (await talked.json()).messages;
+      const [sent, watchers, messages] = await Promise.all([
+        response.json(),
+        watched.ok ? watched.json() : { agents: [] },
+        talked.ok ? talked.json() : { messages: chat.messages },
+      ]);
+      if (read < readTaken) return;
+      readTaken = read;
+      notes.sent = sent;
+      notes.watching = watchers.agents;
+      chat.messages = messages.messages;
       notes.live = true;
       drawChat();
     } catch (error) {
@@ -2313,11 +2356,17 @@
       keepChatRead();
     }
     els.chatdot.dataset.on = String([...threads.values()].some((thread) => unreadIn(thread) > 0));
-    els.chatwho.textContent = !notes.live
-      ? "The desk is not answering"
-      : notes.watching.length
-        ? `Watching: ${notes.watching.join(", ")}`
-        : "No agent watching";
+    // Each name in the colour its words are read in, so who is watching is told at a glance from who is talking.
+    els.chatwho.replaceChildren();
+    if (!notes.live) els.chatwho.textContent = "The desk is not answering";
+    else if (!notes.watching.length) els.chatwho.textContent = "No agent watching";
+    else {
+      els.chatwho.append("Watching: ");
+      for (const [index, name] of notes.watching.entries()) {
+        if (index) els.chatwho.append(", ");
+        els.chatwho.append(voiced(Object.assign(document.createElement("b"), { className: "name", textContent: name }), `agent:${name}`));
+      }
+    }
     const isThread = typeof chat.open === "number" && threads.has(chat.open);
     const isNew = chat.open === "new";
     els.chatback.hidden = !isThread && !isNew;
@@ -2335,7 +2384,8 @@
     if (isThread) {
       for (const message of threads.get(chat.open)) {
         const line = document.createElement("div");
-        line.className = `msg ${voiceOf(message.who)}`;
+        line.className = "msg";
+        voiced(line, message.who);
         const who = line.appendChild(document.createElement("div"));
         who.className = "who";
         who.textContent = spokenBy(message.who);
@@ -2454,6 +2504,28 @@
   const spokenBy = (who) => (isReader(who) ? "you" : isAgent(who) ? who.slice("agent:".length) : who);
   // Which voice words are read in: the reader's, an agent's, or that of an author on the pull request.
   const voiceOf = (who) => (!who || isReader(who) ? "you" : isAgent(who) ? "agent" : "them");
+  // Everyone who has said something on this desk other than the reader, agents and the pull request's authors alike, in
+  // the order they first did, read once per answer of the desk.
+  const voicesRead = { sent: null, messages: null, order: [] };
+  function voiceOrder() {
+    if (voicesRead.sent !== notes.sent || voicesRead.messages !== chat.messages) {
+      const said = [];
+      for (const note of notes.sent) for (const item of [note, ...(note.replies || [])]) said.push([item.at || "", item.who]);
+      for (const message of chat.messages) said.push([message.at, message.who]);
+      said.sort((first, second) => (first[0] < second[0] ? -1 : first[0] > second[0] ? 1 : 0));
+      voicesRead.order = [...new Set(said.map(([, who]) => who).filter((who) => who && !isReader(who)))];
+      Object.assign(voicesRead, { sent: notes.sent, messages: chat.messages });
+    }
+    return voicesRead.order;
+  }
+  // Each author in a colour of its own, handed out in the order they first spoke here, so two of them read apart for as
+  // long as the palette lasts (see --voice-0 and after). The reader keeps the one colour no one else is given.
+  const VOICES = 8;
+  function voiced(node, who) {
+    node.className = `${node.className} ${voiceOf(who)}`.trim();
+    if (who && !isReader(who)) node.style.setProperty("--voice", `var(--voice-${Math.max(0, voiceOrder().indexOf(who)) % VOICES})`);
+    return node;
+  }
   // Who opened a thread: a remark written here by the reader names nobody.
   const authorOf = (note) => (note.who && !isReader(note.who) ? note.who : "you");
   // A remark this desk can reword, delete and send: the reader's, or an agent's.
@@ -2769,9 +2841,11 @@
     reaching = null;
     landings += 1;
     letGo();
-    const covered = document.querySelector("header").getBoundingClientRect().bottom;
-    const top = window.scrollY + card.getBoundingClientRect().top - covered + place.into;
-    window.scrollTo({ top: Math.max(0, Math.round(top)), behavior: "auto" });
+    // Aimed as a thread is, until it lands: the files the scroll brings within reach are built at the height their
+    // lines take, which can differ from the height they stood at, and a single scroll leaves the reader that far from
+    // where they were.
+    reaching = { path: place.path, seq: null, into: place.into };
+    aim(reaching, 24);
   }
 
   function foldReviewed() {
@@ -2815,14 +2889,16 @@
   // file as soon as it has.
   const LANDED = 2;
 
-  function missedBy(target, seq) {
-    // How far the target stands from where an aim leaves it: a thread in the middle of the room under the header, and
-    // a file with its head on the line its own scroll margin asks for, which is where the reader is said to be on it.
+  function missedBy(target, seq, into) {
+    // How far the target stands from where an aim leaves it: a thread in the middle of the room under the header, a
+    // file with its head on the line its own scroll margin asks for, which is where the reader is said to be on it, and
+    // a place to go back to as far under the header as the reader had scrolled into its file.
     // A thread taller than the room is read from its latest reply, so that reply is what stands in the middle: centring
     // the whole thread would leave what was said last below the view.
     const box = target.getBoundingClientRect();
-    if (seq === null) return box.top - parseFloat(getComputedStyle(target).scrollMarginTop);
     const covered = document.querySelector("header").getBoundingClientRect().bottom;
+    if (into !== undefined) return box.top - covered + into;
+    if (seq === null) return box.top - parseFloat(getComputedStyle(target).scrollMarginTop);
     const room = window.innerHeight - covered;
     const latest = [...target.querySelectorAll(".line.reply")].filter((reply) => reply.getClientRects().length).pop();
     const read = box.height > room && latest ? latest.getBoundingClientRect() : box;
@@ -2841,7 +2917,7 @@
         else land();
         return;
       }
-      const off = missedBy(thread, aimed.seq);
+      const off = missedBy(thread, aimed.seq, aimed.into);
       if (tries <= 0) {
         land();
         return;
@@ -2887,7 +2963,7 @@
         centring = false;
         return;
       }
-      const off = missedBy(thread, aimed.seq);
+      const off = missedBy(thread, aimed.seq, aimed.into);
       if (Math.abs(off) >= LANDED) window.scrollTo({ top: Math.max(0, window.scrollY + off), behavior: "auto" });
       if (tries > 0) centre(tries - 1);
       else centring = false;
@@ -3962,7 +4038,8 @@
       // Whose remark it is, said where a reply says whose it is. Where it was written is the one thing left to hovering:
       // a thread reads the same either way, and this desk is where the reader is reading it.
       const from = document.createElement("span");
-      from.className = `by ${voiceOf(note.who)}`;
+      from.className = "by";
+      voiced(from, note.who);
       from.textContent = note.who ? spokenBy(note.who) : "you";
       who.append(document.createTextNode(" "), from);
       // Said by the tag alone, as a reply's is: the line holds the words and the buttons, which say their own.
@@ -4154,7 +4231,8 @@
       const said = document.createElement("div");
       // Read as the reader's own where they wrote it, whichever side of the pull request they were on at the time. A
       // note is nobody's word to the pull request: it is written for this side of the desk, so it opens as one.
-      said.className = `line reply ${voiceOf(answer.who)}${answer.whisper ? " aside" : ""}`;
+      said.className = `line reply${answer.whisper ? " aside" : ""}`;
+      voiced(said, answer.who);
       // A note stands one step in, however deep the notes it answers go, and what is said to the pull request is read
       // back at the margin: a run of notes reads as an aside, and the thread resumes where it left off.
       said.style.marginLeft = answer.whisper ? "12px" : "0";
@@ -6383,7 +6461,7 @@
           }
           const label = document.createElement("span");
           label.className = "at";
-          label.textContent = text ? `@@ ${text}` : "@@";
+          label.textContent = text ? ` ${text}` : "";
           cell.append(label);
           row.append(cell);
           tbody.append(row);
@@ -7126,6 +7204,24 @@
   els.moved.addEventListener("click", () => rescan(true));
   els.traysend.addEventListener("click", submitReview);
   els.chatopen.addEventListener("click", () => showChat(!document.body.classList.contains("chat-open")));
+  els.chat.addEventListener(
+    "wheel",
+    (event) => {
+      // The chat scrolls what it holds and nothing behind it: a wheel turned past the end of its messages, or over its
+      // head or its box, would otherwise scroll the diff the reader is not looking at. What still has room to move in
+      // the direction turned (the messages, a wide table, a long draft) takes it.
+      const across = Math.abs(event.deltaX) > Math.abs(event.deltaY);
+      const delta = across ? event.deltaX : event.deltaY;
+      for (let node = event.target; node && node !== els.chat; node = node.parentElement) {
+        const [at, room] = across
+          ? [node.scrollLeft, node.scrollWidth - node.clientWidth]
+          : [node.scrollTop, node.scrollHeight - node.clientHeight];
+        if (room > 1 && (delta < 0 ? at > 0 : at < room - 1)) return;
+      }
+      event.preventDefault();
+    },
+    { passive: false },
+  );
   els.chatclose.addEventListener("click", () => showChat(false));
   els.chatnew.addEventListener("click", () => openChat("new"));
   els.chatback.addEventListener("click", () => openChat(null));
