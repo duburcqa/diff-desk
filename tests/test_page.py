@@ -3586,6 +3586,10 @@ def test_a_comment_does_not_shift_the_columns_of_the_diff_it_hangs_under(page, d
             const cell = card.querySelector('td.ln').getBoundingClientRect();
             return `${Math.round(cell.width)}|${Math.round(card.getBoundingClientRect().height)}`;
           };
+          // Read where the reader stands: the page keeps the lines of the files near the reader alone, and a card
+          // folded far from there is let go of for good.
+          card.scrollIntoView({ block: "start" });
+          await new Promise(requestAnimationFrame);
           const was = shape();
           card.dataset.open = "false";
           await new Promise((done) => setTimeout(done, 150));
@@ -4749,14 +4753,21 @@ def test_going_back_from_a_comment_returns_to_the_place_left(page, desk):
 
         # Back where the reader was before each jump, one jump at a time, by the key or the button joined to the box
         # that goes to a comment, and nowhere further once every jump is undone.
-        backs = (lambda: page.locator("body").press("b"), lambda: page.locator("#goback").click())
-        for back, left in zip(backs, reversed(places), strict=True):
-            back()
-            # A file built at another height than it stood at moves everything below it a moment after the jump, which
-            # fonts make happen on some machines and not others: the place is aimed at until it lands, wherever that is.
+        backs = (
+            ("keydown", lambda: page.locator("body").press("b")),
+            ("click", lambda: page.locator("#goback").click()),
+        )
+        for (kind, back), left in zip(backs, reversed(places), strict=True):
+            # A file built at another height than it stood at moves everything below it on the frame after the jump,
+            # which fonts make happen on some machines and not others: the place is aimed at until it lands, wherever
+            # that is. Moved on that frame rather than after a delay, which a loaded machine stretches past the landing.
             page.evaluate(
-                "() => setTimeout(() => { document.querySelector('section.file').style.marginTop = '150px'; }, 30)"
+                """(kind) => document.addEventListener(kind, () => requestAnimationFrame(() => {
+                  document.querySelector('section.file').style.marginTop = '150px';
+                }), { once: true })""",
+                kind,
             )
+            back()
             page.wait_for_timeout(300)
             reached = page.evaluate(standing)
             page.evaluate("() => { document.querySelector('section.file').style.marginTop = ''; }")
