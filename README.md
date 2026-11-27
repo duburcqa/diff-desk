@@ -29,7 +29,7 @@ The page comes up on `127.0.0.1:8787`, each ref a tab, scoped to the whole range
 
 ## Reading a diff
 
-- The file list is a tree following the repository's folders, foldable and remembered, with a count per folder. A chain of single-child directories is one row.
+- The file list is a tree following the repository's folders, foldable and remembered, with a count per folder. A chain of single-child directories is one row. Its right edge widens it, and the width is kept.
 - `j`/`k` walk the files, `/` picks one by name, `c` comments on the selection, `r` marks the current file reviewed.
 - **Find** (`Cmd`/`Ctrl`+`F`, or `f`) reads every line of the diff, folded and hidden files included, and brings you to each line it finds: in its case (`Aa`, `Alt`+`C`), as whole words (`ab`, `Alt`+`W`) or as a regular expression (`.*`, `Alt`+`R`). The speech-bubble toggle (`Alt`+`T`) reads what the threads say as well, each remark and reply found right under the line its thread hangs on, a thread the settings hide shown for it. Its left edge widens the box when dragged, and the width is kept.
 - The diff reads down in the order of the file list, each folder's folders before its own files, and the file list follows the scroll: the file you scroll onto becomes the current one in it, and the list scrolls to keep it in view. A file picked from the list stays current until you scroll on from where it left you.

@@ -5034,3 +5034,34 @@ def test_the_chat_stands_beside_the_diff_and_names_its_lines(page, desk):
     page.reload(wait_until="load")
     page.wait_for_selector(f".chat .topic[data-thread='{thread}']")
     assert page.locator("#chatopen").get_attribute("aria-pressed") == "true"
+
+
+def test_the_file_list_and_the_chat_are_widened_from_their_edge(page):
+    page.locator("#chatopen").click()
+    page.locator("#chat .head").wait_for()
+
+    def drag(grip, by):
+        box = page.locator(grip).bounding_box()
+        x, y = box["x"] + box["width"] / 2, box["y"] + 200
+        page.mouse.move(x, y)
+        page.mouse.down()
+        page.mouse.move(x + by / 2, y)
+        page.mouse.move(x + by, y)
+        page.mouse.up()
+
+    files, chat = page.locator("aside").bounding_box()["width"], page.locator("#chat").bounding_box()["width"]
+    # Each follows its edge, and the diff between them gives way.
+    drag("#filesgrip", 80)
+    drag("#chatgrip", -100)
+    widened = page.locator("aside").bounding_box()["width"], page.locator("#chat").bounding_box()["width"]
+    assert abs(widened[0] - (files + 80)) <= 2
+    assert abs(widened[1] - (chat + 100)) <= 2
+    main, chat_box = page.locator("#main").bounding_box(), page.locator("#chat").bounding_box()
+    assert main["x"] >= page.locator("aside").bounding_box()["x"] + widened[0] - 1
+    assert main["x"] + main["width"] <= chat_box["x"] + 1
+
+    # Kept for the next load.
+    page.reload(wait_until="load")
+    page.locator("#chat .head").wait_for()
+    assert abs(page.locator("aside").bounding_box()["width"] - widened[0]) <= 2
+    assert abs(page.locator("#chat").bounding_box()["width"] - widened[1]) <= 2
