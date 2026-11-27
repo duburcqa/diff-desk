@@ -556,6 +556,9 @@
     border-radius: 7px 7px 0 0;
     background: var(--surface);
   }
+  /* Held under the bar while the file scrolls by, the head reads as the bar's lower edge rather than the top of a card,
+     so its corners square up (see markStuck). */
+  .file[data-stuck="true"] > .filehead { border-radius: 0; }
   .filehead .grow {
     display: flex;
     align-items: center;
@@ -2879,6 +2882,31 @@
 
   // The thread the reader was taken to stays shown whatever the header hides, until they let go of it: by asking the
   // header again, or by scrolling it out of sight once the aim has landed.
+  // The file whose head is held under the bar while its lines scroll by. CSS cannot tell a sticky head held from one at
+  // rest, so it is found by what stands just under the bar, a single hit, rather than by measuring every file.
+  let stuck = null;
+  let isStuckAsked = false;
+  function markStuck() {
+    isStuckAsked = false;
+    const covered = document.querySelector("header").getBoundingClientRect().bottom;
+    const under = document.elementFromPoint(els.main.getBoundingClientRect().left + 40, covered + 1);
+    const card = under && under.closest("section.file > .filehead") ? under.closest("section.file") : null;
+    const held = card && card.getBoundingClientRect().top < covered - 0.5 ? card : null;
+    if (held === stuck) return;
+    if (stuck) delete stuck.dataset.stuck;
+    if (held) held.dataset.stuck = "true";
+    stuck = held;
+  }
+  addEventListener(
+    "scroll",
+    () => {
+      if (isStuckAsked) return;
+      isStuckAsked = true;
+      requestAnimationFrame(markStuck);
+    },
+    { passive: true },
+  );
+
   function letGo() {
     if (!state.reached) return;
     const { seq, path } = state.reached;
@@ -5677,6 +5705,7 @@
     hangWriting(lifted);
     fitNotes();
     markCurrent();
+    markStuck();
     paintSel();
     if (!reaching) {
       window.scrollTo(0, scrolled);
