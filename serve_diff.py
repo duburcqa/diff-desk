@@ -105,6 +105,8 @@ import os
 import pathlib
 import re
 import secrets
+import select
+import socket
 import threading
 import time
 import types
@@ -1594,6 +1596,16 @@ class Handler(BaseHTTPRequestHandler):
             return None
         return self.author
 
+    def _gone(self):
+        """Whether whoever asked has hung up, which a request held open learns only by looking at its connection."""
+        readable, _, _ = select.select([self.connection], [], [], 0)
+        if not readable:
+            return False
+        try:
+            return self.connection.recv(1, socket.MSG_PEEK) == b""
+        except OSError:
+            return True
+
     def _heard(self, query):
         """Where the asking agent last stopped watching the reviews it names, and whether the desk restarted since."""
         if self._watcher() is None:
@@ -1638,10 +1650,14 @@ class Handler(BaseHTTPRequestHandler):
                 left = deadline - time.monotonic()
                 if fresh or said or left <= 0:
                     break
-                # Asleep only if nothing was written since the log was read, which would otherwise wake nobody.
+                # Asleep only if nothing was written since the log was read, which would otherwise wake nobody, and
+                # never long without looking whether the agent is still there: a watch killed while it waits leaves
+                # this request behind, which would otherwise take the next word for heard and answer nobody with it.
                 with NEWS:
                     if Watch.written == written:
-                        NEWS.wait(left)
+                        NEWS.wait(min(left, 1.0))
+                if self._gone():
+                    return
         finally:
             with NEWS:
                 WAITING[self.author] -= 1

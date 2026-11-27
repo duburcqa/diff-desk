@@ -1964,15 +1964,25 @@ def test_a_watch_on_one_review_leaves_what_is_said_about_the_others(desk):
 
 
 def test_watching_hears_everything_said_not_only_the_first(desk):
-    # Where a watch stopped is written down by the desk, per agent, so what it has heard is asked of that rather than
-    # guessed at from a pause.
+    # Where a watch stopped is written down by the desk, per agent, so a watch armed again carries on from there.
     stopped = desk.home / "heard.json"
     mine = f"agent:{AGENT}|"
+    # Started past everything already said, so what this test says is the only thing that can wake it.
+    spoken = max(
+        [row["event"] for row in desk.get("/comments")] + [said["event"] for said in desk.get("/chat")["messages"]],
+        default=0,
+    )
+    watching = desk.cli("watch", "--since", str(spoken), "--timeout", "20")
+    # Read as it prints: the desk records what a watch has heard as it answers it, before the watch has printed it, so
+    # the print is what says it was heard.
+    heard = []
 
-    def reached(event):
-        return stopped.exists() and json.loads(stopped.read_text()).get(mine, {}).get("event", 0) >= event
+    def listen():
+        for line in watching.stdout:
+            heard.append(line)
 
-    watching = desk.cli("watch", "--timeout", "20")
+    listening = threading.Thread(target=listen, daemon=True)
+    listening.start()
     try:
         # Waiting on the desk, so the page can say who is watching it.
         until(lambda: AGENT in desk.get("/watching")["agents"])
@@ -1981,15 +1991,15 @@ def test_watching_hears_everything_said_not_only_the_first(desk):
             "/comments",
             [{"branch": "feature", "path": "sample.py", "line": 71, "side": "new", "text": "the first word"}],
         )["seqs"][0]
-        spoken = {row["seq"]: row for row in desk.get("/comments")}[first]["event"]
-        until(lambda: reached(spoken))
+        until(lambda: any("the first word" in line for line in heard))
         desk.post("/reply", {"seq": first, "text": "my own answer"}, agent=AGENT)
         desk.post("/reply", {"seq": first, "text": "and the second word"})
-        answered = {row["seq"]: row for row in desk.get("/comments")}[first]["event"]
-        until(lambda: reached(answered))
+        until(lambda: any("and the second word" in line for line in heard))
     finally:
         watching.terminate()
-        said = watching.communicate(timeout=30)[0]
+        watching.wait(timeout=30)
+        listening.join(timeout=30)
+    said = "".join(heard)
     assert "the first word" in said
     assert "and the second word" in said
     # Its own writes are not news to it, so an agent's reply never wakes it.
