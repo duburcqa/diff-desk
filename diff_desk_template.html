@@ -1428,6 +1428,8 @@
   .chat .msg.them { color: var(--voice, var(--stale)); }
   .chat .msg .who { font-size: 11.5px; font-weight: 600; }
   .chat .msg .who .at { margin-left: 6px; color: var(--faint); font-weight: 400; }
+  .chat .msg .who .num { margin-left: 6px; color: var(--faint); font-family: var(--mono); font-weight: 400; }
+  .chat .msg.flash { background: color-mix(in srgb, var(--accent) 14%, transparent); }
   .chat .msg .said { color: var(--ink); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
   .chat .msg .said .text > p:first-child { margin-top: 2px; }
   /* A form keeps a margin under it in the quirks mode this page renders in, which would leave a strip of nothing below
@@ -2465,9 +2467,26 @@
         const at = who.appendChild(document.createElement("span"));
         at.className = "at";
         at.textContent = said(message.at);
+        // The number a message is referred to by, right where the message is, as a thread wears its own.
+        const number = who.appendChild(document.createElement("span"));
+        number.className = "num";
+        number.textContent = `#${message.id}`;
+        number.dataset.tip = `Refer to this message as #${message.id}`;
         const words = line.appendChild(document.createElement("div"));
         words.className = "said";
-        written(words.appendChild(spoke()), message.text);
+        const text = written(words.appendChild(spoke()), message.text);
+        // A message named by its number goes to that message, in whichever thread it was said.
+        rewriteText(text, /(?<![\w&#])(#\d+)(?!\w)/, (piece) => {
+          const named = chat.messages.find((held) => held.id === Number(piece.slice(1)));
+          if (!named) return piece;
+          const anchor = Object.assign(document.createElement("a"), { className: "xref", href: "#", textContent: piece });
+          anchor.dataset.tip = outline(named.text).slice(0, 120);
+          anchor.addEventListener("click", (event) => {
+            event.preventDefault();
+            reachMessage(named.id);
+          });
+          return anchor;
+        });
         els.chatrows.append(line);
       }
       // The latest word is what a thread is opened for, and where a reader at the foot of it stays as it grows.
@@ -2504,6 +2523,27 @@
       topic.addEventListener("click", () => openChat(thread[0].thread));
       els.chatrows.append(topic);
     }
+  }
+
+  // Opens the chat on the thread a message was said in.
+  function chatOn(thread) {
+    if (!document.body.classList.contains("chat-open")) showChat(true);
+    if (chat.open === thread) return;
+    chat.open = thread;
+    drawChat();
+  }
+
+  function reachMessage(id) {
+    const message = chat.messages.find((held) => held.id === id);
+    if (!message) return;
+    chatOn(message.thread);
+    const line = els.chatrows.querySelector(`.msg[data-id="${id}"]`);
+    if (!line) return;
+    const box = line.getBoundingClientRect();
+    const room = els.chatrows.getBoundingClientRect();
+    els.chatrows.scrollTop += box.top - room.top - Math.max(0, (room.height - box.height) / 2);
+    line.classList.add("flash");
+    window.setTimeout(() => line.classList.remove("flash"), 1600);
   }
 
   function openChat(where) {
@@ -3918,6 +3958,27 @@
       .split(/(?<!\\)\|/)
       .map((cell) => cell.trim().replace(/\\\|/g, "|"));
 
+  // Every piece of the plain text under a node that a pattern matches, put back as what make builds of it. Code and
+  // links are left alone. The pattern has one capturing group, which is the piece.
+  function rewriteText(root, pattern, make) {
+    const inside = (node) => node.parentElement.closest("code, pre, a");
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) => (inside(node) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+    });
+    const texts = [];
+    while (walker.nextNode()) texts.push(walker.currentNode);
+    for (const text of texts) {
+      const pieces = text.data.split(pattern);
+      if (pieces.length === 1) continue;
+      const held = document.createDocumentFragment();
+      for (const [at, piece] of pieces.entries()) {
+        if (at % 2) held.append(make(piece));
+        else if (piece) held.append(piece);
+      }
+      text.replaceWith(held);
+    }
+  }
+
   function table(host, lines) {
     // The line under the head says how each column is aligned, and a row is as wide as the head whatever it holds.
     const [head, divider, ...rows] = lines.map(cells);
@@ -3935,19 +3996,9 @@
         inline(cell, row[column] || "");
         // A figure written with a sign or an exponent (1e-14, -0.82) holds together: a cell broken at its hyphen reads
         // as two values. Measurements are what tables here mostly hold.
-        const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
-        const texts = [];
-        while (walker.nextNode()) texts.push(walker.currentNode);
-        for (const text of texts) {
-          const pieces = text.data.split(/([-\u2212+]?\d[\d.,]*[eE][-\u2212+]?\d+|[-\u2212]\d[\d.,]*)/);
-          if (pieces.length === 1) continue;
-          const held = document.createDocumentFragment();
-          for (const [at, piece] of pieces.entries()) {
-            if (at % 2) held.append(Object.assign(document.createElement("span"), { className: "figure", textContent: piece }));
-            else if (piece) held.append(piece);
-          }
-          text.replaceWith(held);
-        }
+        rewriteText(cell, /([-\u2212+]?\d[\d.,]*[eE][-\u2212+]?\d+|[-\u2212]\d[\d.,]*)/, (piece) =>
+          Object.assign(document.createElement("span"), { className: "figure", textContent: piece }),
+        );
       });
     }
   }
@@ -5639,12 +5690,7 @@
     if (!hit) return;
     if (hit.chat) {
       // A hit in the chat opens it on its thread, and puts the message in view in the chat alone.
-      if (!document.body.classList.contains("chat-open")) showChat(true);
-      if (chat.open !== hit.thread) {
-        chat.open = hit.thread;
-        drawChat();
-        markChat();
-      }
+      chatOn(hit.thread);
       const words = chatHitAt(hit);
       if (!words) return;
       words.classList.add("hit");
@@ -5710,12 +5756,15 @@
   // bar, stays within reach on the way through the hits.
   function placeFind() {
     const header = document.querySelector("header").getBoundingClientRect().bottom;
-    const card = document.querySelector("section.file");
+    // The first file shown: one hidden as reviewed takes no room, and measures as nothing.
+    const card = [...document.querySelectorAll("section.file")].find((held) => held.getClientRects().length);
     const head = card && card.querySelector(".filehead");
     const rest = card ? Math.max(0, card.getBoundingClientRect().top + window.scrollY - header) : 0;
     const tall = head ? head.getBoundingClientRect().height : 0;
     els.find.style.top = `${header + rest + tall + 8}px`;
-    els.find.style.right = `${Math.max(8, document.documentElement.clientWidth - els.main.getBoundingClientRect().right + 8)}px`;
+    // Flush with the right edge of the files, which is the edge of what it reads.
+    const edge = card ? card.getBoundingClientRect().right : els.main.getBoundingClientRect().right;
+    els.find.style.right = `${Math.max(0, document.documentElement.clientWidth - edge)}px`;
   }
   addEventListener("resize", () => {
     if (!els.find.hidden) placeFind();

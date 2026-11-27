@@ -3362,8 +3362,9 @@ def test_the_chat_is_found_when_asked_by_a_box_standing_over_the_diff(page, desk
     page.locator("#fq").press("Enter")
     page.wait_for_function(counted, arg="2/2")
     assert "again" in page.locator("#chatrows .msg .text.hit").inner_text()
-    box, diff = page.locator("#find").bounding_box(), page.locator("#main").bounding_box()
-    assert box["x"] + box["width"] <= diff["x"] + diff["width"]
+    box, files = page.locator("#find").bounding_box(), page.locator("section.file").first.bounding_box()
+    # Flush with the right edge of the files it reads.
+    assert abs((box["x"] + box["width"]) - (files["x"] + files["width"])) <= 1
     assert box["x"] + box["width"] <= page.locator("#chat").bounding_box()["x"]
     page.locator("#fq").press("Escape")
     assert page.locator("#chatrows .text.hit").count() == 0
@@ -5280,3 +5281,25 @@ def test_a_table_of_measurements_reads_as_prose(page, desk):
     assert not laid["mono"]
     assert {"2.3e-13", "1.6e-11", "-0.82"} <= set(laid["figures"])
     assert (laid["split"], laid["word"]) == (0, 1)
+
+
+def test_a_message_of_the_chat_is_named_by_its_number(page, desk):
+    named = desk.post("/chat", {"title": "Where it was said", "text": "the spectral reading holds"}, agent=AGENT)["id"]
+    naming = desk.post(
+        "/chat", {"title": "Where it is named", "text": f"as in #{named}, unlike `#{named}` or #999999"}, agent="astra"
+    )["id"]
+    page.evaluate("() => loadNotes()")
+    page.locator("#chatopen").click()
+    page.locator(f".chat .topic[data-thread='{naming}']").click()
+    message = page.locator(f".chat .msg[data-id='{naming}']")
+    message.wait_for()
+    # Each message wears the number it is named by, beside who said it and when.
+    assert message.locator(".who .num").inner_text() == f"#{naming}"
+    # Named outside code, and naming a message that exists, it is a link; anything else stays words.
+    assert message.locator("a.xref").all_inner_texts() == [f"#{named}"]
+    message.locator("a.xref").click()
+    reached = page.locator(f".chat .msg[data-id='{named}']")
+    reached.wait_for()
+    assert page.locator("#chattitle").inner_text() == "Where it was said"
+    assert "flash" in reached.get_attribute("class")
+    assert reached.is_visible()
