@@ -2,6 +2,8 @@
 
 import atexit
 import base64
+import functools
+import http.server
 import json
 import os
 import pathlib
@@ -10,6 +12,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -173,10 +176,11 @@ class Desk:
         with urllib.request.urlopen(f"{self.url}/", timeout=60) as answer:
             return answer.read().decode()
 
-    def attach(self, name, raw):
-        """Offer one file to the desk as the page does: the bytes as the body, under the name it arrived with."""
+    def attach(self, name, raw, is_chat=False):
+        """Offer one file to the desk as the page does: the bytes as the body, under the name it arrived with, for a
+        comment or for a message of the chat."""
         request = urllib.request.Request(
-            f"{self.url}/media?name={urllib.parse.quote(name)}",
+            f"{self.url}/media?name={urllib.parse.quote(name)}{'&for=chat' if is_chat else ''}",
             data=raw,
             headers={"Content-Type": "application/octet-stream"},
             method="POST",
@@ -252,3 +256,25 @@ def shot():
 @pytest.fixture(scope="session")
 def payload(repo):
     return gen_diff_data.collect(str(repo), "main", ["feature"])
+
+
+class QuietPage(http.server.SimpleHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+
+@pytest.fixture
+def site(tmp_path):
+    """A web page of our own on a port of its own, which a link of the chat is shown by: what it says of itself."""
+    (tmp_path / "page.html").write_text(
+        '<html><head><title>Not this</title><meta property="og:title" content="Standing-wave benchmark">'
+        '<meta property="og:description" content="Energy over five periods">'
+        '<meta property="og:image" content="/plot.png">'
+        "</head><body></body></html>"
+    )
+    server = http.server.ThreadingHTTPServer(
+        ("127.0.0.1", free_port()), functools.partial(QuietPage, directory=tmp_path)
+    )
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()

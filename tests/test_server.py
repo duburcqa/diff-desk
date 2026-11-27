@@ -3,6 +3,7 @@
 import concurrent.futures
 import json
 import os
+import pathlib
 import shutil
 import subprocess
 import sys
@@ -2099,6 +2100,49 @@ def test_the_chat_holds_threads_between_the_reader_and_the_agents(desk):
     assert "name the thread" in refused.communicate(timeout=60)[0] and refused.returncode != 0
 
 
+def test_a_link_of_the_chat_is_shown_by_what_it_says_of_itself(desk, site, shot, tmp_path):
+    def ask(route, as_reader=True):
+        named = {"Cookie": desk.as_reader()} if as_reader else {"X-Desk-Agent": AGENT}
+        with urllib.request.urlopen(urllib.request.Request(f"{desk.url}{route}", headers=named), timeout=30) as answer:
+            return answer.headers.get_content_type(), answer.read()
+
+    # A page by the title, the words and the image it gives of itself, its image read against its own address.
+    page = f"{site}/page.html"
+    card = json.loads(ask(f"/unfurl?url={urllib.parse.quote(page)}")[1])
+    assert (card["title"], card["text"], card["image"]) == (
+        "Standing-wave benchmark",
+        "Energy over five periods",
+        f"{site}/plot.png",
+    )
+    # A pull request as GitHub names it, its state and its author.
+    pull = "https://github.com/someone/somewhere/pull/7"
+    said = {"title": "Fix the warm start", "state": "closed", "who": "octocat", "merged": "2026-11-27T10:00:00Z"}
+    desk.github_answers(rules=[{"match": "repos/someone/somewhere/issues/7", "out": json.dumps(said)}])
+    try:
+        card = json.loads(ask(f"/unfurl?url={urllib.parse.quote(pull)}")[1])
+    finally:
+        desk.github_answers(code=1, err="gh: Not Found (HTTP 404)")
+    assert (card["site"], card["title"], card["text"]) == (
+        "GitHub someone/somewhere#7",
+        "Fix the warm start",
+        "merged by octocat",
+    )
+
+    # A file on disk named by its path, of a kind a page shows: an image, to the page alone.
+    plot = tmp_path / "plot.png"
+    plot.write_bytes(shot)
+    assert ask(f"/file?path={urllib.parse.quote(str(plot))}") == ("image/png", shot)
+    notes = tmp_path / "notes.txt"
+    notes.write_text("not shown")
+    for refused, as_reader, code in ((plot, False, 403), (notes, True, 404), (pathlib.Path("plot.png"), True, 404)):
+        with pytest.raises(urllib.error.HTTPError) as answer:
+            ask(f"/file?path={urllib.parse.quote(str(refused))}", as_reader)
+        assert answer.value.code == code
+    with pytest.raises(urllib.error.HTTPError) as answer:
+        ask(f"/unfurl?url={urllib.parse.quote(page)}", as_reader=False)
+    assert answer.value.code == 403
+
+
 def test_the_desk_updates_itself_over_https_when_ssh_cannot_be_reached(tmp_path):
     # A published copy of the desk to update from, and a checkout of it whose remote is an address SSH cannot reach.
     published, here = tmp_path / "published", tmp_path / "here"
@@ -2563,6 +2607,13 @@ def test_a_file_offered_to_a_box_is_kept_beside_the_log_and_read_back_from_it(de
     # What GitHub renders nothing of, and a file with nothing in it, are refused as they are offered.
     assert desk.attach("notes.txt", shot)["ok"] is False
     assert desk.attach("empty.png", b"")["ok"] is False
+    # A message of the chat goes nowhere, so it carries any file, which is served to be saved rather than shown.
+    notes = desk.attach("notes.txt", b"what was measured", is_chat=True)["image"]
+    assert (notes["kind"], notes["size"]) == ("text/plain", 17)
+    with urllib.request.urlopen(f"{desk.url}/media/{notes['file']}", timeout=30) as answer:
+        assert answer.headers.get_content_type() == "application/octet-stream"
+        assert answer.headers["Content-Disposition"] == "attachment"
+        assert answer.read() == b"what was measured"
 
 
 def test_a_comment_carries_a_file_to_the_pull_request_and_keeps_a_local_one_here(desk, shot):

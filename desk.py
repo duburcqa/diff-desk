@@ -25,6 +25,7 @@ desk.py chat                                         the threads of the chat, ne
 desk.py chat 3                                       one thread of the chat, as plain text to keep or read back
 desk.py say 3 "..."                                  say something in a thread of the chat
 desk.py say --new "title" "..."                      open a thread of the chat
+desk.py say 3 "..." --attach plot.png                say it with a file, an image, a video or a PDF shown as one
 """
 
 import argparse
@@ -446,6 +447,25 @@ def say(args):
             sys.exit("name the thread to say it in, then the message, or open a thread with --new <title>")
         order["thread"] = int(words.pop(0))
     order["text"] = " ".join(words)
+    # Each file is kept on the desk first, as a box of the page keeps what is dropped into it, and the message then
+    # carries what the desk calls it.
+    order["images"] = []
+    for path in args.attach or ():
+        given = pathlib.Path(path)
+        request = urllib.request.Request(
+            f"{URL}/media?name={urllib.parse.quote(given.name)}&for=chat",
+            data=given.read_bytes(),
+            headers={"Content-Type": "application/octet-stream"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=90) as answer:
+                held = json.loads(answer.read())
+        except (urllib.error.URLError, OSError):
+            sys.exit("nothing is serving")
+        if not held.get("ok"):
+            sys.exit(held.get("error", f"{given.name} was not kept"))
+        order["images"].append(held["image"])
     outcome = ask("/chat", order)
     if outcome is None:
         sys.exit("nothing is serving")
@@ -746,6 +766,7 @@ job.add_argument(
     "words", nargs="+", help="the thread's number then the message in markdown, or the message alone with --new"
 )
 job.add_argument("--new", metavar="TITLE", help="open a new thread under this title")
+job.add_argument("--attach", action="append", metavar="PATH", help="a file the message carries, any kind; repeatable")
 job.set_defaults(run=say)
 
 job = jobs.add_parser("refs", help="the branches ahead of a base, and the open pull requests")

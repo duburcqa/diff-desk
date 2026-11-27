@@ -785,6 +785,7 @@
      away, in a tab of its own. */
   .carries { display: block; max-height: 120px; max-width: 100%; border: 1px solid var(--rule); border-radius: 6px; }
   .said .carries { margin-top: 4px; max-height: 160px; }
+  .carried { display: flex; width: fit-content; align-items: center; margin-top: 6px; padding: 4px 9px; color: var(--accent); background: var(--surface-sunk); border: 1px solid var(--rule); border-radius: 6px; font-size: 12px; }
   /* A box a file is being dragged over, said while it is over it and nowhere else. */
   .taking { outline: 2px dashed var(--accent); outline-offset: -2px; }
   button.solid, button.ghost {
@@ -1428,6 +1429,16 @@
   .chat .msg.them { color: var(--voice, var(--stale)); }
   .chat .msg .who { font-size: 11.5px; font-weight: 600; }
   .chat .msg .who .at { margin-left: 6px; color: var(--faint); font-weight: 400; }
+  .mention { font-weight: 600; color: var(--voice, var(--add-ink)); }
+  .chat .previews { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-top: 6px; }
+  .chat .said .pdf, .chat .previews .pdf { width: 100%; max-width: 520px; height: 240px; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); }
+  .chat .card { display: flex; gap: 10px; max-width: 520px; padding: 7px 10px; background: var(--surface-sunk); border-left: 3px solid var(--rule-strong); border-radius: 0 6px 6px 0; }
+  .chat .card:empty { display: none; }
+  .chat .card .words { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .chat .card .site { color: var(--muted); font-size: 11.5px; }
+  .chat .card .title { font-weight: 600; color: var(--accent); overflow-wrap: anywhere; }
+  .chat .card .text { color: var(--muted); font-size: 12px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .chat .card img { flex: none; width: 72px; height: 72px; object-fit: cover; border-radius: 4px; }
   .chat .msg .who .num { margin-left: 6px; color: var(--faint); font-family: var(--mono); font-weight: 400; }
   .chat .msg.flash { background: color-mix(in srgb, var(--accent) 14%, transparent); }
   .chat .msg .said { color: var(--ink); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
@@ -1446,7 +1457,11 @@
   }
   /* The box and its button side by side, the button at the foot of a box grown taller, and the status under both only
      once it has something to say. */
-  .chat .say textarea { flex: 1; min-width: 0; min-height: 64px; resize: vertical; }
+  .chat .say .write { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+  /* The files the box holds stand under it once there are some, and take no room before. */
+  .chat .say .carrying:empty { display: none; }
+  .chat .say textarea { min-height: 64px; resize: vertical; }
+  .chat .say .buttons { display: flex; flex-direction: column-reverse; gap: 6px; }
   .chat .say .actions { display: flex; align-items: flex-end; gap: 8px; }
   .chat .say .status { color: var(--muted); font-size: 11.5px; }
   .chat .say .status:empty { display: none; }
@@ -1671,8 +1686,12 @@
     <form class="say" id="chatsay">
       <input id="chatname" type="text" placeholder="What the thread is about" aria-label="Title of the new thread" hidden />
       <div class="actions">
-        <textarea id="chattext" placeholder="Markdown. [N] names a comment, `path:line` a line of the diff, @name an agent" aria-label="Message"></textarea>
-        <button class="solid" id="chatsend" type="submit">Send</button>
+        <div class="write">
+          <textarea id="chattext" placeholder="Markdown. [N] names a comment, #N a message, `path:line` a line of the diff, @name an agent" aria-label="Message"></textarea>
+        </div>
+        <div class="buttons" id="chatbuttons">
+          <button class="solid" id="chatsend" type="submit">Send</button>
+        </div>
       </div>
       <span class="status" id="chatresult"></span>
     </form>
@@ -1723,7 +1742,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "goback", "foldreviewed", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "loading", "goto", "veil", "palette", "pq", "picks", "find", "fgrip", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "fthreads", "toast", "toastwhere", "toastsaid", "toastmark", "logdot", "chatopen", "chatdot", "chat", "chatgrip", "chatback", "chattitle", "chatcopy", "chatnew", "chatclose", "chatwho", "chatrows", "chatsay", "chatname", "chattext", "chatsend", "chatresult", "filesgrip", "railfold", "logmove", "logsize", "fchat"]) {
+  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "goback", "foldreviewed", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "loading", "goto", "veil", "palette", "pq", "picks", "find", "fgrip", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "fthreads", "toast", "toastwhere", "toastsaid", "toastmark", "logdot", "chatopen", "chatdot", "chat", "chatgrip", "chatback", "chattitle", "chatcopy", "chatnew", "chatclose", "chatwho", "chatrows", "chatsay", "chatname", "chattext", "chatsend", "chatresult", "filesgrip", "railfold", "logmove", "logsize", "fchat", "chatbuttons"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -2089,12 +2108,13 @@
   // request could not show.
   const ATTACHABLE = ".png,.jpg,.jpeg,.gif,.webp,.svg,.mp4,.mov,.webm";
 
-  async function kept(file) {
+  async function kept(file, isChat) {
     // Kept by the desk as it arrives rather than as the comment is sent: the reader sees at once that the screenshot
-    // is on the desk, and what the comment holds is its name.
+    // is on the desk, and what the comment holds is its name. A message of the chat takes any file (see `attached`).
     if (leaving) return { ok: false, error: "the page is going" };
     try {
-      const answer = await ask(`media?name=${encodeURIComponent(file.name || "pasted.png")}`, {
+      const named = `media?name=${encodeURIComponent(file.name || "pasted.png")}${isChat ? "&for=chat" : ""}`;
+      const answer = await ask(named, {
         method: "POST",
         headers: { "Content-Type": "application/octet-stream" },
         body: file,
@@ -2188,8 +2208,24 @@
     return add;
   }
 
-  function shown(host, images) {
+  function shown(host, images, isPreviewing = true) {
     for (const image of images || []) {
+      // A PDF is shown at its first page where there is room for it, and any other file a message of the chat carries
+      // as its name, saved when pressed under the name it came with.
+      const isOther = !image.kind.startsWith("image/") && !image.kind.startsWith("video/");
+      if (image.kind === "application/pdf" && isPreviewing) {
+        const pages = `media/${image.file}#toolbar=0&view=FitH`;
+        host.append(Object.assign(document.createElement("iframe"), { className: "pdf", src: pages, title: image.name }));
+        continue;
+      }
+      if (isOther) {
+        const saved = Object.assign(document.createElement("a"), { className: "carried", href: `media/${image.file}` });
+        saved.download = image.name;
+        saved.textContent = image.size ? `${image.name} (${Math.max(1, Math.round(image.size / 1024))} kB)` : image.name;
+        saved.dataset.tip = `Save ${image.name}`;
+        host.append(saved);
+        continue;
+      }
       // A video is played where it stands, a still is opened whole in a tab of its own.
       if (image.kind.startsWith("video/")) {
         const player = document.createElement("video");
@@ -2219,7 +2255,7 @@
   const sameFiles = (held, given) =>
     held.map((image) => image.file).join(" ") === (given || []).map((image) => image.file).join(" ");
 
-  function attaching(field, box, controls, held) {
+  function attaching(field, box, controls, held, isChat = false) {
     // Every box a reviewer writes in takes a file the three ways one arrives: pasted from the clipboard, dropped onto
     // the box, or picked with the button this adds to its buttons. Answers with the way to read what the box carries,
     // and to replace it, which is what a box that outlives one comment - the overall note - is cleared through.
@@ -2231,7 +2267,7 @@
       strip.innerHTML = "";
       for (const image of carrying) {
         const one = document.createElement("span");
-        shown(one, [image]);
+        shown(one, [image], false);
         const drop = document.createElement("button");
         drop.className = "drop";
         drop.textContent = "\u00d7";
@@ -2246,7 +2282,7 @@
     };
     const take = async (files) => {
       for (const file of files) {
-        const answer = await kept(file);
+        const answer = await kept(file, isChat);
         if (answer.ok) carrying.push(answer.image);
         else window.alert(`${file.name || "that file"} was not kept: ${answer.error || "the desk refused it"}`);
       }
@@ -2255,7 +2291,8 @@
     const pick = document.createElement("input");
     pick.type = "file";
     pick.multiple = true;
-    pick.accept = ATTACHABLE;
+    // What a comment can carry to the pull request, or any file for the chat, which goes nowhere.
+    if (!isChat) pick.accept = ATTACHABLE;
     pick.hidden = true;
     pick.addEventListener("change", () => {
       take([...pick.files]);
@@ -2265,7 +2302,7 @@
     const offer = document.createElement("button");
     offer.className = "ghost";
     offer.textContent = "Attach";
-    offer.dataset.tip = "Attach an image or a video";
+    offer.dataset.tip = isChat ? "Attach a file" : "Attach an image or a video";
     offer.addEventListener("click", () => pick.click());
     controls.append(offer, pick);
     field.addEventListener("paste", (event) => {
@@ -2450,10 +2487,10 @@
     els.chatname.hidden = !isNew;
     els.chattitle.textContent = isThread ? threads.get(chat.open)[0].title || "Untitled" : isNew ? "New thread" : "Chat";
     // Drawn again only for what moved, so a thread being read keeps its place between two rounds that heard nothing.
-    const shown = JSON.stringify([chat.open, chat.messages.length, isThread ? null : chat.read, data.viewer]);
-    if (shown === chat.drawn) return;
+    const drawing = JSON.stringify([chat.open, chat.messages.length, isThread ? null : chat.read, data.viewer]);
+    if (drawing === chat.drawn) return;
     const atFoot = els.chatrows.scrollHeight - els.chatrows.scrollTop - els.chatrows.clientHeight < 40;
-    chat.drawn = shown;
+    chat.drawn = drawing;
     els.chatrows.replaceChildren();
     if (isThread) {
       for (const message of threads.get(chat.open)) {
@@ -2475,6 +2512,8 @@
         const words = line.appendChild(document.createElement("div"));
         words.className = "said";
         const text = written(words.appendChild(spoke()), message.text);
+        shown(words, message.images);
+        previews(words, text, message.text);
         // A message named by its number goes to that message, in whichever thread it was said.
         rewriteText(text, /(?<![\w&#])(#\d+)(?!\w)/, (piece) => {
           const named = chat.messages.find((held) => held.id === Number(piece.slice(1)));
@@ -2522,6 +2561,56 @@
       dot.dataset.on = String(unreadIn(thread) > 0);
       topic.addEventListener("click", () => openChat(thread[0].thread));
       els.chatrows.append(topic);
+    }
+  }
+
+  // The links of a message shown under it, as a chat shows them: an image or a video where it stands, a PDF's first page,
+  // and any other page as a card of what it says of itself (see /unfurl). A file on disk named by its path is shown the
+  // same way, through the desk (see /file). The first few alone, so a message listing links stays a message.
+  const PREVIEWS = 4;
+  const KINDS = [
+    ["image", /\.(?:png|jpe?g|gif|webp|svg)(?:[?#].*)?$/i],
+    ["video", /\.(?:mp4|mov|webm)(?:[?#].*)?$/i],
+    ["pdf", /\.pdf(?:[?#].*)?$/i],
+  ];
+  const ON_DISK = /(?:^|[\s(`])((?:~|\/)[^\s`()]*\.(?:png|jpe?g|gif|webp|svg|mp4|mov|webm|pdf))(?=$|[\s).,;:`])/gim;
+  // What each page has been shown as, asked once however often the chat is drawn.
+  const cards = new Map();
+
+  function previews(host, text, said) {
+    const web = [...text.querySelectorAll("a[href^='http']")].map((anchor) => anchor.href);
+    const disk = [...String(said).matchAll(ON_DISK)].map((found) => found[1]);
+    const links = [...new Set([...web, ...disk])].slice(0, PREVIEWS);
+    if (!links.length) return;
+    const shelf = host.appendChild(document.createElement("div"));
+    shelf.className = "previews";
+    for (const link of links) {
+      const src = /^https?:/.test(link) ? link : `file?path=${encodeURIComponent(link)}`;
+      const kind = (KINDS.find(([, pattern]) => pattern.test(link)) || ["page"])[0];
+      if (kind === "image") {
+        const opened = Object.assign(document.createElement("a"), { href: src, target: "_blank", rel: "noreferrer" });
+        opened.append(Object.assign(document.createElement("img"), { className: "carries", src, alt: link }));
+        shelf.append(opened);
+      } else if (kind === "video") {
+        shelf.append(Object.assign(document.createElement("video"), { className: "carries", src, controls: true, preload: "metadata" }));
+      } else if (kind === "pdf") {
+        // Its first page across the width, without the viewer's toolbar, which a preview this small has no room for.
+        shelf.append(Object.assign(document.createElement("iframe"), { className: "pdf", src: `${src}#toolbar=0&view=FitH`, title: link }));
+      } else {
+        const card = shelf.appendChild(document.createElement("div"));
+        card.className = "card";
+        if (!cards.has(link)) cards.set(link, ask(`unfurl?url=${encodeURIComponent(link)}`).then((answer) => (answer.ok ? answer.json() : null)).catch(() => null));
+        cards.get(link).then((said) => {
+          const told = said || { url: link, site: new URL(link).hostname, title: link };
+          const words = card.appendChild(document.createElement("div"));
+          words.className = "words";
+          words.append(Object.assign(document.createElement("span"), { className: "site", textContent: told.site }));
+          const title = Object.assign(document.createElement("a"), { className: "title", href: link, target: "_blank", rel: "noreferrer", textContent: told.title });
+          words.append(title);
+          if (told.text) words.append(Object.assign(document.createElement("span"), { className: "text", textContent: told.text }));
+          if (told.image) card.append(Object.assign(document.createElement("img"), { src: told.image, alt: "" }));
+        });
+      }
     }
   }
 
@@ -2575,7 +2664,8 @@
       return;
     }
     els.chatsend.disabled = true;
-    const outcome = await post("chat", isNew ? { title, text } : { thread: chat.open, text });
+    const images = chatFiles();
+    const outcome = await post("chat", isNew ? { title, text, images } : { thread: chat.open, text, images });
     els.chatsend.disabled = false;
     if (!outcome.ok) {
       els.chatresult.textContent = outcome.error || "not sent";
@@ -2583,6 +2673,7 @@
     }
     els.chattext.value = "";
     els.chatname.value = "";
+    chatFiles([]);
     els.chatresult.textContent = "";
     chat.open = outcome.thread;
     await loadNotes();
@@ -3987,7 +4078,7 @@
   // Every piece of the plain text under a node that a pattern matches, put back as what make builds of it. Code and
   // links are left alone. The pattern has one capturing group, which is the piece.
   function rewriteText(root, pattern, make) {
-    const inside = (node) => node.parentElement.closest("code, pre, a");
+    const inside = (node) => node.parentElement.closest("code, pre, a, .mention, .figure");
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
       acceptNode: (node) => (inside(node) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
     });
@@ -4175,7 +4266,22 @@
         }
         prose(host, spoken(chunk));
       });
+    // A mention of someone who has said something on this desk is read in their colour.
+    rewriteText(host, /(?<![\w@])(@[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)/, (piece) => {
+      const who = mentioned(piece.slice(1));
+      if (!who) return piece;
+      return voiced(Object.assign(document.createElement("span"), { className: "mention", textContent: piece }), who);
+    });
     return host;
+  }
+
+  // Who a mention names, as the log records them: the reader by their login or as "you", an agent by its name, and an
+  // author of the pull request by their login. Null for a name nobody here goes by.
+  function mentioned(name) {
+    if (name === "you" || (mine_() && name === mine_())) return "you";
+    const known = voiceOrder();
+    if (known.includes(`agent:${name}`)) return `agent:${name}`;
+    return known.includes(name) ? name : null;
   }
 
   const spoke = () => {
@@ -7484,6 +7590,9 @@
   els.chatclose.addEventListener("click", () => showChat(false));
   els.chatnew.addEventListener("click", () => openChat("new"));
   els.chatback.addEventListener("click", () => openChat(null));
+  // The box of the chat takes a file the way every box a reviewer writes in does, pasted, dropped or picked, and any
+  // file at all, since the chat goes nowhere.
+  const chatFiles = attaching(els.chattext, els.chatsay, els.chatbuttons, [], true);
   els.chatsay.addEventListener("submit", sayInChat);
   els.chattext.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) sayInChat(event);

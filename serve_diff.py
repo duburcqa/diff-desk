@@ -18,6 +18,9 @@ Endpoints, all on 127.0.0.1 so nothing is exposed off the machine:
   GET  /heard?branch=         where the agent asking last stopped watching those reviews, and whether the desk has
                               restarted since
   GET  /watching              the agents watching the desk right now
+  GET  /unfurl?url=           what a link of the chat is shown as: a pull request, an issue or a commit as GitHub
+                              names it, a page by the title, words and image it gives of itself
+  GET  /file?path=            an image, a video or a PDF on disk named by its path, shown in the chat where it is named
   GET  /chat                  every message of the chat, threads and all
   GET  /chat/export?thread=N  one thread of the chat as plain text, to be kept or read back
   POST /chat                  {thread, title, text, images} - say something in a thread, or open one with a title
@@ -37,7 +40,8 @@ Endpoints, all on 127.0.0.1 so nothing is exposed off the machine:
                               what was only bound, so nothing first reaches a pull request unasked
   POST /sync                  {repo, pr} - bring back what the pull request holds: replies, what it says is resolved,
                               and the comments written there that this desk has none of
-  POST /media?name=           the bytes of one image or video a comment is to carry, kept beside the log
+  POST /media?name=&for=      the bytes of one image or video a comment is to carry, kept beside the log, or of any
+                              file a message of the chat carries with `for=chat`
   GET  /media/<file>          one file kept that way, which is what the page shows a comment carrying
   GET  /semantic?dir=&oldrev=&rev=&path=...
                               the Python files named, old and new, lined up by statement for the semantic view
@@ -101,6 +105,7 @@ import hashlib
 import hmac
 import http.cookies
 import json
+import mimetypes
 import os
 import pathlib
 import re
@@ -110,9 +115,12 @@ import socket
 import threading
 import time
 import types
+import urllib.error
+import urllib.request
+from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import NamedTuple
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, quote, urljoin, urlparse
 
 import gen_diff_data
 import semantic
@@ -198,6 +206,16 @@ ATTACHABLE = {
     ".mov": "video/quicktime",
     ".webm": "video/webm",
 }
+# What the page may be shown from disk where a message names a file: what a browser shows inline.
+SHOWABLE = {**ATTACHABLE, ".pdf": "application/pdf"}
+# A pull request, an issue or a commit on GitHub, which `gh` names better than its page does to a stranger.
+GITHUB_LINK = re.compile(r"https://github\.com/([\w.-]+)/([\w.-]+)/(pull|issues|commit)/(\w+)")
+# What `gh` is asked to say of a commit, and of an issue or a pull request (an issue to the API, merged or not).
+COMMIT_SAYS = '{title: (.commit.message | split("\\n")[0]), who: (.author.login // .commit.author.name)}'
+ISSUE_SAYS = "{title, state, who: .user.login, merged: .pull_request.merged_at}"
+# How much of a page is read for what it says of itself, and how long it is waited for: its head is all that is wanted.
+PAGE_READ = 512 * 1024
+PAGE_WAIT = 5.0
 # The most GitHub takes of each kind. What it takes of a video is the account's own allowance, which cannot be known
 # before asking, so this is the generous bound and GitHub refuses the rest.
 CAPS = {"image": 10 * 1024 * 1024, "video": 100 * 1024 * 1024}
@@ -260,21 +278,25 @@ def reader_key():
     return READER_KEY.read_text().strip()
 
 
-def attached(name, raw):
-    """Keep one file a comment is to carry beside the log, and say what it is called there, or why it was refused.
+def attached(name, raw, is_chat=False):
+    """Keep one file a comment or a message of the chat is to carry beside the log, and say what it is called there, or
+    why it was refused.
 
     Named by the digest of what it holds, so the same screenshot pasted into two comments is one file and a name the
-    reviewer never chose cannot land on another's.
+    reviewer never chose cannot land on another's. A comment carries what GitHub's upload takes, since a comment may go
+    there; the chat goes nowhere, so a message carries any file, up to the largest a video may be.
     """
     suffix = pathlib.Path(name).suffix.lower()
     kind = ATTACHABLE.get(suffix)
+    if is_chat:
+        kind = SHOWABLE.get(suffix) or mimetypes.guess_type(name)[0] or "application/octet-stream"
     if kind is None:
         offered = suffix or "a file with no extension"
         taken = " ".join(sorted(ATTACHABLE))
         return None, f"GitHub's upload takes none of {offered}, whatever a browser's comment box takes: {taken}"
     if not raw:
         return None, f"{name} holds nothing"
-    cap = CAPS["video" if kind.startswith("video/") else "image"]
+    cap = CAPS["video" if is_chat or kind.startswith("video/") else "image"]
     if len(raw) > cap:
         return None, f"{name} is {len(raw) // (1024 * 1024)}MB, and GitHub takes {cap // (1024 * 1024)}MB of that kind"
     file = hashlib.sha256(raw).hexdigest()[:16] + suffix
@@ -282,7 +304,10 @@ def attached(name, raw):
     gen_diff_data.write_whole(MEDIA / file, raw)
     # The words that stand in for an image are its own name, as the web uploader has them: the extension goes and the
     # dots left in what remains read as spaces.
-    return {"file": file, "name": name, "kind": kind, "alt": pathlib.Path(name).stem.replace(".", " ")}, ""
+    held = {"file": file, "name": name, "kind": kind, "alt": pathlib.Path(name).stem.replace(".", " ")}
+    if is_chat:
+        held["size"] = len(raw)
+    return held, ""
 
 
 def carried(order):
@@ -1314,6 +1339,89 @@ def spoken_name(who):
     return who.removeprefix("agent:")
 
 
+class PageSays(HTMLParser):
+    """What a page says of itself in its head: its title, and the `og:` and `description` meta of its tags."""
+
+    def __init__(self):
+        super().__init__()
+        self.meta = {}
+        self.title = ""
+        self.in_title = False
+
+    def handle_starttag(self, tag, attrs):
+        held = dict(attrs)
+        if tag == "meta" and held.get("content"):
+            name = held.get("property") or held.get("name") or ""
+            self.meta.setdefault(name.lower(), held["content"])
+        self.in_title = tag == "title"
+
+    def handle_endtag(self, tag):
+        if tag == "title":
+            self.in_title = False
+
+    def handle_data(self, data):
+        if self.in_title:
+            self.title += data
+
+
+# What each link has been shown as, for as long as the desk runs: a page redrawn every few seconds asks again.
+UNFURLED = {}
+UNFURLING = threading.Lock()
+
+
+def unfurl(url):
+    """What a link of the chat is shown as: a card with the site it is on, a title, some words and an image."""
+    with UNFURLING:
+        if url in UNFURLED:
+            return UNFURLED[url]
+    named = GITHUB_LINK.match(url)
+    card = github_card(url, *named.groups()) if named else page_card(url)
+    with UNFURLING:
+        UNFURLED[url] = card
+    return card
+
+
+def github_card(url, owner, repo, kind, ident):
+    """A pull request, an issue or a commit as GitHub names it, read through `gh`, which names a private one too."""
+    if kind == "commit":
+        where, shape = f"repos/{owner}/{repo}/commits/{ident}", COMMIT_SAYS
+    else:
+        where, shape = f"repos/{owner}/{repo}/issues/{ident}", ISSUE_SAYS
+    done = gen_diff_data.gh("api", where, "--jq", shape, repeatable=True, budget=PAGE_WAIT)
+    label = f"{owner}/{repo}" + (f"@{ident[:9]}" if kind == "commit" else f"#{ident}")
+    if done.returncode != 0:
+        return {"url": url, "site": "GitHub", "title": label}
+    said = json.loads(done.stdout)
+    state = "merged" if said.get("merged") else said.get("state")
+    words = " by ".join(part for part in (state, said.get("who")) if part)
+    return {"url": url, "site": f"GitHub {label}", "title": said.get("title") or label, "text": words}
+
+
+def page_card(url):
+    """A page by the title, the words and the image it gives of itself, or by its address where it gives nothing."""
+    site = urlparse(url).hostname or url
+    request = urllib.request.Request(url, headers={"User-Agent": "diff-desk", "Accept": "text/html"})
+    try:
+        with urllib.request.urlopen(request, timeout=PAGE_WAIT) as answer:
+            if answer.headers.get_content_type() != "text/html":
+                return {"url": url, "site": site, "title": url}
+            head = answer.read(PAGE_READ).decode(answer.headers.get_content_charset() or "utf-8", errors="replace")
+    except (urllib.error.URLError, OSError, ValueError):
+        return {"url": url, "site": site, "title": url}
+    says = PageSays()
+    says.feed(head)
+    meta = says.meta
+    card = {
+        "url": url,
+        "site": meta.get("og:site_name") or site,
+        "title": " ".join((meta.get("og:title") or says.title or url).split()),
+        "text": " ".join((meta.get("og:description") or meta.get("description") or "").split())[:300],
+    }
+    if meta.get("og:image"):
+        card["image"] = urljoin(url, meta["og:image"])
+    return card
+
+
 def chat_export(thread):
     """One thread of the chat as plain markdown: its title, then every message under who said it, when, and the number
     it is referred to by."""
@@ -1467,13 +1575,13 @@ class Handler(BaseHTTPRequestHandler):
     # Who is making the request, for a request that writes to the log or asks for an agent's news (see `_author`).
     author = None
 
-    def _send(self, code, body=b"", kind="text/plain; charset=utf-8", cookie=""):
+    def _send(self, code, body=b"", kind="text/plain; charset=utf-8", headers=()):
         self.send_response(code)
         self.send_header("Content-Type", kind)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
-        if cookie:
-            self.send_header("Set-Cookie", cookie)
+        for name, value in headers:
+            self.send_header(name, value)
         self.end_headers()
         if body:
             self.wfile.write(body)
@@ -1528,6 +1636,8 @@ class Handler(BaseHTTPRequestHandler):
             "/news": self._news,
             "/heard": self._heard,
             "/chat/export": self._export,
+            "/unfurl": self._unfurl,
+            "/file": self._file,
         }
         if path in ("", "/index.html"):
             print(f"PAGE served to {self.headers.get('User-Agent', '?')}", flush=True)
@@ -1536,7 +1646,7 @@ class Handler(BaseHTTPRequestHandler):
             # cookie is what makes every request of the page the reader's, and it lasts as long as a page can stay
             # open, since one restored by a browser coming back is not asked for again.
             key = f"{READER_COOKIE}={reader_key()}; Path=/; Max-Age=31536000; SameSite=Strict; HttpOnly"
-            self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8", cookie=key)
+            self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8", headers=(("Set-Cookie", key),))
         elif path in held:
             self._json(held[path]())
         elif path == "/data":
@@ -1670,6 +1780,30 @@ class Handler(BaseHTTPRequestHandler):
         titles = {number: thread[0].get("title", "") for number, thread in threads.items()}
         said = [{**message, "title": titles.get(message["thread"], "")} for message in said]
         self._json({"rows": fresh, "chat": said, "desk": SERVING})
+
+    def _unfurl(self, query):
+        """What a link of the chat is shown as, to the page alone, which is the one that shows it."""
+        url = query.get("url", [""])[0]
+        if self._author()[0] != READER or not url.startswith(("http://", "https://")):
+            self._send(403)
+            return
+        self._json(unfurl(url))
+
+    def _file(self, query):
+        """An image, a video or a PDF on disk, to the page alone: named by an absolute path, of a type a page shows.
+
+        The page is told it by the cookie it was served, which a page of another site never carries, so nothing but
+        this desk's own page is shown a file this way.
+        """
+        given = pathlib.Path(os.path.expanduser(query.get("path", [""])[0]))
+        kind = SHOWABLE.get(given.suffix.lower())
+        if self._author()[0] != READER:
+            self._send(403)
+            return
+        if kind is None or not given.is_absolute() or not given.is_file():
+            self._send(404)
+            return
+        self._send(200, given.read_bytes(), kind)
 
     def _export(self, query):
         """One thread of the chat as plain text, which is what an agent keeps of a conversation or reads back later."""
@@ -1813,9 +1947,16 @@ class Handler(BaseHTTPRequestHandler):
         can read, and every file here is named by the digest of what it holds.
         """
         where = MEDIA / pathlib.PurePosixPath(file).name
-        kind = ATTACHABLE.get(where.suffix.lower())
-        if kind is None or not where.is_file():
+        if not where.is_file():
             self._send(404)
+            return
+        # What a page shows is served to be shown; anything else a message of the chat carries is served to be saved,
+        # so nothing kept here is ever run as a page of this desk.
+        kind = SHOWABLE.get(where.suffix.lower())
+        if kind is None:
+            self._send(
+                200, where.read_bytes(), "application/octet-stream", headers=(("Content-Disposition", "attachment"),)
+            )
             return
         self._send(200, where.read_bytes(), kind)
 
@@ -1826,14 +1967,16 @@ class Handler(BaseHTTPRequestHandler):
         rather than a form. Kept as it is offered rather than as the comment is sent: a reviewer sees at once that the
         screenshot is on the desk, and the comment it goes into carries nothing but its name.
         """
-        name = parse_qs(urlparse(self.path).query).get("name", ["attachment"])[0]
+        query = parse_qs(urlparse(self.path).query)
+        name = query.get("name", ["attachment"])[0]
+        is_chat = query.get("for", [""])[0] == "chat"
         length = int(self.headers.get("Content-Length", 0))
         # Refused on the length it declares, before it is read: nothing GitHub would turn away is carried into memory
         # first.
         if length > CAPS["video"]:
             self._json({"ok": False, "error": f"{name} is larger than anything GitHub takes"})
             return
-        held, trouble = attached(name, self.rfile.read(length))
+        held, trouble = attached(name, self.rfile.read(length), is_chat)
         if trouble:
             print(f"ATTACH REFUSED {trouble}", flush=True)
             self._json({"ok": False, "error": trouble})

@@ -5311,3 +5311,43 @@ def test_a_message_of_the_chat_is_named_by_its_number(page, desk):
     assert page.locator("#chattitle").inner_text() == "Where it was said"
     assert "flash" in reached.get_attribute("class")
     assert reached.is_visible()
+
+
+def test_a_message_of_the_chat_carries_files_and_shows_its_links(page, desk, site, shot, tmp_path):
+    plot = tmp_path / "plot.png"
+    plot.write_bytes(shot)
+    title = f"Carried, number {len(desk.get('/chat')['messages']) + 1}"
+    thread = desk.post("/chat", {"title": title, "text": "the run is done"}, agent=AGENT)["thread"]
+    said = f"@{AGENT} the benchmark is at {site}/page.html and the plot at {plot}."
+    desk.post("/chat", {"thread": thread, "text": said}, agent="astra")
+    page.evaluate("() => loadNotes()")
+    page.locator("#chatopen").click()
+    page.locator(f".chat .topic[data-thread='{thread}']").click()
+    page.wait_for_selector(".chat .card .title")
+
+    # A mention of an author who has said something here is read in their colour.
+    colour = "(node) => getComputedStyle(node).color"
+    mention = page.locator(".chat .msg .mention", has_text=f"@{AGENT}")
+    assert mention.evaluate(colour) == page.locator(".chat .msg .who").first.evaluate(colour)
+    # Its links are shown under it: a page by what it says of itself, an image on disk as the image.
+    assert page.locator(".chat .card .title").inner_text() == "Standing-wave benchmark"
+    shown = "(img) => img.complete && img.naturalWidth"
+    page.wait_for_function(f"() => ({shown})(document.querySelector('.chat .previews img.carries'))")
+    assert page.locator(".chat .previews img.carries").evaluate(shown) == 64
+
+    # Files are put in the box as in any box, any file at all, and go with the message: an image shown as the image,
+    # anything else as its name, saved under that name.
+    notes = tmp_path / "measured.csv"
+    notes.write_text("case,mm\nlattice,0.8\n")
+    page.locator("#chatbuttons input[type=file]").set_input_files([str(plot), str(notes)])
+    page.wait_for_function("() => document.querySelectorAll('.chat .say .carrying > span').length === 2")
+    page.locator("#chattext").fill("and the plot itself")
+    page.locator("#chatsend").click()
+    page.wait_for_function("() => document.querySelectorAll('.chat .msg').length === 3")
+    sent = [message for message in desk.get("/chat")["messages"] if message["thread"] == thread][-1]
+    assert (sent["who"], len(sent["images"])) == ("you", 2)
+    last = page.locator(".chat .msg").last.locator("img.carries")
+    page.wait_for_function(f"(seen) => ({shown})(seen)", arg=last.element_handle())
+    saved = page.locator(".chat .msg").last.locator("a.carried")
+    assert saved.get_attribute("download") == "measured.csv"
+    assert page.locator(".chat .say .carrying img").count() == 0
