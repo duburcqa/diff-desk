@@ -5361,6 +5361,17 @@ def test_a_message_of_the_chat_is_named_by_its_number(page, desk):
     message.wait_for()
     # Each message wears the number it is named by, beside who said it and when.
     assert message.locator(".who .num").inner_text() == f"#{naming}"
+    # And hands the clipboard what it says as it was written, recorded rather than read back (see the copy of a path).
+    page.evaluate("""() => {
+      window.copied = [];
+      navigator.clipboard.writeText = (text) => {
+        window.copied.push(text);
+        return Promise.resolve();
+      };
+    }""")
+    message.hover()
+    message.locator(".who .copy").click()
+    assert page.evaluate("() => window.copied") == [f"as in #{named}, unlike `#{named}` or #999999"]
     # Named outside code, and naming a message that exists, it is a link; anything else stays words.
     assert message.locator("a.xref").all_inner_texts() == [f"#{named}"]
     message.locator("a.xref").click()
