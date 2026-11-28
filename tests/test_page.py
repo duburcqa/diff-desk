@@ -5962,9 +5962,14 @@ def test_a_message_of_the_chat_carries_files_and_shows_its_links(page, desk, sit
     page.wait_for_function(f"() => ({shown})(document.querySelector('.chat .previews img.carries'))")
     assert page.locator(".chat .previews img.carries").evaluate(shown) == 64
 
-    # A path on disk in its words is a link, a sentence ending on one keeping its full stop, and so is a folder closing
-    # on its slash.
-    assert page.locator(".chat .msg a.ondisk").first.inner_text() == str(plot)
+    # A link shown under the message reads as the label of its preview there, numbered in the order the message names
+    # them, the whole of it said when pointed at. A path on disk in its words is a link as well, and so is a folder
+    # closing on its slash, which nothing shows and which keeps its words.
+    shortened = page.locator(".chat .msg a.short")
+    assert shortened.all_inner_texts() == ["link#1", "link#2", "link#3"]
+    tips = [link.get_attribute("data-tip") for link in shortened.all()]
+    assert tips == [f"{site}/page.html", str(plot), str(derivation)]
+    assert page.locator(".chat .previews .linklabel").all_inner_texts() == ["link#1", "link#2", "link#3"]
     assert f"{tmp_path}/" in page.locator(".chat .msg a.ondisk").all_inner_texts()
 
     # An image or a video is put in the box as in any box, and goes with the message, shown where it stands. Any other
