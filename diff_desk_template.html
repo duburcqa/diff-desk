@@ -1509,7 +1509,14 @@
   .chat .reports .reportchip > span, .chat .pins .pinned { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .chat .reports .reportchip > span { min-width: 0; }
   .chat .reports .reportchip .dot { top: 2px; right: 6px; }
-  .chat .reports .reportchip { position: relative; border: 1px solid var(--rule-strong); border-radius: 999px; padding: 4px 14px 4px 10px; max-width: min(100%, 260px); }
+  .chat .reports .reportpin { display: inline-flex; align-items: center; min-width: 0; max-width: min(100%, 280px); padding-right: 2px; border: 1px solid var(--rule-strong); border-radius: 999px; }
+  .chat .reports .reportchip { position: relative; flex: 1 1 auto; padding: 4px 12px 4px 10px; border-radius: 999px; }
+  .chat .pins .pinrow { display: flex; align-items: center; min-width: 0; }
+  .chat .pins .pinrow .pinned { flex: 1 1 auto; }
+  /* The cross taking a pin off comes with the pointer, and stands always on a touch screen, which has none. */
+  .chat .pins .pinrow .unpin { visibility: hidden; }
+  .chat .pins .pinrow:hover .unpin, .chat .pins .pinrow .unpin:focus-visible { visibility: visible; }
+  @media (pointer: coarse) { .chat .pins .pinrow .unpin { visibility: visible; } }
   .chat .reportcard { margin-top: 6px; padding: 6px 10px; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface-sunk); }
   /* A report opened fills the chat, the way back at the top right. */
   .chat .viewer:not([hidden]) { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; background: var(--surface); }
@@ -3225,36 +3232,37 @@
     ["video", /\.(?:mp4|mov|webm)(?:[?#].*)?$/i],
     ["pdf", /\.pdf(?:[?#].*)?$/i],
   ];
-  const ON_DISK = /(?:^|[\s(`])((?:~|\/)[^\s`()]*\.(?:png|jpe?g|gif|webp|svg|mp4|mov|webm|pdf))(?=$|[\s).,;:`])/gim;
+  const ON_DISK = /(?:^|[\s(`])((?:~|\/)[^\s`()]*\.(?:png|jpe?g|gif|webp|svg|mp4|mov|webm|pdf|md|markdown|txt|html?))(?=$|[\s).,;:`])/gim;
   // A path on disk named in a message, in its words or alone in a code span, is a link that opens the file where the
   // page is read: with the application that machine opens its kind with on the desk's own machine (see '/open'), and
   // from another device (a phone on the tailnet) shown or saved there through the desk (see '/file'). Two parts at
-  // least, so a slash between two words is no path.
-  const ON_DISK_PATH = /(?<![\w:/.~-])((?:~\/|\/)[\w.@+%~-]+(?:\/[\w.@+%~-]+)+)/;
+  // least, so a slash between two words is no path, and a folder may close on its slash.
+  const ON_DISK_PATH = /(?<![\w:/.~-])((?:~\/|\/)[\w.@+%~-]+(?:\/[\w.@+%~-]+)+\/?)/;
   const isOnThisMachine = ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname);
 
+  function diskLink(path) {
+    const anchor = Object.assign(document.createElement("a"), {
+      className: "ondisk",
+      href: `file?path=${encodeURIComponent(path)}`,
+      target: "_blank",
+      rel: "noreferrer",
+      textContent: path,
+    });
+    anchor.dataset.tip = isOnThisMachine ? "Open with this machine's application for it" : "Open on this device";
+    anchor.addEventListener("click", async (event) => {
+      if (!isOnThisMachine) return;
+      event.preventDefault();
+      const outcome = await post("open", { path });
+      if (!outcome.ok) announce("open", path, outcome.error || "the desk refused it");
+    });
+    return anchor;
+  }
+
   function linkDisk(text) {
-    const link = (path) => {
-      const anchor = Object.assign(document.createElement("a"), {
-        className: "ondisk",
-        href: `file?path=${encodeURIComponent(path)}`,
-        target: "_blank",
-        rel: "noreferrer",
-        textContent: path,
-      });
-      anchor.dataset.tip = isOnThisMachine ? "Open with this machine's application for it" : "Open on this device";
-      anchor.addEventListener("click", async (event) => {
-        if (!isOnThisMachine) return;
-        event.preventDefault();
-        const outcome = await post("open", { path });
-        if (!outcome.ok) announce("open", path, outcome.error || "the desk refused it");
-      });
-      return anchor;
-    };
     for (const code of text.querySelectorAll(":not(pre) > code")) {
       const path = code.textContent.trim();
       if (!new RegExp(`^${ON_DISK_PATH.source}$`).test(path)) continue;
-      const anchor = link(path);
+      const anchor = diskLink(path);
       anchor.replaceChildren(code.cloneNode(true));
       code.replaceWith(anchor);
     }
@@ -3262,12 +3270,13 @@
     rewriteText(text, ON_DISK_PATH, (piece) => {
       const path = piece.replace(/\.+$/, "");
       const held = document.createDocumentFragment();
-      held.append(link(path), piece.slice(path.length));
+      held.append(diskLink(path), piece.slice(path.length));
       return held;
     });
   }
 
-  // What each page has been shown as, asked once however often the chat is drawn.
+  // What each page of the web has been shown as, asked once however often the chat is drawn. A file on disk is asked
+  // each time, since the agent naming it may write it again.
   const cards = new Map();
 
   function previews(host, text, said) {
@@ -3292,13 +3301,18 @@
       } else {
         const card = shelf.appendChild(document.createElement("div"));
         card.className = "card";
-        if (!cards.has(link)) cards.set(link, ask(`unfurl?url=${encodeURIComponent(link)}`).then((answer) => (answer.ok ? answer.json() : null)).catch(() => null));
+        const isWeb = /^https?:/.test(link);
+        const asked = () => ask(`unfurl?url=${encodeURIComponent(link)}`).then((answer) => (answer.ok ? answer.json() : null)).catch(() => null);
+        if (!isWeb) cards.delete(link);
+        if (!cards.has(link)) cards.set(link, asked());
         cards.get(link).then((said) => {
-          const told = said || { url: link, site: new URL(link).hostname, title: link };
+          const told = said || { url: link, site: isWeb ? new URL(link).hostname : "on disk", title: link };
           const words = card.appendChild(document.createElement("div"));
           words.className = "words";
           words.append(Object.assign(document.createElement("span"), { className: "site", textContent: told.site }));
-          const title = Object.assign(document.createElement("a"), { className: "title", href: link, target: "_blank", rel: "noreferrer", textContent: told.title });
+          // A file on disk opens as its link in the words does (see 'diskLink').
+          const title = isWeb ? Object.assign(document.createElement("a"), { href: link, target: "_blank", rel: "noreferrer" }) : diskLink(link);
+          Object.assign(title, { className: "title", textContent: told.title });
           words.append(title);
           if (told.text) words.append(Object.assign(document.createElement("span"), { className: "text", textContent: told.text }));
           if (told.image) card.append(Object.assign(document.createElement("img"), { src: told.image, alt: "" }));
@@ -3361,7 +3375,8 @@
   }
 
   // A report's name as its chip reads: the file it is, or the site it is on.
-  const reportName = (report) => (report.key ? report.source.split("/").pop() : new URL(report.source).hostname);
+  // A report is named by its own title, read by the desk as the report stands (see '/chat'), else by its file or site.
+  const reportName = (report) => report.title || (report.key ? report.source.split("/").pop() : new URL(report.source).hostname);
 
   // The messages pinned over a thread, each a way to it, and the reports pinned under it, each opened in place.
   function drawPins(messages) {
@@ -3369,27 +3384,41 @@
     const pins = shown.filter((message) => !message.report);
     const reports = shown.filter((message) => message.report);
     els.chatpins.hidden = !pins.length;
+    // Each pin is taken off where it stands, the message it pins staying where it was said.
+    const unpin = (message) => {
+      const off = actButton("unpin", "Take the pin off");
+      off.addEventListener("click", async () => {
+        const outcome = await post("chat/pin", { id: message.id, pinned: false });
+        if (!outcome.ok) announce("pin", `#${message.id}`, outcome.error || "the desk refused it");
+        await loadNotes();
+      });
+      return off;
+    };
     els.chatpins.replaceChildren(
       ...pins.map((message) => {
-        const item = Object.assign(document.createElement("button"), { type: "button", className: "pinned" });
+        const row = Object.assign(document.createElement("div"), { className: "pinrow" });
+        const item = row.appendChild(Object.assign(document.createElement("button"), { type: "button", className: "pinned" }));
         item.innerHTML = `<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><g transform="rotate(45 7 7)"><path d="M5.3 1.6h3.4l-.4 4.5 2.3 2.4H3.4l2.3-2.4z"/><path d="M7 8.5v4.4"/></g></svg>`;
         item.append(`${spokenBy(message.who)}: ${outline(message.text)}`);
         item.addEventListener("click", () => reachMessage(message.id));
-        return item;
+        row.append(unpin(message));
+        return row;
       }),
     );
     els.chatreports.hidden = !reports.length;
     els.chatreports.replaceChildren(
       ...reports.map((message) => {
-        const item = Object.assign(document.createElement("button"), { type: "button", className: "reportchip" });
+        const holder = Object.assign(document.createElement("span"), { className: "reportpin" });
+        const item = holder.appendChild(Object.assign(document.createElement("button"), { type: "button", className: "reportchip" }));
         item.innerHTML = `<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><path d="M3 1.5h5.5L11 4v8.5H3z"/><path d="M8.5 1.5V4H11M5 7h4M5 9.5h4"/></svg>`;
-        item.append(Object.assign(document.createElement("span"), { textContent: outline(message.text) || reportName(message.report) }));
+        item.append(Object.assign(document.createElement("span"), { textContent: reportName(message.report) }));
         // A report on disk written again since the reader last opened it, or never opened, carries a dot (see '/chat').
         const dot = item.appendChild(Object.assign(document.createElement("i"), { className: "dot" }));
         dot.dataset.on = String(Boolean(message.report.at) && chat.reportsSeen[message.id] !== message.report.at);
         item.dataset.tip = message.report.source;
         item.addEventListener("click", () => openReport(message));
-        return item;
+        holder.append(unpin(message));
+        return holder;
       }),
     );
   }
@@ -3417,7 +3446,7 @@
     els.chatviewframe.replaceWith(frame);
     els.chatviewframe = frame;
     els.chatviewout.href = src;
-    els.chatviewtitle.textContent = outline(message.text) || reportName(message.report);
+    els.chatviewtitle.textContent = reportName(message.report);
     els.chatviewer.hidden = false;
     // A phone's back closes it, as it closes a screen.
     if (isPhone()) history.pushState({ ...(history.state || {}), report: true }, "");
@@ -3596,6 +3625,7 @@
     whisperon: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13H15A3 3 0 0 0 18 10V6A3 3 0 0 0 15 3H5A3 3 0 0 0 2 6V10A3 3 0 0 0 5 13H6.6" stroke-dasharray="2.041 2.1"/><path d="M10.8 13H10L6.5 16.8V13H5.8"/><path d="M6.15 8h1.2M9.4 8h1.2M12.65 8h1.2"/></svg>',
     moreacts: '<svg viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><circle cx="3" cy="7" r="1.15"/><circle cx="7" cy="7" r="1.15"/><circle cx="11" cy="7" r="1.15"/></svg>',
     copy: '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="4.6" y="1.6" width="7.8" height="9.8" rx="1.6"/><path d="M9.4 12.4H3.2a1.6 1.6 0 0 1-1.6-1.6V4.2"/></svg>',
+    unpin: '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true"><path d="M4 4l6 6M10 4l-6 6"/></svg>',
     drop: '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7"/></svg>',
   };
 
