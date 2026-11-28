@@ -2189,15 +2189,24 @@ def test_the_desk_is_reached_from_the_tailnet_through_tailscale(desk, tmp_path, 
     port = desk.url.rsplit(":", 1)[1]
     asked = tmp_path / "asked.log"
 
-    # Served over HTTPS at this machine's name on the tailnet, on the desk's own port, forwarded to the desk on
-    # 127.0.0.1, which keeps answering there alone.
+    # Served over HTTPS at this machine's plain address on the tailnet, which a phone types without a port, forwarded
+    # to the desk on 127.0.0.1, which keeps answering there alone.
+    told = desk.cli("tailnet").communicate(timeout=60)[0]
+    assert "https://desk.tail0.ts.net/" in told
+    assert f"serve --bg --https=443 http://127.0.0.1:{port}" in asked.read_text().splitlines()
+    # Asked again, it keeps the address it holds.
+    assert "https://desk.tail0.ts.net/" in desk.cli("tailnet").communicate(timeout=60)[0]
+    # Taken off as asked, and nothing left served.
+    assert "no longer on the tailnet" in desk.cli("tailnet", "--off").communicate(timeout=60)[0]
+    assert asked.read_text().splitlines()[-1] == "serve --https=443 off"
+    assert not (tmp_path / "serving").exists()
+    # Where the plain address serves something else, the desk takes its own port and leaves that alone.
+    (tmp_path / "serving").write_text("443")
     told = desk.cli("tailnet").communicate(timeout=60)[0]
     assert f"https://desk.tail0.ts.net:{port}/" in told
     assert f"serve --bg --https={port} http://127.0.0.1:{port}" in asked.read_text().splitlines()
-    # Taken off as asked, and nothing left served.
-    assert "no longer on the tailnet" in desk.cli("tailnet", "--off").communicate(timeout=60)[0]
+    desk.cli("tailnet", "--off").communicate(timeout=60)
     assert asked.read_text().splitlines()[-1] == f"serve --https={port} off"
-    assert not (tmp_path / "serving").exists()
 
 
 def test_the_desk_updates_itself_over_https_when_ssh_cannot_be_reached(tmp_path):
