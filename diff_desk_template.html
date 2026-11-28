@@ -1437,6 +1437,10 @@
   .chat .msg .who .at { margin-left: 6px; color: var(--faint); font-weight: 400; }
   .mention { font-weight: 600; color: var(--voice, var(--add-ink)); }
   .chat .previews { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-top: 6px; }
+  /* Each preview under the label its link reads as in the message. */
+  .chat .previews .preview { display: flex; flex-direction: column; align-items: flex-start; align-self: stretch; gap: 2px; min-width: 0; }
+  .chat .previews .preview .linklabel { color: var(--faint); font-family: var(--mono); font-size: 11px; }
+  .chat a.ondisk.short { font-family: inherit; font-size: inherit; }
   .chat .said .pdf, .chat .previews .pdf { width: 100%; max-width: 520px; height: 240px; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); }
   .chat .card { display: flex; gap: 10px; max-width: 520px; padding: 7px 10px; background: var(--surface-sunk); border-left: 3px solid var(--rule-strong); border-radius: 0 6px 6px 0; }
   .chat .card:empty { display: none; }
@@ -3165,8 +3169,19 @@
           open.addEventListener("click", () => openReport(message));
         }
         shown(words, message.images);
-        previews(words, text, message.text);
+        const linksShown = previews(words, text, message.text);
         linkDisk(text);
+        // A link shown under the message reads as the label its preview carries, the whole of it said when pointed at.
+        // One the message wrote as words of its own keeps them.
+        for (const anchor of text.querySelectorAll("a[href^='http'], a.ondisk")) {
+          const isDisk = anchor.classList.contains("ondisk");
+          const link = isDisk ? new URL(anchor.href).searchParams.get("path") : anchor.href;
+          const index = linksShown.indexOf(link);
+          if (index < 0 || anchor.textContent.trim() !== (isDisk ? link : anchor.getAttribute("href"))) continue;
+          anchor.replaceChildren(`link#${index + 1}`);
+          anchor.classList.add("short");
+          anchor.dataset.tip = link;
+        }
         // A message named by its number goes to that message, in whichever thread it was said.
         rewriteText(text, /(?<![\w&#])(#\d+)(?!\w)/, (piece) => {
           const named = chat.messages.find((held) => held.id === Number(piece.slice(1)));
@@ -3279,27 +3294,35 @@
   // each time, since the agent naming it may write it again.
   const cards = new Map();
 
+  // The first links of a message shown under it, each labelled `link#N` in the order the message names them, which is
+  // what the words of the message then read for it (see drawChat). Answers the links shown, in that order.
   function previews(host, text, said) {
-    const web = [...text.querySelectorAll("a[href^='http']")].map((anchor) => anchor.href);
-    const disk = [...String(said).matchAll(ON_DISK)].map((found) => found[1]);
-    const links = [...new Set([...web, ...disk])].slice(0, PREVIEWS);
-    if (!links.length) return;
+    const web = [...text.querySelectorAll("a[href^='http']")].map((anchor) => [anchor.href, anchor.getAttribute("href")]);
+    const disk = [...String(said).matchAll(ON_DISK)].map((found) => [found[1], found[1]]);
+    const named = (raw) => (String(said).includes(raw) ? String(said).indexOf(raw) : Infinity);
+    const ordered = [...web, ...disk].sort((one, other) => named(one[1]) - named(other[1]));
+    const links = [...new Map(ordered).keys()].slice(0, PREVIEWS);
+    if (!links.length) return links;
     const shelf = host.appendChild(document.createElement("div"));
     shelf.className = "previews";
-    for (const link of links) {
+    for (const [index, link] of links.entries()) {
+      const item = shelf.appendChild(document.createElement("div"));
+      item.className = "preview";
+      const label = item.appendChild(Object.assign(document.createElement("span"), { className: "linklabel", textContent: `link#${index + 1}` }));
+      label.dataset.tip = link;
       const src = /^https?:/.test(link) ? link : `file?path=${encodeURIComponent(link)}`;
       const kind = (KINDS.find(([, pattern]) => pattern.test(link)) || ["page"])[0];
       if (kind === "image") {
         const opened = Object.assign(document.createElement("a"), { href: src, target: "_blank", rel: "noreferrer" });
         opened.append(Object.assign(document.createElement("img"), { className: "carries", src, alt: link }));
-        shelf.append(opened);
+        item.append(opened);
       } else if (kind === "video") {
-        shelf.append(Object.assign(document.createElement("video"), { className: "carries", src, controls: true, preload: "metadata" }));
+        item.append(Object.assign(document.createElement("video"), { className: "carries", src, controls: true, preload: "metadata" }));
       } else if (kind === "pdf") {
         // Its first page across the width, without the viewer's toolbar, which a preview this small has no room for.
-        shelf.append(Object.assign(document.createElement("iframe"), { className: "pdf", src: `${src}#toolbar=0&view=FitH`, title: link }));
+        item.append(Object.assign(document.createElement("iframe"), { className: "pdf", src: `${src}#toolbar=0&view=FitH`, title: link }));
       } else {
-        const card = shelf.appendChild(document.createElement("div"));
+        const card = item.appendChild(document.createElement("div"));
         card.className = "card";
         const isWeb = /^https?:/.test(link);
         const asked = () => ask(`unfurl?url=${encodeURIComponent(link)}`).then((answer) => (answer.ok ? answer.json() : null)).catch(() => null);
@@ -3319,6 +3342,7 @@
         });
       }
     }
+    return links;
   }
 
   // Opens the chat on the thread a message was said in.
