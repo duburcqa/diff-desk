@@ -109,6 +109,15 @@ Dropped into an agent's skills directory (`~/.claude/skills/diff-desk/`, `~/.cod
 
 A watch hears the chat too. A message wakes an agent when it opens a thread, when the agent has spoken in its thread, or when it names the agent as `@name`.
 
+## Reading it from a phone
+
+    python3 desk.py tailnet           # https://<this machine>.<tailnet>.ts.net:8787/
+    python3 desk.py tailnet --off
+
+Tailscale serves the running desk over HTTPS at this machine's name on your tailnet, on the desk's own port, to the devices of the tailnet alone: the desk keeps answering on `127.0.0.1`, and the tailnet reaches it through Tailscale (`tailscale serve`, never `funnel`). A page opened there is the reader's, as one opened on the machine is. `desk.py stop` takes it off the tailnet as well. It needs Tailscale installed and logged in on both ends.
+
+On a phone, a narrow touch screen, the page fits the screen: the bar scrolls away with the page and the file heads stick to the top in its place, a file's path takes a line of its own, and lines of code wrap rather than running off the side.
+
 ## Where things live
 
 State is `~/.claude/diff-desk/`, overridden with `DIFF_DESK_HOME`; the port is `DIFF_DESK_PORT`. What comments carry is kept in `media/` beside the log, one file named by the digest of what it holds, and stays there when a comment goes: nothing another comment, or an earlier wording of one, still names can vanish under it. One log holds every review the desk has served, each comment recording which pull request it was sent to, so posting, resolving or syncing one review never reaches another's comments.

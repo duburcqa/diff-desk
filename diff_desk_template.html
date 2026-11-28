@@ -1,4 +1,5 @@
 <title>Genesis Diff Desk</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   :root {
     --ground: #f6f7f9;
@@ -1466,6 +1467,19 @@
   .chat .say .status { color: var(--muted); font-size: 11.5px; }
   .chat .say .status:empty { display: none; }
   .chat .empty { padding: 24px 8px; }
+
+  /* A phone: the bar scrolls away with the page, since held it would take a third of the screen, and the file heads
+     stick to the top of the screen instead (see measureHead). A file's path takes a line of its own above its buttons,
+     and a line of code wraps rather than having a finger scroll each file sideways. A narrow window with a mouse keeps
+     the lines as they are written, each file scrolled across under the pointer. */
+  @media (max-width: 600px) and (pointer: coarse) {
+    header { position: static; }
+    .filehead { flex-wrap: wrap; row-gap: 4px; }
+    .filehead .grow { flex-basis: 100%; }
+    td.code { white-space: pre-wrap; overflow-wrap: anywhere; }
+    /* The hunk head as well, whose line of context would otherwise hold the whole table wider than the screen. */
+    tr.h td { white-space: normal; overflow-wrap: anywhere; }
+  }
 </style>
 
 <header data-built="__BUILD__">
@@ -2978,11 +2992,15 @@
     return draftKeys.get(draft);
   }
 
+  // Where the screen stops being covered by the bar: its lower edge while it is held at the top, or the top of the
+  // screen once it has scrolled away, as it does on a phone.
+  const underBar = () => Math.max(0, document.querySelector("header").getBoundingClientRect().bottom);
+
   function keepPlace() {
     // Where the reader stands, kept so that going back returns there. Taken only from a reader at rest: a jump made
     // while the last one is still landing starts from nowhere they read.
     if (reaching) return;
-    const covered = document.querySelector("header").getBoundingClientRect().bottom;
+    const covered = underBar();
     const under = [...document.querySelectorAll("section.file")].find(
       (card) => card.getBoundingClientRect().bottom > covered,
     );
@@ -3080,7 +3098,7 @@
   let isStuckAsked = false;
   function markStuck() {
     isStuckAsked = false;
-    const covered = document.querySelector("header").getBoundingClientRect().bottom;
+    const covered = underBar();
     const under = document.elementFromPoint(els.main.getBoundingClientRect().left + 40, covered + 1);
     const card = under && under.closest("section.file > .filehead") ? under.closest("section.file") : null;
     const held = card && card.getBoundingClientRect().top < covered - 0.5 ? card : null;
@@ -3133,7 +3151,7 @@
     // A thread taller than the room is read from its latest reply, so that reply is what stands in the middle: centring
     // the whole thread would leave what was said last below the view.
     const box = target.getBoundingClientRect();
-    const covered = document.querySelector("header").getBoundingClientRect().bottom;
+    const covered = underBar();
     if (into !== undefined) return box.top - covered + into;
     if (seq === null) return box.top - parseFloat(getComputedStyle(target).scrollMarginTop);
     const room = window.innerHeight - covered;
@@ -3437,7 +3455,7 @@
   function letKeptGo(seq) {
     const note = mine().find((row) => row.seq === seq);
     const rows = [...els.main.querySelectorAll(`#note-${seq}, .filenote[data-seq="${seq}"]`)];
-    const covered = document.querySelector("header").getBoundingClientRect().bottom;
+    const covered = underBar();
     const shown = rows.some((row) => {
       const box = row.getBoundingClientRect();
       return box.height > 0 && box.bottom > covered && box.top < window.innerHeight;
@@ -3611,7 +3629,7 @@
   // thread - so that scrolling away from one never loses it. A reply is kept by its thread even when the lines it
   // hangs among are let go of, so it is listed from what is kept rather than from the page.
   function drawUnsent() {
-    const covered = document.querySelector("header").getBoundingClientRect().bottom;
+    const covered = underBar();
     const away = (field) => {
       const box = field ? field.getBoundingClientRect() : null;
       return !box || !box.height || box.bottom <= covered || box.top >= window.innerHeight;
@@ -5808,7 +5826,7 @@
 
   // Where the diff starts being visible, under the header and the find bar hung below it.
   function viewTop() {
-    const header = document.querySelector("header").getBoundingClientRect().bottom;
+    const header = underBar();
     return els.find.hidden ? header : Math.max(header, els.find.getBoundingClientRect().bottom);
   }
 
@@ -5887,7 +5905,7 @@
   // goes. The tick of that head stays within reach on the way through the hits, and nothing of the diff shows between
   // the two. The header's edge is read now, since a narrow window folds the header onto two rows.
   function placeFind() {
-    const header = document.querySelector("header").getBoundingClientRect().bottom;
+    const header = underBar();
     // The first file shown: one hidden as reviewed takes no room, and measures as nothing.
     const card = [...document.querySelectorAll("section.file")].find((held) => held.getClientRects().length);
     const head = card && card.querySelector(".filehead");
@@ -6093,7 +6111,7 @@
   }
 
   function takeReadingLine() {
-    const covered = document.querySelector("header").getBoundingClientRect().bottom;
+    const covered = underBar();
     const main = els.main.getBoundingClientRect();
     const heads = [...els.main.querySelectorAll("section.file > .filehead")];
     const pinned = heads.find((head) => Math.abs(head.getBoundingClientRect().top - covered) < 1);
@@ -6200,7 +6218,7 @@
       const node = file && document.querySelector(`section.file[data-path="${CSS.escape(file)}"]`);
       return node ? node.getBoundingClientRect().top : null;
     };
-    const covered = document.querySelector("header").getBoundingClientRect().bottom;
+    const covered = underBar();
     const before = at(path);
     const passed = before !== null && before < covered;
     change();
@@ -7087,7 +7105,7 @@
     // the line a stepped-to file comes to rest at - the header plus the breathing space the card's own scroll margin
     // asks for, read off the style so the two cannot drift apart. Measuring against the header alone would name the
     // next file.
-    const covered = document.querySelector("header").getBoundingClientRect().bottom;
+    const covered = underBar();
     const resting = Math.max(covered, parseFloat(getComputedStyle(cards[0]).scrollMarginTop) || covered) + LANDED;
     const below = cards.findIndex((card) => card.getBoundingClientRect().top > resting);
     return below === -1 ? cards.length - 1 : below - 1;
@@ -7115,7 +7133,7 @@
     // the reader was just taken to is neither ahead nor behind. A thread whose file is not built yet is measured by the
     // file, and those sharing it keep the order of their lines.
     const hidingClosed = document.body.classList.contains("hide-closed");
-    const covered = document.querySelector("header").getBoundingClientRect().bottom;
+    const covered = underBar();
     const middle = (covered + window.innerHeight) / 2;
     const placed = [];
     for (const note of mine()) {
@@ -7227,7 +7245,7 @@
       if (!state.reached || reaching !== null) return;
       const { seq } = state.reached;
       const thread = els.main.querySelector(`#note-${seq}, .filenote[data-seq="${seq}"]`);
-      const covered = document.querySelector("header").getBoundingClientRect().bottom;
+      const covered = underBar();
       const box = thread ? thread.getBoundingClientRect() : null;
       if (box && box.bottom > covered && box.top < window.innerHeight) return;
       const anchor = document.elementFromPoint(window.innerWidth / 2, (covered + window.innerHeight) / 2);
@@ -7936,10 +7954,14 @@
   });
   for (const ending of ["pointerdown", "keydown", "scroll"]) document.addEventListener(ending, hideTip, true);
 
+  // What the file heads stick under: the bar while it is held at the top, nothing where it scrolls away with the page.
   const measureHead = () => {
-    const box = document.querySelector("header").getBoundingClientRect();
-    document.documentElement.style.setProperty("--head", `${Math.round(box.height)}px`);
+    const header = document.querySelector("header");
+    const isHeld = getComputedStyle(header).position === "sticky";
+    const tall = isHeld ? Math.round(header.getBoundingClientRect().height) : 0;
+    document.documentElement.style.setProperty("--head", `${tall}px`);
   };
+  addEventListener("resize", measureHead);
   new ResizeObserver(measureHead).observe(document.querySelector("header"));
   measureHead();
 
