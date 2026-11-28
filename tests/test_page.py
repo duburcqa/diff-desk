@@ -5817,7 +5817,8 @@ def test_a_message_of_the_chat_is_answered_folded_reworded_and_taken_back(page, 
 
 def test_the_chat_pins_messages_over_a_thread_and_opens_its_reports_in_place(page, desk, tmp_path):
     report = tmp_path / "report.html"
-    report.write_text('<h1 id="said">Benchmark</h1><script>document.title = "ran"</script>')
+    ran = '<p id="ran"></p><script>document.getElementById("ran").textContent = "ran"</script>'
+    report.write_text(f'<h1 id="said">Benchmark</h1>{ran}')
     opened = desk.post("/chat", {"title": "Read this first", "text": "the jitter is the warm start"}, agent=AGENT)
     thread = opened["thread"]
     desk.post("/chat", {"thread": thread, "text": "Benchmark", "report": str(report)}, agent=AGENT)
@@ -5843,6 +5844,8 @@ def test_the_chat_pins_messages_over_a_thread_and_opens_its_reports_in_place(pag
     assert all(abs(shown[side] - held[side]) <= 1 for side in ("x", "y", "width", "height"))
     assert "allow-same-origin" not in frame.get_attribute("sandbox")
     assert page.frame_locator("#chatviewframe").locator("#said").inner_text() == "Benchmark"
+    # Its scripts run, a report being as often a page that draws its own plots.
+    assert page.frame_locator("#chatviewframe").locator("#ran").inner_text() == "ran"
     # Closed from its top right corner, the chat it stood over is as it was.
     page.locator("#chatviewclose").click()
     assert not page.locator("#chatviewer").is_visible()
