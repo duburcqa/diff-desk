@@ -3593,15 +3593,15 @@ def test_the_page_reads_on_a_phone(phone):
 
 
 def test_a_phone_shows_one_screen_at_a_time_and_goes_back_from_it(phone, desk):
-    # The dock stands along the top of the screen, and each screen it opens takes all of the screen under it: under
-    # its row of icons alone, the file tabs and the steps through the files giving way to the screen's own head.
+    # The dock stands along the top of the screen, and each screen it opens takes all of the screen under it, the
+    # file tabs and the steps through the files giving way to what that screen does.
     width, height = phone.evaluate("() => [document.documentElement.clientWidth, innerHeight]")
     assert phone.locator("#dock").bounding_box()["y"] == 0
 
     def fills(selector):
         under = round(phone.locator("#dock").bounding_box()["height"])
-        assert under - round(phone.locator("#dock .icons").bounding_box()["height"]) <= 1
         assert not phone.locator("#dockprev").is_visible()
+        assert not phone.locator("#filetabs").is_visible()
         return tuple(round(value) for value in phone.locator(selector).bounding_box().values()) == (
             0,
             under,
@@ -3630,9 +3630,7 @@ def test_a_phone_shows_one_screen_at_a_time_and_goes_back_from_it(phone, desk):
     phone.wait_for_selector("aside", state="hidden")
     phone.wait_for_function("(at) => state.current === Number(at)", arg=picked)
     phone.wait_for_function("() => history.state === null")
-    # One screen at a time: the chat takes the place of the comments, and one step back is the diff again. The file
-    # just picked has a tab now, which gives way to the screen as well.
-    assert phone.locator("#filetabs").is_visible()
+    # One screen at a time: the chat takes the place of the comments, and one step back is the diff again.
     phone.tap("#docklog")
     assert fills("#log")
     phone.tap("#dockchat")
@@ -3710,6 +3708,23 @@ def test_a_phone_leaves_a_chat_thread_the_way_it_leaves_a_screen(phone, desk):
     swipe(phone, "#chatrows", 1)
     phone.wait_for_function("() => !document.body.classList.contains('chat-open')")
     phone.wait_for_function("() => history.state === null")
+
+
+def test_a_phone_keeps_the_controls_of_the_comments_in_the_dock(phone):
+    phone.tap("#docklog")
+    # Their head stands in the dock's second row: the grouping as one icon flipping between the two, and what the
+    # panel sends and brings back behind a '...', the comments staying up under the sheet it opens.
+    assert phone.locator("#logcount").bounding_box()["y"] < phone.locator("#dock").bounding_box()["height"]
+    assert not phone.locator("#logsort").is_visible()
+    grouped = phone.evaluate("() => document.getElementById('logsort').value")
+    phone.tap("#logflip")
+    assert phone.evaluate("() => document.getElementById('logsort').value") != grouped
+    assert not phone.locator("#logretry").is_visible()
+    phone.tap("#logmore")
+    labels = phone.locator("#sheet .items button").all_inner_texts()
+    assert labels == ["Retry failures", "Send local", "Sync threads", "Bring back"]
+    assert phone.evaluate("() => document.getElementById('log').dataset.open") == "true"
+    phone.tap("#logflip")
 
 
 def test_a_phone_steps_through_the_files_from_its_dock_and_by_swiping(phone):

@@ -1405,6 +1405,7 @@
   .chat .head > button { margin-bottom: 10px; }
   .chat .head strong { margin-bottom: 10px; }
   #chatnew svg { display: none; }
+  #logflip, #logmore { display: none; }
   .chat .head strong { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
   /* Who watches, on a line of its own under the buttons of the head. */
   .chat .present { flex-basis: 100%; margin: 0 -12px; padding: 6px 12px; color: var(--muted); font-size: 11.5px; border-top: 1px solid var(--rule); }
@@ -1524,8 +1525,9 @@
     /* What the dock and its sheet do, the bar does not do again: it keeps what is being reviewed. */
     header .tally, header .jumps, header > .steps, header .search, #settingsopen, #logopen, #chatopen, #moved:disabled { display: none; }
     #scope { flex: 1 1 0; min-width: 0; max-width: none; }
-    /* The dock: a strip of icons along the top of the screen, held there, the share of files reviewed drawn along its
-       foot. Icons alone, since every pixel of height it takes is a line of code fewer. */
+    /* The dock, held along the top of the screen in two rows: the views, always the same four icons, then the row of the
+       view up (its tabs, and what it does), the share of files reviewed drawn along its foot. Icons alone, since every
+       pixel of height it takes is a line of code fewer. */
     .dock {
       position: fixed;
       left: 0;
@@ -1538,8 +1540,10 @@
       background: var(--surface);
       border-bottom: 1px solid var(--rule);
     }
-    .dock .icons { position: relative; display: grid; grid-template-columns: repeat(8, 1fr); height: 40px; }
-    .dock .icons::after {
+    .dock .icons { display: grid; grid-template-columns: repeat(4, 1fr); height: 40px; }
+    .dock .viewbar { position: relative; display: flex; height: 36px; border-top: 1px solid var(--rule); }
+    .dock .viewbar .tools { display: flex; flex: none; margin-left: auto; }
+    .dock .viewbar::after {
       content: "";
       position: absolute;
       left: 0;
@@ -1548,7 +1552,7 @@
       height: 2px;
       background: var(--add-ink);
     }
-    .dock .icons button {
+    .dock :is(.icons, .tools) button {
       position: relative;
       display: grid;
       place-items: center;
@@ -1559,16 +1563,18 @@
       color: var(--muted);
       -webkit-tap-highlight-color: transparent;
     }
-    .dock .icons button svg { width: 20px; height: 20px; }
+    .dock :is(.icons, .tools) button svg { width: 20px; height: 20px; }
+    .dock .tools button { width: 42px; }
+    .dock .tools button svg { width: 18px; height: 18px; }
     .dock .icons button[aria-pressed="true"] { color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent); }
     #dockdone[aria-pressed="true"] { color: var(--add-ink); box-shadow: none; }
-    .dock .icons button:disabled { color: var(--faint); opacity: 0.5; }
+    .dock :is(.icons, .tools) button:disabled { color: var(--faint); opacity: 0.5; }
     .dock .dot { top: 8px; right: auto; left: calc(50% + 6px); }
     #dockdone .tick { opacity: 0; }
     #dockdone[aria-pressed="true"] .tick { opacity: 1; }
     /* The files gone to, as tabs to go back to in a tap, the one on screen marked, and in italics while it is only
        passed through rather than gone to (see drawTabs). */
-    .filetabs:not([hidden]) { display: flex; height: 32px; overflow-x: auto; border-top: 1px solid var(--rule); scrollbar-width: none; }
+    .filetabs:not([hidden]) { display: flex; flex: 1 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
     .filetabs::-webkit-scrollbar { display: none; }
     .ftab { display: flex; flex: none; align-items: stretch; max-width: 46vw; border-right: 1px solid var(--rule); color: var(--muted); }
     .ftab[data-current="true"] { color: var(--ink); background: var(--surface-sunk); box-shadow: inset 0 -2px 0 var(--accent); }
@@ -1676,7 +1682,11 @@
     #logmove, #logsize { display: none; }
     .log .actions, .log .head { flex-wrap: wrap; }
     #logcount { white-space: nowrap; }
-    .logrow { min-height: 44px; box-sizing: border-box; }
+    /* A row of the comments: where it stands and how it stands on one line, what it says under them, on two lines at
+       most. Beside them it had the width of a few words. */
+    .logrow { flex-wrap: wrap; row-gap: 2px; min-height: 44px; padding: 6px 10px; box-sizing: border-box; }
+    .logrow > .said { order: 1; flex-basis: 100%; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; font-size: 13px; }
+    .logrow > b + .said + * { margin-left: auto; }
     /* What a remark or a reply can be asked to do waits behind its '...', so the words take the whole width and no row
        of buttons stands between them. Asked for, the buttons take a row of their own under the words, flush right. */
     .thread .said > .more {
@@ -1711,6 +1721,9 @@
     /* A phone zooms the page onto any field written in smaller letters the moment it takes the keyboard, and leaves
        it zoomed. Every field is set apart by its own rule, so only an override reaches them all. */
     input, textarea, select { font-size: 16px !important; }
+    /* What a field says before anything is written in it reads at the size of the words around it: the zoom answers
+       the size of what is typed alone. */
+    input::placeholder, textarea::placeholder { font-size: 13px; }
     /* Rows and buttons a finger can hit: the size of a fingertip, rather than of a pointer. */
     .fileitem, .foldername { min-height: 44px; }
     .fileitem .name { font-size: 13px; }
@@ -1737,35 +1750,41 @@
     #chatnew { display: grid; place-items: center; margin-left: auto; width: 36px; height: 36px; padding: 0; border: 0; background: transparent; color: var(--muted); }
     #chatnew svg { display: block; width: 18px; height: 18px; }
     #chatnew .word { display: none; }
-    /* A screen up (the file list, the comments, the chat) has the steps through the files and the file tabs no use: they
-       act on the diff. Its own head takes the right half of the dock in their place, so the screen starts right under
-       the dock's row of icons, and the room every head would take is the screen's. */
-    body:is(.chat-open, :not(.hide-files), :has(#log[data-open="true"])) :is(#dockprev, #dockdone, #docknext, #dockmore) {
-      visibility: hidden;
-    }
-    body:is(.chat-open, :not(.hide-files), :has(#log[data-open="true"])) #filetabs { display: none; }
-    body:not(.chat-open) #chattabs, #chattitle { display: none; }
+    /* The row of the view: the file tabs and the steps through the files for the diff, the thread tabs and the head of
+       the chat for the chat, the head of the comments for them, and none for the file list, which takes its room. */
+    body:is(.chat-open, :has(#log[data-open="true"])) :is(.dock .tools, #filetabs), body:not(.chat-open) #chattabs, #chattitle { display: none; }
+    body:not(.hide-files) .dock .viewbar, aside .asidehead { display: none; }
     .ftab.threadtab .name { display: flex; align-items: center; gap: 5px; font-family: var(--sans); font-size: 12.5px; }
     .ftab.threadtab .name svg { flex: none; width: 13px; height: 13px; color: var(--accent); }
-    .chat .head .present { flex: 1 1 auto; }
     aside, body.chat-open .chat, .log[data-open="true"] { z-index: 48; }
-    body.chat-open .chat .head, .log[data-open="true"] > .head, aside .asidehead {
+    /* The head of the chat and of the comments stand in that row: over the end of it, past the thread tabs, for the
+       chat, and over the whole of it for the comments. */
+    body.chat-open .dock .viewbar::before { content: ""; flex: 0 0 45%; order: 1; }
+    body.chat-open .chat .head, .log[data-open="true"] > .head {
       position: fixed;
-      top: env(safe-area-inset-top);
-      left: 50%;
+      top: calc(env(safe-area-inset-top) + 41px);
+      left: 0;
       right: 0;
-      height: 40px;
+      height: 36px;
       min-height: 0;
       margin: 0;
-      padding: 0 4px 0 8px;
+      padding: 0 4px 0 10px;
       background: var(--surface);
       border: 0;
       box-sizing: border-box;
     }
+    body.chat-open .chat .head { left: 55%; padding-left: 6px; }
+    .chat .head .present { flex: 1 1 auto; }
     .log > .head { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; }
     .log > .head > strong, #logorder .word, .asidehead h2 { display: none; }
     #logcount { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
-    #logorder { padding: 0; margin: 0; }
+    #logorder, #foldreviewed { display: none; }
+    #logflip, #logmore { display: grid; place-items: center; flex: none; width: 36px; height: 36px; padding: 0; border: 0; background: transparent; color: var(--muted); }
+    #logflip svg, #logmore svg { width: 18px; height: 18px; }
+    /* What the panel sends and brings back waits behind its '...', its outcome alone left at its foot. */
+    .log .actions > button { display: none; }
+    .log .actions:has(> .status:empty) { display: none; }
+    #logflip[data-sort="batch"] .by-thread, #logflip[data-sort="thread"] .by-batch { display: none; }
     .asidehead { justify-content: flex-end; }
   }
 </style>
@@ -1833,13 +1852,17 @@
   <button id="dockfiles" type="button" aria-pressed="false" aria-label="Files" data-tip="Files"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h9"/></svg></button>
   <button id="docklog" type="button" aria-pressed="false" aria-label="Comments" data-tip="Comments"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h14v9H9l-4 3v-3H3z"/></svg><i class="dot" id="docklogdot" aria-hidden="true"></i></button>
   <button id="dockchat" type="button" aria-pressed="false" aria-label="Chat" data-tip="Chat"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h11v7H7l-3 2.5V10H2z"/><path d="M15.5 6.5H18v7h-2v2.5l-3-2.5H8.5V12"/></svg><i class="dot" id="dockchatdot" aria-hidden="true"></i></button>
-  <button id="dockprev" type="button" aria-label="Previous file" data-tip="Previous file"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5 10 7.5l5 5"/></svg></button>
-  <button id="dockdone" type="button" aria-pressed="false" aria-label="Reviewed" data-tip="Reviewed"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="13" height="13" rx="3"/><path class="tick" d="M6.8 10.2 9 12.4l4.4-4.8"/></svg></button>
-  <button id="docknext" type="button" aria-label="Next file" data-tip="Next file"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 7.5 10 12.5l5-5"/></svg></button>
-  <button id="dockmore" type="button" aria-label="More" data-tip="More"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><circle cx="4.5" cy="10" r="1.6"/><circle cx="10" cy="10" r="1.6"/><circle cx="15.5" cy="10" r="1.6"/></svg></button>
   </div>
-  <div class="filetabs" id="filetabs" hidden></div>
-  <div class="filetabs" id="chattabs" hidden></div>
+  <div class="viewbar">
+    <div class="filetabs" id="filetabs" hidden></div>
+    <div class="filetabs" id="chattabs" hidden></div>
+    <span class="tools">
+    <button id="dockprev" type="button" aria-label="Previous file" data-tip="Previous file"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5 10 7.5l5 5"/></svg></button>
+    <button id="dockdone" type="button" aria-pressed="false" aria-label="Reviewed" data-tip="Reviewed"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="13" height="13" rx="3"/><path class="tick" d="M6.8 10.2 9 12.4l4.4-4.8"/></svg></button>
+    <button id="docknext" type="button" aria-label="Next file" data-tip="Next file"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 7.5 10 12.5l5-5"/></svg></button>
+    <button id="dockmore" type="button" aria-label="More" data-tip="More"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><circle cx="4.5" cy="10" r="1.6"/><circle cx="10" cy="10" r="1.6"/><circle cx="15.5" cy="10" r="1.6"/></svg></button>
+    </span>
+  </div>
 </nav>
 <div class="sheet" id="sheet" hidden>
   <div class="title" id="sheettitle"></div>
@@ -1939,6 +1962,8 @@
         <option value="thread">thread</option>
       </select>
     </label>
+    <button class="ghost" id="logflip" type="button" aria-label="Group by thread" data-tip="Group by thread"><svg class="by-batch" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M2.5 3.5h11M2.5 6.5h11M2.5 10.5h11M2.5 13.5h11"/></svg><svg class="by-thread" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 2.5h11v6h-6l-3 2.5v-2.5h-2z"/><path d="M5 13.5h8.5"/></svg></button>
+    <button class="ghost" id="logmore" type="button" aria-label="More" data-tip="More"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3.5" cy="8" r="1.3"/><circle cx="8" cy="8" r="1.3"/><circle cx="12.5" cy="8" r="1.3"/></svg></button>
     <button class="ghost" id="logclose">Close</button>
   </div>
   <div class="rows" id="logrows"></div>
@@ -2069,7 +2094,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "goback", "foldreviewed", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "loading", "goto", "veil", "palette", "pq", "picks", "find", "fgrip", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "fthreads", "toast", "toastwhere", "toastsaid", "toastmark", "logdot", "chatopen", "chatdot", "chat", "chatgrip", "chatback", "chattitle", "chatcopy", "chatnew", "chatclose", "chatwho", "chatrows", "chatsay", "chatname", "chattext", "chatsend", "chatresult", "filesgrip", "railfold", "logmove", "logsize", "fchat", "chatbuttons", "dock", "dockfiles", "dockprev", "dockdone", "docknext", "docklog", "dockchat", "docklogdot", "dockchatdot", "selbar", "selwhat", "selcomment", "selclear", "turn", "dockmore", "sheet", "sheettitle", "sheetitems", "dockdiff", "filetabs", "chattabs"]) {
+  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "goback", "foldreviewed", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "loading", "goto", "veil", "palette", "pq", "picks", "find", "fgrip", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "fthreads", "toast", "toastwhere", "toastsaid", "toastmark", "logdot", "chatopen", "chatdot", "chat", "chatgrip", "chatback", "chattitle", "chatcopy", "chatnew", "chatclose", "chatwho", "chatrows", "chatsay", "chatname", "chattext", "chatsend", "chatresult", "filesgrip", "railfold", "logmove", "logsize", "fchat", "chatbuttons", "dock", "dockfiles", "dockprev", "dockdone", "docknext", "docklog", "dockchat", "docklogdot", "dockchatdot", "selbar", "selwhat", "selcomment", "selclear", "turn", "dockmore", "sheet", "sheettitle", "sheetitems", "dockdiff", "filetabs", "chattabs", "logflip", "logmore"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -2193,6 +2218,7 @@
       chat.read = {};
     }
     els.logsort.value = choices.sort === "thread" ? "thread" : "batch";
+    sayLogOrder();
     els.hidedone.setAttribute("aria-pressed", String(Boolean(choices.hideDone)));
     document.body.classList.toggle("hide-done", Boolean(choices.hideDone));
     els.reactnow.setAttribute("aria-pressed", String(choices.reactNow !== false));
@@ -3695,7 +3721,8 @@
     where.textContent = `${note.path.split("/").pop()} ${span(note)}`;
     const said = document.createElement("span");
     said.className = "said";
-    said.textContent = outline(note.text).slice(0, 90);
+    // Whole, cut by the row's own width with an ellipsis: on one line beside the place, on two under it on a phone.
+    said.textContent = outline(note.text);
     item.append(where, said);
     for (const [label, kind] of [
       [note.github === "none" ? "local only" : GITHUB_MARK[note.github], note.github],
@@ -7568,7 +7595,7 @@
     const file = inTreeOrder(view().files)[state.current];
     const here = file ? file.path : null;
     const paths = here && !fileTabs.includes(here) ? [...fileTabs, here] : fileTabs;
-    els.filetabs.hidden = !fileTabs.length;
+    els.filetabs.hidden = !paths.length;
     drawTabStrip(
       els.filetabs,
       paths.map((path) => ({
@@ -8068,7 +8095,6 @@
     source: [() => els.source.dataset.open === "true", () => els.sourceopen.click()],
     picker: [() => !els.palette.hidden, closePicker],
     find: [() => !els.find.hidden, closeFind],
-    sheet: [() => !els.sheet.hidden, () => (els.sheet.hidden = true)],
   };
   let screenOn = null;
   function screensMoved() {
@@ -8096,7 +8122,7 @@
   const screenWatch = new MutationObserver(screensMoved);
   screenWatch.observe(document.body, { attributes: true, attributeFilter: ["class"] });
   for (const node of [els.log, els.settings, els.source]) screenWatch.observe(node, { attributes: true, attributeFilter: ["data-open"] });
-  for (const node of [els.find, els.sheet]) screenWatch.observe(node, { attributes: true, attributeFilter: ["hidden"] });
+  screenWatch.observe(els.find, { attributes: true, attributeFilter: ["hidden"] });
   window.addEventListener("popstate", (event) => {
     if (!isPhone()) return;
     const want = event.state && event.state.screen;
@@ -8173,9 +8199,11 @@
       ["Settings", () => openSettings(true)],
     ]);
   });
-  // A sheet goes as soon as the reader touches anything else.
+  // A sheet goes as soon as the reader touches anything else. It stands over whatever screen is up, which it leaves
+  // as it is, rather than being a screen of its own.
   document.addEventListener("pointerdown", (event) => {
-    if (!els.sheet.hidden && !els.sheet.contains(event.target) && !els.dockmore.contains(event.target)) els.sheet.hidden = true;
+    const isOpener = [els.dockmore, els.logmore].some((button) => button.contains(event.target));
+    if (!els.sheet.hidden && !els.sheet.contains(event.target) && !isOpener) els.sheet.hidden = true;
   });
   els.selcomment.addEventListener("click", () => {
     composeSel();
@@ -8433,9 +8461,31 @@
   });
   els.logsync.addEventListener("click", () => syncThere(true));
   els.logsend.addEventListener("click", () => sendThreads(alreadyThere()));
+  // The grouping as a single icon on a phone, which flips between the two, the icon saying which is shown.
+  function sayLogOrder() {
+    const other = els.logsort.value === "batch" ? "thread" : "batch";
+    els.logflip.dataset.sort = els.logsort.value;
+    els.logflip.setAttribute("aria-label", `Group by ${other}`);
+    els.logflip.dataset.tip = `Group by ${other}`;
+  }
   els.logsort.addEventListener("change", () => {
     keepChoices();
+    sayLogOrder();
     drawLog();
+  });
+  els.logmore.addEventListener("click", () =>
+    openSheet(
+      "",
+      [els.logretry, els.logbind, els.logsend, els.logsync].map((button) => [
+        button.textContent,
+        () => button.click(),
+        !button.disabled && !button.hidden,
+      ]),
+    ),
+  );
+  els.logflip.addEventListener("click", () => {
+    els.logsort.value = els.logsort.value === "batch" ? "thread" : "batch";
+    els.logsort.dispatchEvent(new Event("change"));
   });
   els.logbind.addEventListener("click", async () => {
     const local = mine().filter((note) => note.github === "none");
