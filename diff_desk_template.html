@@ -1442,7 +1442,11 @@
   .chat .card img { flex: none; width: 72px; height: 72px; object-fit: cover; border-radius: 4px; }
   .chat .msg .who .num { margin-left: 6px; color: var(--faint); font-family: var(--mono); font-weight: 400; }
   /* Offered where the pointer is, and always on a touch screen, which has no pointer to show it by. */
-  .chat .msg .who .copy { margin-left: 8px; font-weight: 400; visibility: hidden; }
+  .chat .msg .who .copy { display: inline-grid; place-items: center; margin-left: 6px; padding: 2px 4px; vertical-align: middle; color: var(--faint); background: transparent; border: 0; border-radius: 4px; cursor: pointer; visibility: hidden; }
+  .chat .msg .who .copy svg { width: 13px; height: 13px; }
+  .chat .msg .who .copy:hover { color: var(--accent); }
+  .chat .msg .who .copy[data-copied="true"] { color: var(--add-ink); }
+  .chat .msg .who .copy[data-copied="false"] { color: var(--del-ink); }
   .chat .msg:hover .who .copy, .chat .msg .who .copy:focus-visible { visibility: visible; }
   @media (pointer: coarse) { .chat .msg .who .copy { visibility: visible; } }
   /* Keys a touch screen has none of. */
@@ -1478,7 +1482,7 @@
   /* The bar of a phone, along the foot of the screen where the thumb rests: the screens it switches between and the
      steps through the files, the share of them reviewed drawn along its top edge. A wider screen has all of it in the
      bar at the top. */
-  .dock, .selbar, .sheet, .filehead > .icon.more, .thread .said > .more { display: none; }
+  .dock, .selbar, .sheet, .filehead > .more, .thread .said > .more { display: none; }
   /* The file a swipe across the diff turns to, named at the edge it comes in from while the finger is still down, and
      in the accent once letting go would turn to it. */
   #turn {
@@ -1631,8 +1635,8 @@
     .filehead .path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; }
     .filehead .badge { flex: none; font-size: 9px; padding: 1px 4px; }
     .filehead > .icon, .filehead .counts, .seen .word, .folderseen .word { display: none; }
-    .filehead > .icon.more { display: grid; width: 36px; height: 36px; }
-    .filehead .icon svg { width: 16px; height: 16px; }
+    .filehead > .more { display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; background: transparent; color: var(--faint); }
+    .filehead .more svg { width: 16px; height: 16px; }
     .filehead .seen { padding: 8px; margin: 0; }
     .seen input { width: 20px; height: 20px; margin: 0; }
     .body { border-radius: 0; }
@@ -1672,7 +1676,19 @@
     .logrow { min-height: 44px; box-sizing: border-box; }
     /* What a remark or a reply can be asked to do waits behind its '...', so the words take the whole width and no row
        of buttons stands between them. Asked for, the buttons take a row of their own under the words, flush right. */
-    .thread .said > .more { display: inline-grid; float: right; margin: 0 0 2px 8px; }
+    .thread .said > .more {
+      display: inline-grid;
+      float: right;
+      margin: 0 0 2px 8px;
+      padding: 0 9px;
+      font: inherit;
+      font-size: 13px;
+      line-height: 20px;
+      color: var(--muted);
+      background: var(--surface);
+      border: 1px solid var(--rule-strong);
+      border-radius: 999px;
+    }
     .thread .line:not([data-tools="open"]) > .tools > :not(.turn), .thread .line.reply:not([data-tools="open"]) > button.tiny { display: none; }
     .thread .line.reply { flex-wrap: wrap; row-gap: 4px; }
     .thread .line.reply > .said { flex: 1 1 100%; }
@@ -2778,18 +2794,23 @@
         number.dataset.tip = `Refer to this message as #${message.id}`;
         // The message as it was written, to paste wherever it is wanted next.
         const copy = who.appendChild(document.createElement("button"));
-        copy.className = "tiny copy";
+        copy.className = "copy";
         copy.type = "button";
-        copy.textContent = "copy";
         copy.dataset.tip = "Copy this message as plain text";
+        copy.setAttribute("aria-label", "Copy this message as plain text");
+        copy.innerHTML =
+          '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">' +
+          '<rect x="4.6" y="1.6" width="7.8" height="9.8" rx="1.6"/>' +
+          '<path d="M9.4 12.4H3.2a1.6 1.6 0 0 1-1.6-1.6V4.2"/></svg>';
+        // The icon takes the colour of how it went for a moment, as the copy of a file's path does.
         copy.addEventListener("click", async () => {
           try {
             await navigator.clipboard.writeText(message.text);
-            copy.textContent = "copied";
+            copy.dataset.copied = "true";
           } catch (error) {
-            copy.textContent = "not copied";
+            copy.dataset.copied = "false";
           }
-          window.setTimeout(() => (copy.textContent = "copy"), 1200);
+          window.setTimeout(() => delete copy.dataset.copied, 1200);
         });
         const words = line.appendChild(document.createElement("div"));
         words.className = "said";
@@ -3044,7 +3065,7 @@
   // The '...' of a remark or a reply on a phone, which brings its buttons out under the words and puts them away again.
   function toolsFor(line, key) {
     const more = document.createElement("button");
-    more.className = "tiny more";
+    more.className = "more";
     more.type = "button";
     more.textContent = "\u22ef";
     more.setAttribute("aria-label", "More");
@@ -6671,7 +6692,7 @@
 
     // A phone keeps the head to one row: what the icons and the counts beside the path say goes behind this.
     const more = document.createElement("button");
-    more.className = "icon more";
+    more.className = "more";
     more.setAttribute("aria-label", `More on ${file.path}`);
     more.innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3.5" cy="8" r="1.3"/><circle cx="8" cy="8" r="1.3"/><circle cx="12.5" cy="8" r="1.3"/></svg>';
     more.addEventListener("click", () =>
