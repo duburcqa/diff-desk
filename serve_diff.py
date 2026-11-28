@@ -20,7 +20,10 @@ Endpoints, all on 127.0.0.1 so nothing is exposed off the machine:
   GET  /watching              the agents watching the desk right now
   GET  /unfurl?url=           what a link of the chat is shown as: a pull request, an issue or a commit as GitHub
                               names it, a page by the title, words and image it gives of itself
-  GET  /file?path=            an image, a video or a PDF on disk named by its path, shown in the chat where it is named
+  GET  /file?path=            a file on disk named by its path: shown where a browser shows its kind (an image, a
+                              video, a PDF), saved otherwise
+  POST /open                  {path} - open a file on disk with the application this machine opens it with, or show it
+                              in its folder where opening it would run it, for a page on this machine alone
   GET  /chat                  every message of the chat, threads and all
   GET  /chat/export?thread=N  one thread of the chat as plain text, to be kept or read back
   POST /chat                  {thread, title, text, images} - say something in a thread, or open one with a title
@@ -40,8 +43,8 @@ Endpoints, all on 127.0.0.1 so nothing is exposed off the machine:
                               what was only bound, so nothing first reaches a pull request unasked
   POST /sync                  {repo, pr} - bring back what the pull request holds: replies, what it says is resolved,
                               and the comments written there that this desk has none of
-  POST /media?name=&for=      the bytes of one image or video a comment is to carry, kept beside the log, or of any
-                              file a message of the chat carries with `for=chat`
+  POST /media?name=           the bytes of one image or video a comment or a message of the chat is to carry, kept
+                              beside the log
   GET  /media/<file>          one file kept that way, which is what the page shows a comment carrying
   GET  /semantic?dir=&oldrev=&rev=&path=...
                               the Python files named, old and new, lined up by statement for the semantic view
@@ -105,13 +108,16 @@ import hashlib
 import hmac
 import http.cookies
 import json
-import mimetypes
 import os
 import pathlib
 import re
 import secrets
 import select
+import shlex
+import shutil
 import socket
+import subprocess
+import sys
 import threading
 import time
 import types
@@ -206,8 +212,44 @@ ATTACHABLE = {
     ".mov": "video/quicktime",
     ".webm": "video/webm",
 }
-# What the page may be shown from disk where a message names a file: what a browser shows inline.
+# What a browser shows inline of a file on disk a message names: anything else is saved.
 SHOWABLE = {**ATTACHABLE, ".pdf": "application/pdf"}
+# What opens a file on this machine with the application it opens that kind with, `DIFF_DESK_OPENER` naming another.
+OPENER = shlex.split(os.environ.get("DIFF_DESK_OPENER", "open" if sys.platform == "darwin" else "xdg-open"))
+# Kinds a machine runs rather than shows when it opens them: one of these named in a message is shown in its folder
+# instead, so a message cannot run anything with a click.
+RUNNABLE = {
+    ".app",
+    ".applescript",
+    ".bash",
+    ".bat",
+    ".cmd",
+    ".command",
+    ".csh",
+    ".desktop",
+    ".dmg",
+    ".exe",
+    ".fish",
+    ".jar",
+    ".js",
+    ".ksh",
+    ".mpkg",
+    ".pkg",
+    ".pl",
+    ".prefpane",
+    ".ps1",
+    ".py",
+    ".pyw",
+    ".rb",
+    ".scpt",
+    ".sh",
+    ".terminal",
+    ".tool",
+    ".url",
+    ".webloc",
+    ".workflow",
+    ".zsh",
+}
 # A pull request, an issue or a commit on GitHub, which `gh` names better than its page does to a stranger.
 GITHUB_LINK = re.compile(r"https://github\.com/([\w.-]+)/([\w.-]+)/(pull|issues|commit)/(\w+)")
 # What `gh` is asked to say of a commit, and of an issue or a pull request (an issue to the API, merged or not).
@@ -278,25 +320,23 @@ def reader_key():
     return READER_KEY.read_text().strip()
 
 
-def attached(name, raw, is_chat=False):
+def attached(name, raw):
     """Keep one file a comment or a message of the chat is to carry beside the log, and say what it is called there, or
     why it was refused.
 
     Named by the digest of what it holds, so the same screenshot pasted into two comments is one file and a name the
-    reviewer never chose cannot land on another's. A comment carries what GitHub's upload takes, since a comment may go
-    there; the chat goes nowhere, so a message carries any file, up to the largest a video may be.
+    reviewer never chose cannot land on another's. Both carry what GitHub's upload takes, images and videos: a file of
+    any other kind is named by its path in what is written, which the page opens where it is read (see '/file').
     """
     suffix = pathlib.Path(name).suffix.lower()
     kind = ATTACHABLE.get(suffix)
-    if is_chat:
-        kind = SHOWABLE.get(suffix) or mimetypes.guess_type(name)[0] or "application/octet-stream"
     if kind is None:
         offered = suffix or "a file with no extension"
         taken = " ".join(sorted(ATTACHABLE))
         return None, f"GitHub's upload takes none of {offered}, whatever a browser's comment box takes: {taken}"
     if not raw:
         return None, f"{name} holds nothing"
-    cap = CAPS["video" if is_chat or kind.startswith("video/") else "image"]
+    cap = CAPS["video" if kind.startswith("video/") else "image"]
     if len(raw) > cap:
         return None, f"{name} is {len(raw) // (1024 * 1024)}MB, and GitHub takes {cap // (1024 * 1024)}MB of that kind"
     file = hashlib.sha256(raw).hexdigest()[:16] + suffix
@@ -304,10 +344,7 @@ def attached(name, raw, is_chat=False):
     gen_diff_data.write_whole(MEDIA / file, raw)
     # The words that stand in for an image are its own name, as the web uploader has them: the extension goes and the
     # dots left in what remains read as spaces.
-    held = {"file": file, "name": name, "kind": kind, "alt": pathlib.Path(name).stem.replace(".", " ")}
-    if is_chat:
-        held["size"] = len(raw)
-    return held, ""
+    return {"file": file, "name": name, "kind": kind, "alt": pathlib.Path(name).stem.replace(".", " ")}, ""
 
 
 def carried(order):
@@ -1790,20 +1827,55 @@ class Handler(BaseHTTPRequestHandler):
         self._json(unfurl(url))
 
     def _file(self, query):
-        """An image, a video or a PDF on disk, to the page alone: named by an absolute path, of a type a page shows.
+        """A file on disk named by an absolute path, to the page alone: shown where a browser shows its kind, saved
+        under its own name otherwise, which is how a device reading the desk from elsewhere opens it.
 
         The page is told it by the cookie it was served, which a page of another site never carries, so nothing but
-        this desk's own page is shown a file this way.
+        this desk's own page is handed a file this way.
         """
         given = pathlib.Path(os.path.expanduser(query.get("path", [""])[0]))
-        kind = SHOWABLE.get(given.suffix.lower())
         if self._author()[0] != READER:
             self._send(403)
             return
-        if kind is None or not given.is_absolute() or not given.is_file():
+        if not given.is_absolute() or not given.is_file():
             self._send(404)
             return
-        self._send(200, given.read_bytes(), kind)
+        kind = SHOWABLE.get(given.suffix.lower())
+        saved = f"attachment; filename*=UTF-8''{quote(given.name)}"
+        self.send_response(200)
+        self.send_header("Content-Type", kind or "application/octet-stream")
+        self.send_header("Content-Length", str(given.stat().st_size))
+        self.send_header("Cache-Control", "no-store")
+        if kind is None:
+            self.send_header("Content-Disposition", saved)
+        self.end_headers()
+        # Streamed rather than read whole: what a message names may be far larger than anything a comment carries.
+        with given.open("rb") as held:
+            shutil.copyfileobj(held, self.wfile)
+
+    def _open(self):
+        """Open a file on disk with the application this machine opens its kind with, or show it in its folder where
+        opening it would run it, for the page alone and for a page on this machine alone.
+
+        A page read from another device (through the tailnet) is answered no: opening there means saving it, which
+        '/file' does. Which machine the page stands on is told by the address it reached the desk at.
+        """
+        given = pathlib.Path(os.path.expanduser(str(self._body().get("path") or "")))
+        host = self.headers.get("Host", "").rsplit(":", 1)[0]
+        if self._author()[0] != READER or host not in ("127.0.0.1", "localhost", "[::1]"):
+            self._send(403)
+            return
+        if not given.is_absolute() or not given.is_file():
+            self._json({"ok": False, "error": f"no file at {given}"})
+            return
+        is_runnable = given.suffix.lower() in RUNNABLE or os.access(given, os.X_OK)
+        shown = [*OPENER, "-R", str(given)] if sys.platform == "darwin" else [*OPENER, str(given.parent)]
+        try:
+            subprocess.Popen(shown if is_runnable else [*OPENER, str(given)], start_new_session=True)
+        except OSError as error:
+            self._json({"ok": False, "error": f"nothing opens files here: {error}"})
+            return
+        self._json({"ok": True, "revealed": is_runnable})
 
     def _export(self, query):
         """One thread of the chat as plain text, which is what an agent keeps of a conversation or reads back later."""
@@ -1969,14 +2041,13 @@ class Handler(BaseHTTPRequestHandler):
         """
         query = parse_qs(urlparse(self.path).query)
         name = query.get("name", ["attachment"])[0]
-        is_chat = query.get("for", [""])[0] == "chat"
         length = int(self.headers.get("Content-Length", 0))
         # Refused on the length it declares, before it is read: nothing GitHub would turn away is carried into memory
         # first.
         if length > CAPS["video"]:
             self._json({"ok": False, "error": f"{name} is larger than anything GitHub takes"})
             return
-        held, trouble = attached(name, self.rfile.read(length), is_chat)
+        held, trouble = attached(name, self.rfile.read(length))
         if trouble:
             print(f"ATTACH REFUSED {trouble}", flush=True)
             self._json({"ok": False, "error": trouble})
@@ -1989,6 +2060,7 @@ class Handler(BaseHTTPRequestHandler):
         routes = {
             "/comments": self._record,
             "/media": self._media,
+            "/open": self._open,
             "/reviewed": self._reviewed,
             "/scan": self._scan,
             "/bind": self._bind,

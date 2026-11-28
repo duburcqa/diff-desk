@@ -26,7 +26,7 @@ desk.py chat                                         the threads of the chat, ne
 desk.py chat 3                                       one thread of the chat, as plain text to keep or read back
 desk.py say 3 "..."                                  say something in a thread of the chat
 desk.py say --new "title" "..."                      open a thread of the chat
-desk.py say 3 "..." --attach plot.png                say it with a file, an image, a video or a PDF shown as one
+desk.py say 3 "..." --attach plot.png                say it with an image or a video; name any other file by its path
 """
 
 import argparse
@@ -508,7 +508,7 @@ def say(args):
     for path in args.attach or ():
         given = pathlib.Path(path)
         request = urllib.request.Request(
-            f"{URL}/media?name={urllib.parse.quote(given.name)}&for=chat",
+            f"{URL}/media?name={urllib.parse.quote(given.name)}",
             data=given.read_bytes(),
             headers={"Content-Type": "application/octet-stream"},
             method="POST",
@@ -821,7 +821,9 @@ job.add_argument(
     "words", nargs="+", help="the thread's number then the message in markdown, or the message alone with --new"
 )
 job.add_argument("--new", metavar="TITLE", help="open a new thread under this title")
-job.add_argument("--attach", action="append", metavar="PATH", help="a file the message carries, any kind; repeatable")
+job.add_argument(
+    "--attach", action="append", metavar="PATH", help="an image or a video the message carries; repeatable"
+)
 job.set_defaults(run=say)
 
 job = jobs.add_parser(
