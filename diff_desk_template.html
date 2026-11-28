@@ -1471,8 +1471,14 @@
   .chat .msg[data-folded="true"] > .said, .chat .msg[data-folded="true"] .acts { display: none; }
   .chat .msg .acts { display: inline-flex; flex: none; gap: 1px; margin-left: 6px; visibility: hidden; }
   .chat .msg:hover .acts, .chat .msg .acts:focus-within, .chat .msg[data-acts="true"] .acts { visibility: visible; }
+  /* Under a pointer every action shows at once, all of them out of sight until it comes. A touch screen shows them
+     always, so it keeps the answer alone in reach and the rest behind a '...'. */
   .chat .msg .acts .extra { display: inline-flex; gap: 1px; }
-  .chat .msg:not([data-acts="true"]) .acts .extra { display: none; }
+  .chat .msg .acts .moreacts { display: none; }
+  @media (pointer: coarse) {
+    .chat .msg .acts .moreacts { display: inline-grid; }
+    .chat .msg:not([data-acts="true"]) .acts .extra { display: none; }
+  }
   /* What a message, a remark or a reply can be asked to do: an icon lit in the accent under the pointer, the one that
      deletes drawn in the colour of what is removed. */
   button.iconact { display: inline-grid; place-items: center; flex: none; padding: 2px 4px; color: var(--faint); background: transparent; border: 0; border-radius: 4px; cursor: pointer; vertical-align: middle; }
@@ -3040,8 +3046,7 @@
         gist.className = "gist";
         gist.dataset.gist = `${message.deleted ? "deleted" : outline(message.text)}${below ? ` \u00b7 ${plural(below, "answer")}` : ""}`;
         // What a message can be asked to do: answered and pinned by anyone, reworded and deleted by whoever said it and
-        // by the reader, who keeps the desk. The answer alone is in reach, being the one used all the time, and the rest
-        // wait behind a '...'.
+        // by the reader, who keeps the desk. A touch screen keeps the rest behind a '...' (see '.acts .extra').
         const acts = who.appendChild(document.createElement("span"));
         acts.className = "acts";
         const extra = document.createElement("span");

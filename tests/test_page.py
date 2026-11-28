@@ -2811,7 +2811,8 @@ def test_a_comment_follows_the_line_it_was_written_against(page, desk):
         }""",
         [card.locator(".path").first.inner_text(), code, was],
     )
-    shown = page.evaluate(
+    # Waited for: a file's lines are built again a frame after the redraw, once the page sees them in reach.
+    shown = page.wait_for_function(
         """() => {
           const threads = [...document.querySelectorAll('.thread')];
           const thread = threads.find((node) => node.textContent.includes('about this very line'));
@@ -2823,9 +2824,8 @@ def test_a_comment_follows_the_line_it_was_written_against(page, desk):
           const marks = [...thread.querySelectorAll('.mark')].map((mark) => mark.textContent);
           return {above: row.querySelector('td.code').textContent, marks};
         }"""
-    )
+    ).json_value()
     # It hangs under the code it was written about, wherever that ended up, and is not taken for one left behind.
-    assert shown is not None
     assert shown["above"] == code
     assert not any(mark == "code moved on" for mark in shown["marks"])
 
@@ -3685,8 +3685,13 @@ def test_a_phone_leaves_a_chat_thread_the_way_it_leaves_a_screen(phone, desk):
     phone.wait_for_selector(".chat .msg")
     assert not phone.locator("#chatnew").is_visible()
     assert not phone.locator("#chattitle").is_visible()
-    # What a message can be asked to do stands in view, a finger having no pointer to show it by.
-    assert phone.locator(".chat .msg .acts .answer").first.is_visible()
+    # What a message can be asked to do stands in view, a finger having no pointer to show it by: the answer, the one
+    # used all the time, and the rest behind a '...'.
+    acts = phone.locator(".chat .msg .acts").first
+    assert acts.locator(".answer").is_visible()
+    assert not acts.locator(".edit").is_visible()
+    acts.locator(".moreacts").tap()
+    assert acts.locator(".edit").is_visible()
     assert not phone.locator("#chatback").is_visible()
     assert not phone.locator("#chattabs").is_visible()
     phone.go_back()
@@ -5751,7 +5756,6 @@ def test_a_message_of_the_chat_is_named_by_its_number(page, desk):
       };
     }""")
     message.hover()
-    message.locator(".acts .moreacts").click()
     message.locator(".acts .copy").click()
     assert page.evaluate("() => window.copied") == [f"as in #{named}, unlike `#{named}` or #999999"]
     # Named outside code, and naming a message that exists, it is a link; anything else stays words.
@@ -5797,10 +5801,8 @@ def test_a_message_of_the_chat_is_answered_folded_reworded_and_taken_back(page, 
     assert first.locator(".acts .edit").count() == first.locator(".acts .drop").count() == 1
     own = page.locator(f".chat .msg[data-id='{mine['id']}']")
     own.hover()
-    # The answer alone is in reach, the rest behind the '...'.
-    assert own.locator(".acts .answer").is_visible()
-    assert not own.locator(".acts .edit").is_visible()
-    own.locator(".acts .moreacts").click()
+    # Under the pointer, every action shows at once: they are out of sight until then, so nothing waits behind a '...'.
+    assert not own.locator(".acts .moreacts").is_visible()
     own.locator(".acts .edit").click()
     own.locator("textarea").fill("the tighter one, surely")
     own.locator("button", has_text="Save").click()
@@ -5810,7 +5812,6 @@ def test_a_message_of_the_chat_is_answered_folded_reworded_and_taken_back(page, 
     )
     page.on("dialog", lambda dialog: dialog.accept())
     own.hover()
-    own.locator(".acts .moreacts").click()
     own.locator(".acts .drop").click()
     page.wait_for_function("(id) => !document.querySelector(`.chat .msg[data-id='${id}']`)", arg=mine["id"])
 
@@ -5830,7 +5831,6 @@ def test_the_chat_pins_messages_over_a_thread_and_opens_its_reports_in_place(pag
     # Pinned from beside it, a message stands over the thread, a press there going back to it.
     assert not page.locator("#chatpins").is_visible()
     first.hover()
-    first.locator(".acts .moreacts").click()
     first.locator(".acts .pinit").click()
     page.wait_for_selector("#chatpins .pinned")
     assert page.inner_text("#chatpins .pinned") == f"{AGENT}: the jitter is the warm start"
