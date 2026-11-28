@@ -127,6 +127,7 @@ On a phone, a touch screen narrow one way or the other (upright or on its side),
 - The diff runs from edge to edge with one column of line numbers, and a long line wraps under its own indentation. A file head is one row, its path and its tick, with the rest behind its `...`. A remark or a reply shows its words alone, its buttons behind its own `...`.
 - A swipe across the code turns to the next file or back to the one before, naming it at the edge while the finger is down. A swipe across the file list, the comments or the chat closes it.
 - Tapping a line number picks the line, tapping another line of the same file stretches the pick to it, and the bar that shows up along the foot of the screen opens the comment box on the lines picked.
+- A review being written folds to a bar along the foot of the screen, what it holds and **Submit review**. Its head unfolds it whole, and back folds it again.
 
 ## Where things live
 

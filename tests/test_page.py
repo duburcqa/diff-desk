@@ -3813,6 +3813,29 @@ def test_a_phone_picks_lines_by_tapping_their_numbers_and_comments_on_them(phone
     card.locator(".filenote.writing button", has_text="Cancel").tap()
 
 
+def test_a_phone_folds_the_review_being_written_to_a_bar(phone):
+    card = sample(phone)
+    card.locator("tr[data-line][data-side='new']").nth(1).locator("td.ln").nth(1).tap()
+    phone.tap("#selcomment")
+    card.locator("tr[data-composer] textarea").fill("held for the review")
+    card.locator("tr[data-composer] button", has_text="Add to review").tap()
+    # A bar along the foot of the screen: what it holds and the button sending it, nothing more.
+    tray = phone.locator("#tray")
+    tray.wait_for()
+    assert tray.bounding_box()["height"] <= 56
+    assert phone.locator("#traysend").is_visible()
+    assert not phone.locator("#traylist").is_visible()
+    # Its head unfolds it whole, and the phone's back folds it again.
+    phone.tap("#trayhead")
+    assert phone.locator("#traylist").is_visible()
+    assert phone.locator("#traydrop").is_visible()
+    phone.go_back()
+    phone.wait_for_function("() => document.getElementById('tray').dataset.folded === 'true'")
+    phone.on("dialog", lambda dialog: dialog.accept())
+    phone.evaluate("() => document.getElementById('traydrop').click()")
+    phone.wait_for_function("() => document.getElementById('tray').dataset.open === 'false'")
+
+
 def test_a_phone_keeps_the_buttons_of_a_thread_behind_its_menu(phone, desk):
     branch = phone.evaluate("() => data.branches[0].ref")
     saying = f"tucked away, number {len(desk.get('/comments')) + 1}"

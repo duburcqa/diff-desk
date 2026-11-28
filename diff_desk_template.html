@@ -1752,6 +1752,17 @@
     .folderseen { display: inline-flex; }
     .foldername .num { visibility: hidden; }
     button.expand { padding: 6px 12px; font-size: 12px; }
+    /* The review being written folds to a bar along the foot of the screen, what it holds and the button sending it,
+       and its head unfolds it whole, rising from the foot as a sheet does. It gives way to the lines being picked. */
+    .tray[data-open="true"] { left: 8px; right: 8px; bottom: calc(var(--foot, 0px) + 8px); width: auto; z-index: 46; }
+    .tray[data-open="true"][data-folded="true"] { flex-direction: row; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; }
+    .tray[data-folded="true"] > :not(#trayhead, .actions), .tray[data-folded="true"] .actions > :not(#traysend) { display: none; }
+    .tray[data-folded="true"] #trayhead { flex: 1; min-width: 0; }
+    #trayhead { cursor: pointer; }
+    #trayhead::after { content: ""; width: 7px; height: 7px; margin-left: auto; border: solid var(--muted); border-width: 1.5px 0 0 1.5px; transform: translateY(2px) rotate(45deg); }
+    .tray[data-folded="false"] #trayhead::after { transform: translateY(-2px) rotate(225deg); }
+    .tray[data-folded="false"] { left: 0; right: 0; bottom: 0; max-height: 75vh; overflow-y: auto; border-radius: 12px 12px 0 0; z-index: 49; }
+    body:has(#selbar:not([hidden])) .tray[data-folded="true"] { display: none; }
     /* Keys a touch screen has none of. */
     aside .hint { display: none; }
     /* What the dock and the back gesture close, and what a long press copies, take no button of their own. */
@@ -2018,12 +2029,12 @@
   </span>
 </div>
 
-<div class="tray" id="tray" data-open="false" data-pending="false">
+<div class="tray" id="tray" data-open="false" data-pending="false" data-folded="true">
   <div id="unsent" hidden>
     <div class="head"><strong id="unsentcount"></strong><span class="status">written out of sight, not sent yet</span></div>
     <ol id="unsentlist"></ol>
   </div>
-  <div class="head"><strong id="traycount"></strong><span class="status">not sent yet</span></div>
+  <div class="head" id="trayhead"><strong id="traycount"></strong><span class="status">not sent yet</span></div>
   <ol id="traylist"></ol>
   <textarea id="traynote" placeholder="Overall note (optional)"></textarea>
   <label class="seen" id="tograb" hidden><input type="checkbox" id="togh" /><span id="ghlabel"></span></label>
@@ -2133,7 +2144,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "goback", "foldreviewed", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "loading", "goto", "veil", "palette", "pq", "picks", "find", "fgrip", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "fthreads", "toast", "toastwhere", "toastsaid", "toastmark", "logdot", "chatopen", "chatdot", "chat", "chatgrip", "chatback", "chattitle", "chatcopy", "chatnew", "chatclose", "chatwho", "chatrows", "chatsay", "chatname", "chattext", "chatsend", "chatresult", "filesgrip", "railfold", "logmove", "logsize", "fchat", "chatbuttons", "dock", "dockfiles", "dockprev", "dockdone", "docknext", "docklog", "dockchat", "docklogdot", "dockchatdot", "selbar", "selwhat", "selcomment", "selclear", "turn", "dockmore", "sheet", "sheettitle", "sheetitems", "dockdiff", "filetabs", "chattabs", "logflip", "logmore", "docksettings", "tabbar"]) {
+  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "goback", "foldreviewed", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "loading", "goto", "veil", "palette", "pq", "picks", "find", "fgrip", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "fthreads", "toast", "toastwhere", "toastsaid", "toastmark", "logdot", "chatopen", "chatdot", "chat", "chatgrip", "chatback", "chattitle", "chatcopy", "chatnew", "chatclose", "chatwho", "chatrows", "chatsay", "chatname", "chattext", "chatsend", "chatresult", "filesgrip", "railfold", "logmove", "logsize", "fchat", "chatbuttons", "dock", "dockfiles", "dockprev", "dockdone", "docknext", "docklog", "dockchat", "docklogdot", "dockchatdot", "selbar", "selwhat", "selcomment", "selclear", "turn", "dockmore", "sheet", "sheettitle", "sheetitems", "dockdiff", "filetabs", "chattabs", "logflip", "logmore", "docksettings", "tabbar", "trayhead"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -4235,6 +4246,8 @@
     }
     els.unsent.hidden = !items.length;
     els.tray.dataset.open = String(notes.drafts.length > 0 || items.length > 0);
+    // Folded again once it empties, so the next review starts as a bar.
+    if (els.tray.dataset.open === "false") els.tray.dataset.folded = "true";
   }
 
   // Looked at again whenever what is in sight, or what is written, may have changed: once a frame at most.
@@ -8242,6 +8255,7 @@
     settings: [() => els.settings.dataset.open === "true", () => openSettings(false)],
     source: [() => els.source.dataset.open === "true", () => els.sourceopen.click()],
     picker: [() => !els.palette.hidden, closePicker],
+    tray: [() => els.tray.dataset.folded === "false", () => (els.tray.dataset.folded = "true")],
     find: [() => !els.find.hidden, closeFind],
   };
   let screenOn = null;
@@ -8272,6 +8286,7 @@
   const screenWatch = new MutationObserver(screensMoved);
   screenWatch.observe(document.body, { attributes: true, attributeFilter: ["class"] });
   for (const node of [els.log, els.settings, els.source]) screenWatch.observe(node, { attributes: true, attributeFilter: ["data-open"] });
+  screenWatch.observe(els.tray, { attributes: true, attributeFilter: ["data-folded"] });
   screenWatch.observe(els.find, { attributes: true, attributeFilter: ["hidden"] });
   window.addEventListener("popstate", (event) => {
     if (!isPhone()) return;
@@ -8331,6 +8346,9 @@
     else els.chatopen.click();
   });
   els.dockdiff.addEventListener("click", toDiff);
+  els.trayhead.addEventListener("click", () => {
+    if (isPhone()) els.tray.dataset.folded = String(els.tray.dataset.folded === "false");
+  });
   els.docksettings.addEventListener("click", () => openSettings(els.settings.dataset.open !== "true"));
   els.dockmore.addEventListener("click", () => {
     if (!els.sheet.hidden) {
