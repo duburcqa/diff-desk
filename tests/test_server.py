@@ -4,6 +4,7 @@ import concurrent.futures
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -2103,7 +2104,7 @@ def test_the_chat_holds_threads_between_the_reader_and_the_agents(desk):
     assert "name the thread" in refused.communicate(timeout=60)[0] and refused.returncode != 0
 
 
-def test_a_message_of_the_chat_answers_another_and_is_reworded_or_taken_back_by_its_author(desk):
+def test_a_message_of_the_chat_answers_another_and_is_reworded_or_deleted_by_its_author_or_the_reader(desk):
     opened = desk.post("/chat", {"title": "Answered in place", "text": "which tolerance?"}, agent=AGENT)
     thread = opened["thread"]
     # An answer names the message it answers, one of its own thread.
@@ -2122,22 +2123,22 @@ def test_a_message_of_the_chat_answers_another_and_is_reworded_or_taken_back_by_
     assert [earlier["text"] for earlier in said[answer["id"]]["edits"]] == ["the default one"]
     exported = desk.cli("chat", str(thread)).communicate(timeout=60)[0]
     assert f"#{answer['id']}, answering #{opened['id']}" in exported
-    # Taken back: a message answers stand under leaves a line saying so, the others go, and only their author takes
-    # them back.
-    assert desk.post("/chat/drop", {"id": opened["id"]})["ok"] is False
-    assert desk.post("/chat/drop", {"id": opened["id"]}, agent=AGENT)["ok"]
+    # Deleted: a message answers stand under leaves a line saying so, the others go. Its author deletes it, and so does
+    # the reader, who keeps the desk, but no other agent.
+    assert desk.post("/chat/drop", {"id": opened["id"]}, agent="bystander")["ok"] is False
+    assert desk.post("/chat/drop", {"id": opened["id"]})["ok"]
     assert desk.post("/chat/drop", {"id": answer["id"]})["ok"]
     said = {message["id"]: message for message in desk.get("/chat")["messages"]}
     assert (said[opened["id"]]["deleted"], said[opened["id"]]["text"]) == (True, "")
     assert answer["id"] not in said
-    # From the command line as well, an agent answering, rewording and taking back its own words.
+    # From the command line as well, an agent answering, rewording and deleting its own words.
     told = desk.cli("say", str(other["thread"]), "answered from the shell", "--on", str(other["id"])).communicate(
         timeout=60
     )[0]
     made = int(told.split("[")[1].split("]")[0])
     assert {message["id"]: message for message in desk.get("/chat")["messages"]}[made]["on"] == other["id"]
     assert "reworded" in desk.cli("say", "--edit", str(made), "reworded from the shell").communicate(timeout=60)[0]
-    assert "took back" in desk.cli("say", "--drop", str(made)).communicate(timeout=60)[0]
+    assert "deleted" in desk.cli("say", "--drop", str(made)).communicate(timeout=60)[0]
     assert made not in {message["id"] for message in desk.get("/chat")["messages"]}
 
 
@@ -2269,24 +2270,23 @@ def test_the_desk_is_reached_from_the_tailnet_through_tailscale(desk, tmp_path, 
     port = desk.url.rsplit(":", 1)[1]
     asked = tmp_path / "asked.log"
 
-    # Served over HTTPS at this machine's plain address on the tailnet, which a phone types without a port, forwarded
-    # to the desk on 127.0.0.1, which keeps answering there alone.
+    # Served over HTTPS at this machine's address on the tailnet, which a phone types without a port, under a path
+    # nobody guesses, forwarded to the desk on 127.0.0.1, which keeps answering there alone.
     told = desk.cli("tailnet").communicate(timeout=60)[0]
-    assert "https://desk.tail0.ts.net/" in told
-    assert f"serve --bg --https=443 http://127.0.0.1:{port}" in asked.read_text().splitlines()
-    # Asked again, it keeps the address it holds.
-    assert "https://desk.tail0.ts.net/" in desk.cli("tailnet").communicate(timeout=60)[0]
+    path = (tmp_path / "serving").read_text()
+    assert re.fullmatch(r"/[\w-]{20,}", path)
+    assert f"https://desk.tail0.ts.net{path}/" in told
+    assert f"serve --bg --https=443 --set-path={path} http://127.0.0.1:{port}" in asked.read_text().splitlines()
+    # Asked again, it keeps the address it holds, which a phone may have kept.
+    assert f"https://desk.tail0.ts.net{path}/" in desk.cli("tailnet").communicate(timeout=60)[0]
     # Taken off as asked, and nothing left served.
     assert "no longer on the tailnet" in desk.cli("tailnet", "--off").communicate(timeout=60)[0]
-    assert asked.read_text().splitlines()[-1] == "serve --https=443 off"
+    assert asked.read_text().splitlines()[-1] == f"serve --https=443 --set-path={path} off"
     assert not (tmp_path / "serving").exists()
-    # Where the plain address serves something else, the desk takes its own port and leaves that alone.
-    (tmp_path / "serving").write_text("443")
-    told = desk.cli("tailnet").communicate(timeout=60)[0]
-    assert f"https://desk.tail0.ts.net:{port}/" in told
-    assert f"serve --bg --https={port} http://127.0.0.1:{port}" in asked.read_text().splitlines()
+    # Put back, it is under a path of its own again, the old address leading nowhere.
+    desk.cli("tailnet").communicate(timeout=60)
+    assert (tmp_path / "serving").read_text() != path
     desk.cli("tailnet", "--off").communicate(timeout=60)
-    assert asked.read_text().splitlines()[-1] == f"serve --https={port} off"
 
 
 def test_the_desk_updates_itself_over_https_when_ssh_cannot_be_reached(tmp_path):

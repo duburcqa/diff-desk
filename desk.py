@@ -26,7 +26,7 @@ desk.py chat                                         the threads of the chat, ne
 desk.py chat 3                                       one thread of the chat, as plain text to keep or read back
 desk.py say 3 "..."                                  say something in a thread of the chat
 desk.py say 3 "..." --on 12                          answer message #12 of the thread, read under it
-desk.py say --edit 12 "..."  /  say --drop 12        reword or take back message #12, said by you
+desk.py say --edit 12 "..."  /  say --drop 12        reword or delete message #12, said by you
 desk.py say 3 "Benchmark" --report out/report.html   pin a report under the thread, opened in place in the chat
 desk.py say --pin 12  /  say --unpin 12              pin message #12 over its thread, or take the pin off
 desk.py say --new "title" "..."                      open a thread of the chat
@@ -39,6 +39,7 @@ import json
 import os
 import pathlib
 import re
+import secrets
 import shlex
 import subprocess
 import sys
@@ -330,7 +331,7 @@ def stop(args):
     # asked only where the reader put the desk there: a desk never put on the tailnet never runs it.
     asked = on_tailnet()
     if asked.exists():
-        tailscale("serve", f"--https={asked.read_text().strip()}", "off")
+        tailscale("serve", f"--https={PLAIN_HTTPS}", f"--set-path={asked.read_text().strip()}", "off")
         asked.unlink()
         print("and taken off the tailnet")
 
@@ -344,7 +345,7 @@ def tailscale(*words):
 
 
 def on_tailnet():
-    """The record that the reader put the desk on this port on the tailnet, holding the port it is reached at there,
+    """The record that the reader put the desk on this port on the tailnet, holding the path it is reached at there,
     which exists only while it is there."""
     return serve_diff.HOME / f"tailnet.{serve_diff.PORT}"
 
@@ -352,44 +353,39 @@ def on_tailnet():
 def tailnet(args):
     """Reach the desk from the other devices of your tailnet, a phone included, or stop.
 
-    Tailscale serves the desk over HTTPS at this machine's name on the tailnet, at the plain address with no port, which
-    is what a phone types and keeps. Where that address already serves something else, another desk included, the desk
-    is served on its own port instead, leaving it alone. The desk itself keeps answering on 127.0.0.1 alone: the
+    Tailscale serves the desk over HTTPS at this machine's name on the tailnet, with no port to type, under a path drawn
+    at random: a device of the tailnet reaches the desk only once it is given the address, and every desk of this
+    machine has a path of its own beside whatever else the address serves. The path is kept while the desk stays on the
+    tailnet, so an address kept on a phone keeps working. The desk itself keeps answering on 127.0.0.1 alone: the
     devices of the tailnet reach it through Tailscale, and nothing else does. A page opened there is the reader's, as a
     page opened here is.
     """
     port = serve_diff.PORT
     record = on_tailnet()
     if args.off:
-        done = tailscale("serve", f"--https={record.read_text().strip() if record.exists() else port}", "off")
+        if not record.exists():
+            sys.exit("the desk is not on the tailnet")
+        done = tailscale("serve", f"--https={PLAIN_HTTPS}", f"--set-path={record.read_text().strip()}", "off")
         if done is None or done.returncode != 0:
             sys.exit(
                 f"Tailscale did not take it off: {(done.stderr if done else 'tailscale is not installed').strip()}"
             )
-        record.unlink(missing_ok=True)
+        record.unlink()
         print("no longer on the tailnet")
         return
     if ask("/data") is None:
         sys.exit("nothing is serving; start with 'desk.py serve' first")
-    # The plain address unless something other than this desk is served there already.
-    served = tailscale("serve", "status", "--json")
-    if served is None:
-        sys.exit("tailscale is not installed, or not on the PATH (DIFF_DESK_TAILSCALE names it otherwise)")
-    names = json.loads(served.stdout or "{}").get("Web") or {} if served.returncode == 0 else {}
-    is_ours = record.exists() and record.read_text().strip() == str(PLAIN_HTTPS)
-    https = PLAIN_HTTPS if is_ours or not any(name.endswith(f":{PLAIN_HTTPS}") for name in names) else port
-    done = tailscale("serve", "--bg", f"--https={https}", f"http://127.0.0.1:{port}")
+    path = record.read_text().strip() if record.exists() else f"/{secrets.token_urlsafe(16)}"
+    done = tailscale("serve", "--bg", f"--https={PLAIN_HTTPS}", f"--set-path={path}", f"http://127.0.0.1:{port}")
     if done is None:
         sys.exit("tailscale is not installed, or not on the PATH (DIFF_DESK_TAILSCALE names it otherwise)")
     if done.returncode != 0:
         sys.exit(f"Tailscale refused to serve it: {(done.stderr or done.stdout).strip()}")
-    record.write_text(f"{https}\n")
+    record.write_text(f"{path}\n")
     status = tailscale("status", "--json")
     name = json.loads(status.stdout)["Self"]["DNSName"].rstrip(".") if status and status.returncode == 0 else None
-    at = "" if https == PLAIN_HTTPS else f":{https}"
-    print(f"on the tailnet: https://{name}{at}/" if name else f"on the tailnet, on port {https}")
-    if https != PLAIN_HTTPS:
-        print("the plain address serves something else already, so the desk is on its own port")
+    # With its closing slash: the page names everything it asks for relative to where it was opened.
+    print(f"on the tailnet: https://{name}{path}/" if name else f"on the tailnet, under {path}/")
 
 
 def resume_from(asked, stopped, waiting, latest):
@@ -514,7 +510,7 @@ def chat(args):
 
 
 def change_message(args):
-    """Reword, take back, pin or unpin a message of the chat, as 'say' is asked to."""
+    """Reword, delete, pin or unpin a message of the chat, as 'say' is asked to."""
     if args.pin is not None or args.unpin is not None:
         number = args.pin or args.unpin
         route, order, done = (
@@ -525,7 +521,7 @@ def change_message(args):
     elif args.edit is not None:
         route, order, done = "/chat/edit", {"id": args.edit, "text": " ".join(args.words)}, "reworded"
     else:
-        route, order, done = "/chat/drop", {"id": args.drop}, "took back"
+        route, order, done = "/chat/drop", {"id": args.drop}, "deleted"
     outcome = ask(route, order)
     if outcome is None:
         sys.exit("nothing is serving")
@@ -535,7 +531,7 @@ def change_message(args):
 
 
 def say(args):
-    """Say something in a thread of the chat, open a new one under a title, or reword or take back a message said."""
+    """Say something in a thread of the chat, open a new one under a title, or reword or delete a message said."""
     words = list(args.words)
     if any(number is not None for number in (args.edit, args.drop, args.pin, args.unpin)):
         change_message(args)
@@ -876,7 +872,7 @@ job.add_argument(
 job.add_argument("--new", metavar="TITLE", help="open a new thread under this title")
 job.add_argument("--on", type=int, metavar="N", help="answer message #N of the thread, read under it")
 job.add_argument("--edit", type=int, metavar="N", help="reword message #N, said by you, with the words given")
-job.add_argument("--drop", type=int, metavar="N", help="take back message #N, said by you")
+job.add_argument("--drop", type=int, metavar="N", help="delete message #N, said by you")
 job.add_argument(
     "--report",
     metavar="SOURCE",

@@ -84,6 +84,9 @@ def phone(browser, desk):
     desk.post("/reviewed", {"drop": list(desk.get("/reviewed")["marks"])})
 
 
+# The words a folded message or comment shows, drawn by the page beside the words it already holds.
+PSEUDO = "(gist) => getComputedStyle(gist, '::before').content"
+
 # Which of the screens of a phone are up, as the page says it.
 SHOWN = """{
   files: !document.body.classList.contains('hide-files'),
@@ -395,7 +398,7 @@ def test_a_thread_can_be_answered_rewritten_closed_and_reopened_from_the_page(pa
     assert [(reply["who"], reply["text"]) for reply in said["replies"]] == [("you", "a reply from the reviewer")]
 
     thread = page.locator(f"#note-{seq}")
-    thread.locator(".line:not(.reply) button.tiny").filter(has_text="Edit").click()
+    thread.locator(".line:not(.reply) button.edit").click()
     thread.locator("textarea").first.fill("the remark, rewritten")
     thread.locator("button.solid").filter(has_text="Save").click()
     page.wait_for_function(
@@ -3489,6 +3492,9 @@ def test_every_hit_is_marked_and_one_in_sight_keeps_the_view(page):
         }"""
     )
     assert marked in (None, 7)
+    # Read from the middle of the screen, so the next hit of the block is in sight whatever the earlier steps left the
+    # view on: a hit stepped to from another file may land on the bottom edge, the next one just under it.
+    page.locator("tr.hit").evaluate("(row) => row.scrollIntoView({ block: 'center' })")
     at_rest(page)
     scrolled = page.evaluate("() => window.scrollY")
     page.locator("#fq").press("Enter")
@@ -3879,18 +3885,18 @@ def test_a_phone_keeps_the_buttons_of_a_thread_behind_its_menu(phone, desk):
         assert len(off) == 2
         assert max(off) < 0.5
         head, reply = thread.locator(".thread > .line").first, thread.locator(".line.reply").first
-        assert not head.locator(".tools button", has_text="edit").is_visible()
-        assert not reply.locator("button", has_text="edit").is_visible()
+        assert not head.locator(".tools button.edit").is_visible()
+        assert not reply.locator("button.edit").is_visible()
         head.locator(".said > .more").tap()
-        assert head.locator(".tools button", has_text="edit").is_visible()
-        assert not reply.locator("button", has_text="edit").is_visible()
+        assert head.locator(".tools button.edit").is_visible()
+        assert not reply.locator("button.edit").is_visible()
         reply.locator(".said > .more").tap()
-        assert reply.locator("button", has_text="edit").is_visible()
+        assert reply.locator("button.edit").is_visible()
         # Kept out across a redraw of the thread, and put away by the same '...'.
         phone.evaluate("() => { drawnFor = null; render(); }")
-        assert head.locator(".tools button", has_text="edit").is_visible()
+        assert head.locator(".tools button.edit").is_visible()
         head.locator(".said > .more").tap()
-        assert not head.locator(".tools button", has_text="edit").is_visible()
+        assert not head.locator(".tools button.edit").is_visible()
     finally:
         desk.post("/drop", {"seq": made})
 
@@ -3978,7 +3984,7 @@ def test_a_reply_can_be_rewritten_and_a_comment_and_its_last_reply_deleted_from_
     assert [answer["text"] for answer in kept["replies"]] == ["first answer"]
 
     # A reply carries the same Edit as the remark it answers, and rewriting it keeps what it said before as its own.
-    thread.locator(".line.reply button.tiny").filter(has_text="Edit").click()
+    thread.locator(".line.reply button.edit").click()
     thread.locator(".line.reply textarea").first.fill("better worded")
     thread.locator(".line.reply button.solid").filter(has_text="Save").click()
     # The line being written into holds no said text at all, so the wait outlives it rather than tripping over it.
@@ -3992,12 +3998,12 @@ def test_a_reply_can_be_rewritten_and_a_comment_and_its_last_reply_deleted_from_
     # The remark it answers is left as it was written: the two are rewritten apart.
     assert reworded["text"] == saying
 
-    # A button that deletes reads as one: a pill shaped as the ones beside it, its cross at its centre, drawn in the
-    # colour of what is removed, and filling with it when pointed at.
+    # A button that deletes reads as one: an icon of the size of the ones beside it, its cross at its centre, drawn in
+    # the colour of what is removed, and filling with it when pointed at.
     remove = thread.locator(".thread > .line button.drop").first
     drawn = remove.evaluate(
         """(button) => {
-          const pill = button.closest('.line').querySelector('button.tiny:not(.drop):not(.reactadd)');
+          const beside = button.closest('.line').querySelector('button.iconact:not(.drop)');
           const box = button.getBoundingClientRect();
           const mark = button.querySelector('svg').getBoundingClientRect();
           const off = Math.max(
@@ -4006,13 +4012,12 @@ def test_a_reply_can_be_rewritten_and_a_comment_and_its_last_reply_deleted_from_
           );
           return {
             color: getComputedStyle(button).color,
-            height: box.height === pill.getBoundingClientRect().height,
-            round: getComputedStyle(button).borderRadius === getComputedStyle(pill).borderRadius,
+            height: box.height === beside.getBoundingClientRect().height,
             centred: off < 0.5,
           };
         }"""
     )
-    assert drawn == {"color": colour(page, "--del-ink"), "height": True, "round": True, "centred": True}
+    assert drawn == {"color": colour(page, "--del-ink"), "height": True, "centred": True}
     rest = remove.evaluate("(button) => getComputedStyle(button).backgroundColor")
     remove.hover()
     page.wait_for_function(
@@ -4392,7 +4397,7 @@ def test_a_reply_quoting_a_passage_shows_it_as_a_quote(page, desk):
     assert ">" not in answer
     assert page.locator(f"#note-{made} .line.reply code").first.inner_text() == "code"
     # A reply to one message rather than to the end of the thread starts with that message quoted.
-    page.locator(f"#note-{made} .thread > .line .tools button.tiny", has_text="reply").click()
+    page.locator(f"#note-{made} .thread > .line .tools button.answer").click()
     box = page.locator(f"#note-{made} .line.actions:not(.aside) textarea")
     assert box.input_value() == f"> {saying}\n\n"
     box.fill("")
@@ -4830,7 +4835,7 @@ def test_a_comment_written_on_the_pull_request_shows_whose_it_is_and_is_answered
         # Whose remark it is stands in the line; when it was said and where it stands are what hovering says.
         assert head.locator(".who .by").inner_text() == "Milotrince"
         assert head.locator(".who").get_attribute("data-tip") == "2026-08-22 09:00, submitted on the pull request"
-        assert head.locator("button.tiny").filter(has_text="Edit").count() == 0
+        assert head.locator("button.edit").count() == 0
         assert head.locator("button.drop").count() == 0
         assert page.locator(f"#note-{seq} .actions button.ghost").filter(has_text="Reply").count() == 1
     finally:
@@ -4852,7 +4857,7 @@ def test_a_remark_an_agent_wrote_reads_as_its_own_and_stays_this_desks_to_change
     assert "agent" in head.locator(".who .by").get_attribute("class")
     assert head.locator(".who").get_attribute("data-tip").endswith("submitted here")
     # Written on this desk, so the reader may reword it or take it back before anything sends it.
-    assert head.locator("button.tiny").filter(has_text="Edit").count() == 1
+    assert head.locator("button.edit").count() == 1
     assert head.locator("button.drop").count() == 1
 
 
@@ -4878,7 +4883,7 @@ def test_a_thread_says_what_it_owes_the_pull_request_and_sends_it_when_asked(pag
         # A note is written into the thread and stays there: it is read as a note rather than as somebody's answer,
         # it carries no standing, and what the thread owes the pull request is what it was without it.
         page.locator(f"#note-{made} .filehead, #note-{made} .line").first.hover()
-        page.locator(f"#note-{made} .line:not(.reply) button.tiny").filter(has_text="Whisper").click()
+        page.locator(f"#note-{made} .line:not(.reply) button.whisperon").click()
         page.locator(f"#note-{made} .line.actions.aside textarea").fill("come back to this after the rebase")
         page.locator(f"#note-{made} .line.actions.aside button").filter(has_text="Reply").click()
         page.wait_for_selector(f"#note-{made} .line.reply.aside:not(.actions)")
@@ -4888,9 +4893,9 @@ def test_a_thread_says_what_it_owes_the_pull_request_and_sends_it_when_asked(pag
 
         # One for every comment: the note about the remark carries the remark's, and the reply carries its own while
         # nothing stands on it.
-        assert page.locator(f"#note-{made} button.tiny").filter(has_text="whisper").count() == 2
-        assert aside.locator("button.tiny").filter(has_text="whisper").count() == 1
-        aside.locator("button.tiny").filter(has_text="Whisper").click()
+        assert page.locator(f"#note-{made} button.whisperon").count() == 2
+        assert aside.locator("button.whisperon").count() == 1
+        aside.locator("button.whisperon").click()
         page.locator(f"#note-{made} .line.actions.aside textarea").fill("done.")
         page.locator(f"#note-{made} .line.actions.aside button").filter(has_text="Reply").click()
         page.wait_for_function(
@@ -5127,7 +5132,7 @@ def test_a_note_being_written_survives_the_poll_redrawing_its_thread(page, desk)
     page.reload(wait_until="load")
     page.wait_for_selector(f"#note-{made} .thread")
     page.locator(f"#note-{made} .line").first.hover()
-    page.locator(f"#note-{made} .line:not(.reply) button.tiny").filter(has_text="Whisper").click()
+    page.locator(f"#note-{made} .line:not(.reply) button.whisperon").click()
     page.locator(f"#note-{made} .line.actions.aside textarea").fill("half a note, and worth keeping")
     # A reply landing meanwhile, and the poll that reads it once the box has lost the keyboard: the thread is drawn
     # again around the reply, and the box has to come through with its words, still on the remark.
@@ -5746,7 +5751,8 @@ def test_a_message_of_the_chat_is_named_by_its_number(page, desk):
       };
     }""")
     message.hover()
-    message.locator(".who .copy").click()
+    message.locator(".acts .moreacts").click()
+    message.locator(".acts .copy").click()
     assert page.evaluate("() => window.copied") == [f"as in #{named}, unlike `#{named}` or #999999"]
     # Named outside code, and naming a message that exists, it is a link; anything else stays words.
     assert message.locator("a.xref").all_inner_texts() == [f"#{named}"]
@@ -5783,14 +5789,18 @@ def test_a_message_of_the_chat_is_answered_folded_reworded_and_taken_back(page, 
     assert not page.locator("#chatanswering").is_visible()
     # Folded, a message is its first words and how many answers it holds, its answers out of sight until unfolded.
     first.locator(".foldmsg").click()
-    assert first.locator(".gist").inner_text() == "Which tolerance? \u00b7 2 answers"
+    assert first.locator(".gist").evaluate(PSEUDO) == '"Which tolerance? \u00b7 2 answers"'
     assert page.locator(".chat .msg").count() == 1
     first.locator(".foldmsg").click()
     page.wait_for_function("() => document.querySelectorAll('.chat .msg').length === 3")
-    # Reworded and taken back by the reader, who said it, and by nobody else: an agent's message offers neither.
-    assert first.locator(".acts .edit").count() == 0
+    # Reworded and deleted by the reader, who keeps the desk, whoever said it: an agent's message offers both as well.
+    assert first.locator(".acts .edit").count() == first.locator(".acts .drop").count() == 1
     own = page.locator(f".chat .msg[data-id='{mine['id']}']")
     own.hover()
+    # The answer alone is in reach, the rest behind the '...'.
+    assert own.locator(".acts .answer").is_visible()
+    assert not own.locator(".acts .edit").is_visible()
+    own.locator(".acts .moreacts").click()
     own.locator(".acts .edit").click()
     own.locator("textarea").fill("the tighter one, surely")
     own.locator("button", has_text="Save").click()
@@ -5800,6 +5810,7 @@ def test_a_message_of_the_chat_is_answered_folded_reworded_and_taken_back(page, 
     )
     page.on("dialog", lambda dialog: dialog.accept())
     own.hover()
+    own.locator(".acts .moreacts").click()
     own.locator(".acts .drop").click()
     page.wait_for_function("(id) => !document.querySelector(`.chat .msg[data-id='${id}']`)", arg=mine["id"])
 
@@ -5818,6 +5829,7 @@ def test_the_chat_pins_messages_over_a_thread_and_opens_its_reports_in_place(pag
     # Pinned from beside it, a message stands over the thread, a press there going back to it.
     assert not page.locator("#chatpins").is_visible()
     first.hover()
+    first.locator(".acts .moreacts").click()
     first.locator(".acts .pinit").click()
     page.wait_for_selector("#chatpins .pinned")
     assert page.inner_text("#chatpins .pinned") == f"{AGENT}: the jitter is the warm start"
@@ -5852,7 +5864,7 @@ def test_a_remark_or_a_reply_folds_to_its_first_words(page, desk):
         # Each folds alone, to the line of its author and its first words, and is kept folded across a reload.
         reply.locator(".foldmsg").click()
         assert not reply.locator(".text").is_visible()
-        assert reply.locator(".gist").inner_text() == "answered at length over two paragraphs"
+        assert reply.locator(".gist").evaluate(PSEUDO) == '"answered at length over two paragraphs"'
         assert head.locator(".text").is_visible()
         page.reload(wait_until="load")
         page.wait_for_selector(f"#note-{made} .line.reply")

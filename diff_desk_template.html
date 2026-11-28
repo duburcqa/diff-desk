@@ -429,15 +429,18 @@
   body.hide-files .rail { display: flex; flex-direction: column; gap: 2px; position: sticky; top: var(--head); margin-top: 8px; }
   .rail button { width: 28px; height: 36px; border: 0; border-radius: 0 6px 6px 0; cursor: pointer; }
 
+  /* As tall as the window under the header whatever the list holds, so the rule down its side runs to the bottom
+     rather than stopping under the last file. */
   aside {
     position: sticky;
     top: var(--head);
-    max-height: calc(100vh - var(--head));
+    box-sizing: border-box;
+    height: calc(100vh - var(--head));
     overflow-y: auto;
     padding: 14px 10px 40px 16px;
     border-right: 1px solid var(--rule);
   }
-  @media (max-width: 900px) { aside { position: static; max-height: none; border-right: 0; border-bottom: 1px solid var(--rule); } }
+  @media (max-width: 900px) { aside { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--rule); } }
 
   aside h2 { margin: 0 0 8px 4px; }
   .filelist { display: flex; flex-direction: column; gap: 1px; }
@@ -580,6 +583,8 @@
   .counts .minus { color: var(--del-ink); }
   .chev { width: 12px; height: 12px; color: var(--faint); flex: none; transition: transform 0.12s ease; }
   .file[data-open="false"] .chev { transform: rotate(-90deg); }
+  /* Lit under the pointer as every other icon is, the press folding the file being on the whole head. */
+  .filehead .grow:hover .chev { color: var(--accent); }
   .file[data-open="false"] .body { display: none; }
 
   .icon { position: relative; flex: none; display: grid; place-items: center; width: 22px; height: 20px; padding: 0; color: var(--faint); background: transparent; border: 0; border-radius: 5px; cursor: pointer; }
@@ -615,6 +620,10 @@
   [data-stale="true"] .status { color: var(--del-ink); font-weight: 600; }
   .seen { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); cursor: pointer; user-select: none; white-space: nowrap; padding: 8px 12px; margin: -8px -12px -8px 0; }
   .seen input { accent-color: var(--add-ink); width: 14px; height: 14px; }
+  /* The box answers the pointer anywhere on its label, which is what the press lands on: a browser draws the hover of
+     its own box faintly if at all, so a dark theme would show the cursor change alone. */
+  .seen:hover, .folderseen:hover { color: var(--ink); }
+  .seen:hover input, .folderseen:hover input { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 1px; border-radius: 3px; }
 
   /* What a file is, said beside its path: a label, so it keeps one look under the pointer, unlike a pressable chip. */
   .badge { font-size: 10px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 6px; border-radius: 4px; background: var(--surface-sunk); color: var(--muted); }
@@ -1063,22 +1072,6 @@
   .thread.found { outline: 2px solid var(--accent); outline-offset: 1px; }
   body.hide-done .file[data-done="true"][data-reveal="true"] { display: block; }
 
-  /* A button that deletes is a pill of the height of the ones beside it, drawn in the colour of what is removed, its
-     cross drawn rather than typed so that it stands at the centre whatever the font, and filled with that colour under
-     the pointer. Pinned to the line height every other pill is drawn at, which is what it is measured against. */
-  button.tiny.drop {
-    display: inline-grid;
-    place-items: center;
-    height: 14px;
-    margin-left: auto;
-    padding: 0 7px;
-    color: var(--del-ink);
-    border-color: color-mix(in srgb, var(--del-ink) 55%, transparent);
-    transition: border-color 0.12s, background-color 0.12s;
-  }
-  button.tiny.drop:hover { color: var(--del-ink); border-color: var(--del-ink); background: var(--del-bg); }
-  button.tiny.drop svg { width: 6px; height: 6px; }
-
   .log {
     position: fixed;
     right: 20px;
@@ -1401,9 +1394,10 @@
   body.chat-open.semantic .chat { position: fixed; right: 0; bottom: 0; z-index: 44; width: min(var(--chat-width, 420px), 100vw); height: auto; box-shadow: var(--shadow); }
   .chat .grip { position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 1; }
   .chat .grip:hover, .chat .grip.held { background: color-mix(in srgb, var(--accent) 35%, transparent); }
-  .chat .head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px 0; border-bottom: 1px solid var(--rule); }
-  .chat .head > button { margin-bottom: 10px; }
-  .chat .head strong { margin-bottom: 10px; }
+  /* The line of who is watching sits right under the buttons, across the whole column: a gap between rows would add
+     to the room the buttons keep under them, and the padding of the head would stop its rule short of the edges. */
+  .chat .head { display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; padding: 8px 12px 0; border-bottom: 1px solid var(--rule); }
+  .chat .head > button, .chat .head strong { margin-bottom: 8px; }
   #chatnew svg { display: none; }
   .chat .topic.newtopic { display: none; }
   #logflip, #logmore { display: none; }
@@ -1413,7 +1407,7 @@
   .line.actions[data-whisper="true"] > textarea { border-style: dashed; background: var(--surface-sunk); }
   .chat .head strong { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
   /* Who watches, on a line of its own under the buttons of the head. */
-  .chat .present { flex-basis: 100%; margin: 0 -12px; padding: 6px 12px; color: var(--muted); font-size: 11.5px; border-top: 1px solid var(--rule); }
+  .chat .present { flex-basis: calc(100% + 24px); margin: 0 -12px; padding: 4px 12px; color: var(--muted); font-size: 11.5px; border-top: 1px solid var(--rule); }
   .chat .present .name { color: var(--voice, var(--accent)); font-weight: 600; }
   .chat .talk { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
   .chat .topic {
@@ -1453,35 +1447,40 @@
   .chat .msg .who .num { margin-left: 6px; color: var(--faint); font-family: var(--mono); font-weight: 400; }
   /* Offered where the pointer is, and always on a touch screen, which has no pointer to show it by. */
   @media (pointer: coarse) { .chat .msg .who .acts { visibility: visible; } }
-  /* Offered where the pointer is. */
-  .chat .msg .who .copy { display: inline-grid; place-items: center; margin-left: 6px; padding: 2px 4px; vertical-align: middle; color: var(--faint); background: transparent; border: 0; border-radius: 4px; cursor: pointer; visibility: hidden; }
-  .chat .msg .who .copy svg { width: 13px; height: 13px; }
   .chat a.ondisk { font-family: var(--mono); font-size: 0.92em; overflow-wrap: anywhere; }
-  .chat .msg .who .copy:hover { color: var(--accent); }
-  .chat .msg .who .copy[data-copied="true"] { color: var(--add-ink); }
-  .chat .msg .who .copy[data-copied="false"] { color: var(--del-ink); }
-  .chat .msg:hover .who .copy, .chat .msg .who .copy:focus-visible { visibility: visible; }
+  .chat .msg .acts .copy[data-copied="true"] { color: var(--add-ink); }
+  .chat .msg .acts .copy[data-copied="false"] { color: var(--del-ink); }
   /* Keys a touch screen has none of. */
   @media (pointer: coarse) { .keys { display: none; } }
   .chat .msg.flash { background: color-mix(in srgb, var(--accent) 14%, transparent); }
   .chat .msg .said { color: var(--ink); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
   /* An answer stands under what it answers, a step in for each step down, four at most. */
   .chat .msg { margin-left: calc(var(--depth, 0) * 16px); }
-  .chat .msg .who { display: flex; align-items: center; min-width: 0; }
+  /* One line whatever the width: the date gives way first, so the name and the buttons stay whole. */
+  .chat .msg .who { display: flex; align-items: center; min-width: 0; white-space: nowrap; }
+  .chat .msg .who .at { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .foldmsg { display: inline-grid; place-items: center; flex: none; margin: 0 2px 0 -4px; padding: 2px; color: var(--faint); background: transparent; border: 0; border-radius: 4px; cursor: pointer; }
   .foldmsg svg { width: 11px; height: 11px; transition: transform 0.1s; }
   .foldmsg:hover { color: var(--accent); }
   [data-folded="true"] > .who .foldmsg svg, .said[data-folded="true"] > .foldmsg svg { transform: rotate(-90deg); }
   /* Folded, a message is the line of its author with its first words, and how many answers it holds. */
+  /* Drawn from its attribute: the words are on the page already, and a search or a lookup by text finds them once. */
+  .gist::before { content: attr(data-gist); }
   .chat .msg .gist { display: none; flex: 1 1 auto; min-width: 0; margin-left: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-weight: 400; }
   .chat .msg[data-folded="true"] .gist { display: block; }
   .chat .msg[data-folded="true"] > .said, .chat .msg[data-folded="true"] .acts { display: none; }
   .chat .msg .acts { display: inline-flex; flex: none; gap: 1px; margin-left: 6px; visibility: hidden; }
-  .chat .msg:hover .acts, .chat .msg .acts:focus-within { visibility: visible; }
-  .chat .msg .acts button { display: inline-grid; place-items: center; padding: 2px 4px; color: var(--faint); background: transparent; border: 0; border-radius: 4px; cursor: pointer; }
-  .chat .msg .acts button:hover { color: var(--accent); }
-  .chat .msg .acts .drop:hover { color: var(--del-ink); }
-  .chat .msg .acts svg { width: 13px; height: 13px; }
+  .chat .msg:hover .acts, .chat .msg .acts:focus-within, .chat .msg[data-acts="true"] .acts { visibility: visible; }
+  .chat .msg .acts .extra { display: inline-flex; gap: 1px; }
+  .chat .msg:not([data-acts="true"]) .acts .extra { display: none; }
+  /* What a message, a remark or a reply can be asked to do: an icon lit in the accent under the pointer, the one that
+     deletes drawn in the colour of what is removed. */
+  button.iconact { display: inline-grid; place-items: center; flex: none; padding: 2px 4px; color: var(--faint); background: transparent; border: 0; border-radius: 4px; cursor: pointer; vertical-align: middle; }
+  button.iconact:hover, button.iconact[aria-pressed="true"] { color: var(--accent); }
+  button.iconact svg { width: 13px; height: 13px; }
+  button.iconact.whisperon svg { width: 15px; height: 15px; margin: -1px; }
+  button.iconact.drop, button.iconact.drop:hover { color: var(--del-ink); }
+  button.iconact.drop:hover { background: var(--del-bg); }
   .chat .msg .said.gone { color: var(--faint); font-style: italic; }
   .chat .msg .said textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 6px 8px; color: var(--ink); background: var(--surface); border: 1px solid var(--rule-strong); border-radius: 6px; }
   .chat .msg .said .row { display: flex; gap: 8px; margin-top: 6px; }
@@ -1500,7 +1499,6 @@
   .chat .reports:not([hidden]) { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 10px; border-top: 1px solid var(--rule); }
   .chat .reports .reportchip { border: 1px solid var(--rule-strong); border-radius: 999px; padding: 4px 10px; max-width: 100%; }
   .chat .reportcard { margin-top: 6px; padding: 6px 10px; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface-sunk); }
-  .chat .msg .acts .pinit[aria-pressed="true"] { color: var(--accent); }
   /* A report opened fills the chat, the way back at the top right. */
   .chat .viewer:not([hidden]) { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; background: var(--surface); }
   .chat .viewer .viewhead { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 4px 0 12px; border-bottom: 1px solid var(--rule); }
@@ -1732,7 +1730,7 @@
     /* The line the hunk opens in takes a line of its own under the buttons, read whole rather than wrapped beside them. */
     tr.h td .at { display: block; margin-top: 4px; }
     /* One thing at a time: the file list, the comments and the chat each take the screen under the dock. */
-    aside { position: fixed; inset: var(--head) 0 var(--foot, 0px); z-index: 46; max-height: none; overflow-y: auto; background: var(--surface); border: 0; }
+    aside { position: fixed; inset: var(--head) 0 var(--foot, 0px); z-index: 46; height: auto; overflow-y: auto; background: var(--surface); border: 0; }
     body.chat-open .chat { left: 0; right: 0; bottom: 0; width: auto; top: var(--head); height: auto; }
     .chat .grip { display: none; }
     .log[data-open="true"] { inset: var(--head) 0 0; width: auto; max-height: none; border: 0; border-radius: 0; padding: 12px 10px; }
@@ -1759,15 +1757,16 @@
       border: 1px solid var(--rule-strong);
       border-radius: 999px;
     }
-    .thread .line:not([data-tools="open"]) > .tools > :not(.turn), .thread .line.reply:not([data-tools="open"]) > button.tiny { display: none; }
+    .thread .line:not([data-tools="open"]) > .tools > :not(.turn), .thread .line.reply:not([data-tools="open"]) > :is(button.tiny, button.iconact) { display: none; }
     .thread .line.reply { flex-wrap: wrap; row-gap: 4px; }
     .thread .line.reply > .said { flex: 1 1 100%; }
     .thread .line.reply > .said + button { margin-left: auto; }
     .thread .line[data-tools="open"] > .tools { flex-basis: 100%; justify-content: flex-end; }
     button.tiny { font-size: 12px; line-height: 16px; padding: 5px 10px; }
-    /* The delete pill as tall and as wide as a short word beside it, its cross at the size of the letters. */
-    button.tiny.drop { height: 28px; min-width: 40px; padding: 0 10px; }
-    button.tiny.drop svg { width: 9px; height: 9px; }
+    /* Each icon a fingertip wide. */
+    button.iconact { padding: 6px; }
+    button.iconact svg { width: 16px; height: 16px; }
+    button.iconact.whisperon svg { width: 18px; height: 18px; }
     /* A reply box nobody is writing in shares its row with the button closing the thread, the rest of its buttons
        showing once words or a file are in it. Kept open by what it holds rather than by the keyboard alone: a tap on
        one of its buttons takes the keyboard away before the tap lands. */
@@ -2166,7 +2165,7 @@
   // being opened), and per thread the last message the reader has had on screen, kept in this browser.
   // `folded` holds the messages the reader folded, `answering` the message the box answers, `editing` the message being
   // reworded and its draft: each outlives the redraws a thread goes through while it is read.
-  const chat = { messages: [], open: null, read: {}, drawn: null, drawnThread: null, folded: new Set(), answering: null, editing: null };
+  const chat = { messages: [], open: null, read: {}, drawn: null, drawnThread: null, folded: new Set(), answering: null, editing: null, actsOut: new Set() };
   // A selection is a span of rendered rows, held as the row order within the file rather than as line numbers on one
   // side, which is what lets one range cover removed and added lines together.
   const sel = { path: null, from: null, to: null };
@@ -3039,73 +3038,69 @@
         number.dataset.tip = `Refer to this message as #${message.id}`;
         const gist = who.appendChild(document.createElement("span"));
         gist.className = "gist";
-        gist.textContent = `${message.deleted ? "taken back" : outline(message.text)}${below ? ` \u00b7 ${plural(below, "answer")}` : ""}`;
-        // What a message can be asked to do: answered by the reader, and reworded or taken back by whoever said it.
+        gist.dataset.gist = `${message.deleted ? "deleted" : outline(message.text)}${below ? ` \u00b7 ${plural(below, "answer")}` : ""}`;
+        // What a message can be asked to do: answered and pinned by anyone, reworded and deleted by whoever said it and
+        // by the reader, who keeps the desk. The answer alone is in reach, being the one used all the time, and the rest
+        // wait behind a '...'.
         const acts = who.appendChild(document.createElement("span"));
         acts.className = "acts";
-        const act = (label, icon, deed) => {
-          const button = acts.appendChild(document.createElement("button"));
-          button.type = "button";
-          button.innerHTML = icon;
-          button.dataset.tip = label;
-          button.setAttribute("aria-label", label);
+        const extra = document.createElement("span");
+        extra.className = "extra";
+        const act = (holder, kind, tip, deed) => {
+          const button = holder.appendChild(actButton(kind, tip));
           button.addEventListener("click", deed);
           return button;
         };
         if (!message.deleted) {
-          act("Answer this message", `<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 3 2 6.5 5.5 10"/><path d="M2 6.5h6.5a3.5 3.5 0 0 1 3.5 3.5v1"/></svg>`, () => {
+          act(acts, "answer", "Answer this message", () => {
             chat.answering = message.id;
             drawAnswering();
             els.chattext.focus();
-          }).className = "answer";
-        }
-        if (!message.deleted) {
-          const pin = act(message.pinned ? "Take the pin off" : "Pin this message over the thread", `<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.5 1.8 12.2 5.5 9.6 6.6 7.4 8.8l.4 2.6-1.2 1.2-5-5 1.2-1.2 2.6.4L7.4 4.4z"/><path d="M4.3 9.7 1.8 12.2"/></svg>`, async () => {
+          });
+          line.dataset.acts = String(chat.actsOut.has(message.id));
+          const more = act(acts, "moreacts", "More", () => {
+            if (!chat.actsOut.delete(message.id)) chat.actsOut.add(message.id);
+            line.dataset.acts = String(chat.actsOut.has(message.id));
+            more.setAttribute("aria-expanded", line.dataset.acts);
+          });
+          more.setAttribute("aria-expanded", line.dataset.acts);
+          acts.append(extra);
+          const pin = act(extra, "pinit", message.pinned ? "Take the pin off" : "Pin this message over the thread", async () => {
             const outcome = await post("chat/pin", { id: message.id, pinned: !message.pinned });
             if (!outcome.ok) announce("pin", `#${message.id}`, outcome.error || "the desk refused it");
             await loadNotes();
           });
-          pin.className = "pinit";
           pin.setAttribute("aria-pressed", String(Boolean(message.pinned)));
-        }
-        if (!message.deleted && isReader(message.who)) {
-          act("Reword this message", `<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2.5 11.5 4.5 5 11H3V9z"/></svg>`, () => {
+          act(extra, "edit", message.edits && message.edits.length ? `Reword this message, rewritten ${message.edits.length} time(s)` : "Reword this message", () => {
+            chat.actsOut.delete(message.id);
             chat.editing = { id: message.id, draft: message.text };
             chat.drawn = null;
             drawChat();
-          }).className = "edit";
-          act("Take this message back", `<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7"/></svg>`, async () => {
-            if (!window.confirm("Take this message back? Its words go for good.")) return;
+          });
+          // The message as it was written, to paste wherever it is wanted next. The icon takes the colour of how it went
+          // for a moment, as the copy of a file's path does.
+          const copy = act(extra, "copy", "Copy this message as plain text", async () => {
+            try {
+              await navigator.clipboard.writeText(message.text);
+              copy.dataset.copied = "true";
+            } catch (error) {
+              copy.dataset.copied = "false";
+            }
+            window.setTimeout(() => delete copy.dataset.copied, 1200);
+          });
+          act(extra, "drop", "Delete this message", async () => {
+            const also = below ? `, its ${plural(below, "answer")} staying under what is left of it` : "";
+            if (!window.confirm(`Delete this message${also}?`)) return;
             const outcome = await post("chat/drop", { id: message.id });
-            if (!outcome.ok) announce("take back", `#${message.id}`, outcome.error || "the desk refused it");
+            if (!outcome.ok) announce("delete", `#${message.id}`, outcome.error || "the desk refused it");
             await loadNotes();
-          }).className = "drop";
+          });
         }
-        // The message as it was written, to paste wherever it is wanted next.
-        const copy = who.appendChild(document.createElement("button"));
-        copy.className = "copy";
-        copy.type = "button";
-        copy.dataset.tip = "Copy this message as plain text";
-        copy.setAttribute("aria-label", "Copy this message as plain text");
-        copy.innerHTML =
-          '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">' +
-          '<rect x="4.6" y="1.6" width="7.8" height="9.8" rx="1.6"/>' +
-          '<path d="M9.4 12.4H3.2a1.6 1.6 0 0 1-1.6-1.6V4.2"/></svg>';
-        // The icon takes the colour of how it went for a moment, as the copy of a file's path does.
-        copy.addEventListener("click", async () => {
-          try {
-            await navigator.clipboard.writeText(message.text);
-            copy.dataset.copied = "true";
-          } catch (error) {
-            copy.dataset.copied = "false";
-          }
-          window.setTimeout(() => delete copy.dataset.copied, 1200);
-        });
         const words = line.appendChild(document.createElement("div"));
         words.className = "said";
         if (message.deleted) {
           words.classList.add("gone");
-          words.textContent = "This message was taken back.";
+          words.textContent = "This message was deleted.";
           els.chatrows.append(line);
           continue;
         }
@@ -3360,7 +3355,7 @@
     els.chatpins.replaceChildren(
       ...pins.map((message) => {
         const item = Object.assign(document.createElement("button"), { type: "button", className: "pinned" });
-        item.innerHTML = `<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.5 1.8 12.2 5.5 9.6 6.6 7.4 8.8l.4 2.6-1.2 1.2-5-5 1.2-1.2 2.6.4L7.4 4.4z"/><path d="M4.3 9.7 1.8 12.2"/></svg>`;
+        item.innerHTML = `<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><g transform="rotate(45 7 7)"><path d="M5.3 1.6h3.4l-.4 4.5 2.3 2.4H3.4l2.3-2.4z"/><path d="M7 8.5v4.4"/></g></svg>`;
         item.append(`${spokenBy(message.who)}: ${outline(message.text)}`);
         item.addEventListener("click", () => reachMessage(message.id));
         return item;
@@ -3386,9 +3381,14 @@
     const { source, key } = message.report;
     const isPage = !key || /\.(?:html?|svg)$/i.test(source);
     const src = key ? `report/${key}/${encodeURIComponent(source.split("/").pop())}` : source;
-    if (isPage) els.chatviewframe.setAttribute("sandbox", `allow-scripts allow-popups allow-forms${key ? "" : " allow-same-origin"}`);
-    else els.chatviewframe.removeAttribute("sandbox");
-    els.chatviewframe.src = src;
+    // A fresh frame each time: changing the address of one already on the page adds a step to the page's history,
+    // which the back of a phone would then spend on the frame rather than on the report.
+    const frame = els.chatviewframe.cloneNode(false);
+    if (isPage) frame.setAttribute("sandbox", `allow-scripts allow-popups allow-forms${key ? "" : " allow-same-origin"}`);
+    else frame.removeAttribute("sandbox");
+    frame.src = src;
+    els.chatviewframe.replaceWith(frame);
+    els.chatviewframe = frame;
     els.chatviewout.href = src;
     els.chatviewtitle.textContent = outline(message.text) || reportName(message.report);
     els.chatviewer.hidden = false;
@@ -3399,7 +3399,10 @@
   function closeReport(isBack) {
     if (els.chatviewer.hidden) return;
     els.chatviewer.hidden = true;
-    els.chatviewframe.src = "about:blank";
+    const frame = els.chatviewframe.cloneNode(false);
+    frame.removeAttribute("src");
+    els.chatviewframe.replaceWith(frame);
+    els.chatviewframe = frame;
     if (!isBack && history.state && history.state.report) history.back();
   }
 
@@ -3566,8 +3569,30 @@
     });
     const gist = document.createElement("span");
     gist.className = "gist";
-    gist.textContent = outline(words);
+    gist.dataset.gist = outline(words);
     return [fold, gist];
+  }
+
+  // What a message of the chat, a remark or a reply can be asked to do, drawn the same wherever it is offered.
+  const actIcons = {
+    answer: '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 3 2 6.5 5.5 10"/><path d="M2 6.5h6.5a3.5 3.5 0 0 1 3.5 3.5v1"/></svg>',
+    pinit: '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><g transform="rotate(45 7 7)"><path d="M5.3 1.6h3.4l-.4 4.5 2.3 2.4H3.4l2.3-2.4z"/><path d="M7 8.5v4.4"/></g></svg>',
+    edit: '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2.5 11.5 4.5 5 11H3V9z"/></svg>',
+    whisperon: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13H15A3 3 0 0 0 18 10V6A3 3 0 0 0 15 3H5A3 3 0 0 0 2 6V10A3 3 0 0 0 5 13H6.6" stroke-dasharray="2.041 2.1"/><path d="M10.8 13H10L6.5 16.8V13H5.8"/><path d="M6.15 8h1.2M9.4 8h1.2M12.65 8h1.2"/></svg>',
+    moreacts: '<svg viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><circle cx="3" cy="7" r="1.15"/><circle cx="7" cy="7" r="1.15"/><circle cx="11" cy="7" r="1.15"/></svg>',
+    copy: '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="4.6" y="1.6" width="7.8" height="9.8" rx="1.6"/><path d="M9.4 12.4H3.2a1.6 1.6 0 0 1-1.6-1.6V4.2"/></svg>',
+    drop: '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7"/></svg>',
+  };
+
+  // The button of one of them, named by its tip: the icon alone says what it does.
+  function actButton(kind, tip) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `iconact ${kind}`;
+    button.innerHTML = actIcons[kind];
+    button.dataset.tip = tip;
+    button.setAttribute("aria-label", tip);
+    return button;
   }
 
   // The threads whose box whispers: everything said from it stays on this desk, kept across redraws.
@@ -3576,11 +3601,7 @@
   // A reply to one message of a thread rather than to its end: the box at the foot of the thread starts with that
   // message quoted, which is how a thread on the pull request says what an answer is to.
   function quoteFor(text) {
-    const quote = document.createElement("button");
-    quote.className = "tiny";
-    quote.type = "button";
-    quote.textContent = "reply";
-    quote.dataset.tip = "Reply to this, quoted at the head of the reply";
+    const quote = actButton("answer", "Reply to this, quoted at the head of the reply");
     quote.addEventListener("click", () => {
       const box = quote.closest(".thread").querySelector(".line.actions:not(.aside) textarea");
       if (!box) return;
@@ -3596,10 +3617,7 @@
   // A note written where it belongs: on the remark, or on a reply. Several may stand on one reply, and they are read
   // in the order they were written, so notes never stand inside notes.
   function whisperOn(note, on) {
-    const open = document.createElement("button");
-    open.className = "tiny";
-    open.textContent = "whisper";
-    open.dataset.tip = "Keep a note here, on this desk";
+    const open = actButton("whisperon", "Keep a note here, on this desk");
     open.dataset.on = on === null ? "" : String(on);
     open.addEventListener("click", () => {
       // One at a time: a second press goes back to the box already open rather than opening another beside it.
@@ -3646,7 +3664,7 @@
   // Where a note is read: after the last note about the same comment, and under that comment while none stands there.
   function placeWhisper(thread, writing) {
     const kin = [...thread.querySelectorAll(`.line.reply.aside:not(.actions)[data-on="${writing.dataset.on}"]`)];
-    const under = kin.length ? kin[kin.length - 1] : thread.querySelector(`button.tiny[data-on="${writing.dataset.on}"]`);
+    const under = kin.length ? kin[kin.length - 1] : thread.querySelector(`button.whisperon[data-on="${writing.dataset.on}"]`);
     if (under) (under.matches(".line") ? under : under.closest(".line")).after(writing);
   }
 
@@ -5254,10 +5272,7 @@
     }
     if (reactTo) tools.append(reactTo);
     if ((note.pending || notes.live) && writtenHere(note)) {
-      const change = document.createElement("button");
-      change.className = "tiny";
-      change.textContent = "edit";
-      change.dataset.tip = note.edits && note.edits.length ? `rewritten ${note.edits.length} time(s)` : "Rewrite this comment";
+      const change = actButton("edit", note.edits && note.edits.length ? `Rewrite this comment, rewritten ${note.edits.length} time(s)` : "Rewrite this comment");
       change.addEventListener("click", () => {
         const written = document.createElement("textarea");
         written.rows = 2;
@@ -5339,11 +5354,8 @@
       }
       tools.append(mark);
     }
-    const drop = document.createElement("button");
-    drop.className = "tiny drop";
-    drop.innerHTML = cross;
+    const drop = actButton("drop", "Remove this comment");
     if (note.pending) {
-      drop.dataset.tip = "Remove this comment";
       drop.addEventListener("click", () => {
         if (!window.confirm("Remove this comment? It has not been sent, so nothing else holds it.")) return;
         notes.drafts = notes.drafts.filter((draft) => draft !== note.source);
@@ -5354,6 +5366,7 @@
     } else if (notes.live && writtenHere(note)) {
       const posted = note.github === "posted";
       drop.dataset.tip = posted ? "Delete this comment, here and on the pull request" : "Delete this comment";
+      drop.setAttribute("aria-label", drop.dataset.tip);
       drop.addEventListener("click", async () => {
         const answers = (note.replies || []).length;
         const also = answers ? ` and ${answers} repl${answers === 1 ? "y" : "ies"}` : "";
@@ -5448,10 +5461,7 @@
       if (!note.pending && notes.live) said.append(quoteFor(answer.text));
       if (!note.pending && notes.live && carries) said.append(whisperOn(note, groupOf(entry)));
       if (!note.pending && notes.live && (isReader(answer.who) || isAgent(answer.who))) {
-        const change = document.createElement("button");
-        change.className = "tiny";
-        change.textContent = "edit";
-        change.dataset.tip = answer.edits && answer.edits.length ? `rewritten ${answer.edits.length} time(s)` : "Rewrite this reply";
+        const change = actButton("edit", answer.edits && answer.edits.length ? `Rewrite this reply, rewritten ${answer.edits.length} time(s)` : "Rewrite this reply");
         change.addEventListener("click", () => {
           const written = document.createElement("textarea");
           written.rows = 2;
@@ -5491,10 +5501,7 @@
       // The last of what stands on one comment is what can go, note or reply alike: forgetting one further up would
       // leave the ones under it standing against nothing.
       if (!note.pending && notes.live && answer.whisper && carries) {
-        const forget = document.createElement("button");
-        forget.className = "tiny drop";
-        forget.innerHTML = cross;
-        forget.dataset.tip = "Forget this note";
+        const forget = actButton("drop", "Forget this note");
         forget.addEventListener("click", async () => {
           if (!window.confirm("Forget this note?")) return;
           const outcome = await post("forget", { seq: note.seq, whisper: index });
@@ -5506,10 +5513,7 @@
         said.append(forget);
       }
       if (!note.pending && notes.live && !answer.whisper && place === answers.length - 1) {
-        const undo = document.createElement("button");
-        undo.className = "tiny drop";
-        undo.innerHTML = cross;
-        undo.dataset.tip = note.github === "posted" ? "Delete this reply, here and on the pull request" : "Delete this reply";
+        const undo = actButton("drop", note.github === "posted" ? "Delete this reply, here and on the pull request" : "Delete this reply");
         undo.addEventListener("click", async () => {
           if (!window.confirm("Delete the last reply?")) return;
           const outcome = await post("drop", { seq: note.seq, reply: true, ...where() });
@@ -6842,7 +6846,6 @@
     if (card) jump(Number(card.id.slice(1)));
   }
 
-  const cross = '<svg viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" aria-hidden="true"><path d="M1 1l6 6M7 1 1 7"/></svg>';
   const chevron = '<svg class="chev" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5"/></svg>';
   const tickMark = '<svg class="tick" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 6.5 4.7 9 10 3.5"/></svg>';
 
