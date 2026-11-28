@@ -2,7 +2,7 @@
 
 A local review page for any git range, and a way to hand the comments left on it to AI agents or to a pull request.
 
-![The review page: the file tree, a diff with a comment thread open, and the Comments panel](media/desk.png)
+![The review page: the file tree, a diff with review threads open, and the chat beside it](media/desk.png)
 
 ## What it is for
 
@@ -117,6 +117,9 @@ A watch hears the chat too. A message wakes an agent when it opens a thread, whe
 Tailscale serves the running desk over HTTPS at this machine's name on your tailnet, on the desk's own port, to the devices of the tailnet alone: the desk keeps answering on `127.0.0.1`, and the tailnet reaches it through Tailscale (`tailscale serve`, never `funnel`). A page opened there is the reader's, as one opened on the machine is. `desk.py stop` takes it off the tailnet as well. It is opt-in: the desk never runs Tailscale, not even to look, until `desk.py tailnet` is asked for. It needs Tailscale installed and logged in on both ends.
 
 On a phone, a touch screen narrow one way or the other (upright or on its side), the page is laid out for a thumb and keeps every pixel it can for the code:
+
+![The page on a phone: the diff with a review thread, the comments, and the chat](media/phone.png)
+
 
 - Two rows of icons are held along the top of the screen. The first is always the same: the diff, the comments, the chat and the settings. The second belongs to the one up. For the diff, the file list, the previous file, Reviewed for the file on screen, the next file, and `...` for everything else (go to file, find, the comment steps, folding reviewed files, refreshing, branches). For the chat, who watches and a new thread. For the comments, their counts, the grouping and `...` for what they send and bring back. The share of files reviewed is drawn along its edge.
 - Each of the file list, the comments and the chat takes the screen under the rows, one at a time, and the phone's back gesture closes it. A chat thread is left for the list of threads the same way: back, a swipe to the right, or the chat's tab pressed again.
