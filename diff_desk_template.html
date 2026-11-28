@@ -1469,14 +1469,17 @@
   .chat .msg .gist { display: none; flex: 1 1 auto; min-width: 0; margin-left: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-weight: 400; }
   .chat .msg[data-folded="true"] .gist { display: block; }
   .chat .msg[data-folded="true"] > .said, .chat .msg[data-folded="true"] .acts { display: none; }
-  .chat .msg .acts { display: inline-flex; flex: none; gap: 1px; margin-left: 6px; visibility: hidden; }
+  /* The actions of a message stand flush right on the line of its author. Under a pointer every one of them shows with
+     the pointer. A touch screen shows the answer and a '...' always, and the '...' gives way to a filled capsule holding
+     every action, as the toolbar of a chat does, until a tap lands anywhere else. */
+  .chat .msg .acts { display: inline-flex; flex: none; align-items: center; gap: 1px; margin-left: auto; padding-left: 6px; visibility: hidden; }
   .chat .msg:hover .acts, .chat .msg .acts:focus-within, .chat .msg[data-acts="true"] .acts { visibility: visible; }
-  /* Under a pointer every action shows at once, all of them out of sight until it comes. A touch screen shows them
-     always, so it keeps the answer alone in reach and the rest behind a '...'. */
-  .chat .msg .acts .extra { display: inline-flex; gap: 1px; }
+  .chat .msg .acts .extra { display: inline-flex; align-items: center; gap: 1px; }
   .chat .msg .acts .moreacts { display: none; }
   @media (pointer: coarse) {
-    .chat .msg .acts .moreacts { display: inline-grid; }
+    .chat .msg .acts button.iconact { padding: 3px 6px; border-radius: 999px; }
+    .chat .msg[data-acts="true"] .acts { padding: 0 2px; border: 1px solid var(--rule-strong); border-radius: 999px; background: var(--surface-sunk); box-shadow: var(--shadow); }
+    .chat .msg:not([data-acts="true"]) .acts .moreacts { display: inline-grid; }
     .chat .msg:not([data-acts="true"]) .acts .extra { display: none; }
   }
   /* What a message, a remark or a reply can be asked to do: an icon lit in the accent under the pointer, the one that
@@ -3063,12 +3066,10 @@
             els.chattext.focus();
           });
           line.dataset.acts = String(chat.actsOut.has(message.id));
-          const more = act(acts, "moreacts", "More", () => {
-            if (!chat.actsOut.delete(message.id)) chat.actsOut.add(message.id);
-            line.dataset.acts = String(chat.actsOut.has(message.id));
-            more.setAttribute("aria-expanded", line.dataset.acts);
+          act(acts, "moreacts", "More", () => {
+            chat.actsOut.add(message.id);
+            line.dataset.acts = "true";
           });
-          more.setAttribute("aria-expanded", line.dataset.acts);
           acts.append(extra);
           const pin = act(extra, "pinit", message.pinned ? "Take the pin off" : "Pin this message over the thread", async () => {
             const outcome = await post("chat/pin", { id: message.id, pinned: !message.pinned });
@@ -3418,6 +3419,14 @@
     els.chatanswering.hidden = !answered;
     if (answered) els.chatanswerwhat.textContent = `Answering ${spokenBy(answered.who)} #${answered.id}: ${outline(answered.text)}`;
   }
+
+  // A capsule taken out on a touch screen goes away at the next tap anywhere else, as a menu does: its '...' is gone
+  // while it is out (see '.acts .extra').
+  addEventListener("pointerdown", (event) => {
+    if (!chat.actsOut.size || event.target.closest(".chat .msg .acts")) return;
+    chat.actsOut.clear();
+    for (const line of document.querySelectorAll('.chat .msg[data-acts="true"]')) line.dataset.acts = "false";
+  }, { capture: true });
 
   function keepChatFolded() {
     try {

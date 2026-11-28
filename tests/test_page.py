@@ -3685,13 +3685,8 @@ def test_a_phone_leaves_a_chat_thread_the_way_it_leaves_a_screen(phone, desk):
     phone.wait_for_selector(".chat .msg")
     assert not phone.locator("#chatnew").is_visible()
     assert not phone.locator("#chattitle").is_visible()
-    # What a message can be asked to do stands in view, a finger having no pointer to show it by: the answer, the one
-    # used all the time, and the rest behind a '...'.
-    acts = phone.locator(".chat .msg .acts").first
-    assert acts.locator(".answer").is_visible()
-    assert not acts.locator(".edit").is_visible()
-    acts.locator(".moreacts").tap()
-    assert acts.locator(".edit").is_visible()
+    # What a message can be asked to do stands in view, a finger having no pointer to show it by.
+    assert phone.locator(".chat .msg .acts .answer").first.is_visible()
     assert not phone.locator("#chatback").is_visible()
     assert not phone.locator("#chattabs").is_visible()
     phone.go_back()
@@ -3904,6 +3899,24 @@ def test_a_phone_keeps_the_buttons_of_a_thread_behind_its_menu(phone, desk):
         assert not head.locator(".tools button.edit").is_visible()
     finally:
         desk.post("/drop", {"seq": made})
+
+
+def test_a_phone_keeps_the_rarer_actions_of_a_message_behind_its_menu(phone, desk):
+    thread = desk.post("/chat", {"title": "Acted on from a phone", "text": "a word"}, agent=AGENT)["thread"]
+    phone.evaluate("() => loadNotes()")
+    phone.tap("#dockchat")
+    phone.tap(f".chat .topic[data-thread='{thread}']")
+    acts = phone.locator(".chat .msg .acts").first
+    # The answer, the one used all the time, stands in view, and the rest behind a '...' that gives way to them.
+    assert acts.locator(".answer").is_visible()
+    assert not acts.locator(".edit").is_visible()
+    acts.locator(".moreacts").tap()
+    assert acts.locator(".edit").is_visible()
+    assert not acts.locator(".moreacts").is_visible()
+    # Put away by a tap anywhere else, as a menu is.
+    phone.locator(".chat .msg .said").first.tap()
+    assert not acts.locator(".edit").is_visible()
+    assert acts.locator(".moreacts").is_visible()
 
 
 @pytest.mark.parametrize("width", [1500, 1000, 760])
