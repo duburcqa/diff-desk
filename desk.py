@@ -52,6 +52,8 @@ URL = f"http://127.0.0.1:{serve_diff.PORT}"
 AGENT = os.environ.get("DIFF_DESK_AGENT", "")
 # How Tailscale is run, which a test replaces with a stand-in, as it does `gh`.
 TAILSCALE = shlex.split(os.environ.get("DIFF_DESK_TAILSCALE", "tailscale"))
+# The port HTTPS takes where an address names none, which is what makes an address plain.
+PLAIN_HTTPS = 443
 
 
 def refresh():
@@ -324,7 +326,7 @@ def stop(args):
     # asked only where the reader put the desk there: a desk never put on the tailnet never runs it.
     asked = on_tailnet()
     if asked.exists():
-        tailscale("serve", f"--https={serve_diff.PORT}", "off")
+        tailscale("serve", f"--https={asked.read_text().strip()}", "off")
         asked.unlink()
         print("and taken off the tailnet")
 
@@ -338,39 +340,52 @@ def tailscale(*words):
 
 
 def on_tailnet():
-    """The record that the reader put the desk on this port on the tailnet, which exists only while it is there."""
+    """The record that the reader put the desk on this port on the tailnet, holding the port it is reached at there,
+    which exists only while it is there."""
     return serve_diff.HOME / f"tailnet.{serve_diff.PORT}"
 
 
 def tailnet(args):
     """Reach the desk from the other devices of your tailnet, a phone included, or stop.
 
-    Tailscale serves the desk over HTTPS at this machine's name on the tailnet, on the desk's own port, which leaves
-    whatever else it serves alone and gives each desk an address of its own. The desk itself keeps answering on
-    127.0.0.1 alone: the devices of the tailnet reach it through Tailscale, and nothing else does. A page opened there
-    is the reader's, as a page opened here is.
+    Tailscale serves the desk over HTTPS at this machine's name on the tailnet, at the plain address with no port, which
+    is what a phone types and keeps. Where that address already serves something else, another desk included, the desk
+    is served on its own port instead, leaving it alone. The desk itself keeps answering on 127.0.0.1 alone: the
+    devices of the tailnet reach it through Tailscale, and nothing else does. A page opened there is the reader's, as a
+    page opened here is.
     """
     port = serve_diff.PORT
+    record = on_tailnet()
     if args.off:
-        done = tailscale("serve", f"--https={port}", "off")
+        done = tailscale("serve", f"--https={record.read_text().strip() if record.exists() else port}", "off")
         if done is None or done.returncode != 0:
             sys.exit(
                 f"Tailscale did not take it off: {(done.stderr if done else 'tailscale is not installed').strip()}"
             )
-        on_tailnet().unlink(missing_ok=True)
+        record.unlink(missing_ok=True)
         print("no longer on the tailnet")
         return
     if ask("/data") is None:
         sys.exit("nothing is serving; start with 'desk.py serve' first")
-    done = tailscale("serve", "--bg", f"--https={port}", f"http://127.0.0.1:{port}")
+    # The plain address unless something other than this desk is served there already.
+    served = tailscale("serve", "status", "--json")
+    if served is None:
+        sys.exit("tailscale is not installed, or not on the PATH (DIFF_DESK_TAILSCALE names it otherwise)")
+    names = json.loads(served.stdout or "{}").get("Web") or {} if served.returncode == 0 else {}
+    is_ours = record.exists() and record.read_text().strip() == str(PLAIN_HTTPS)
+    https = PLAIN_HTTPS if is_ours or not any(name.endswith(f":{PLAIN_HTTPS}") for name in names) else port
+    done = tailscale("serve", "--bg", f"--https={https}", f"http://127.0.0.1:{port}")
     if done is None:
         sys.exit("tailscale is not installed, or not on the PATH (DIFF_DESK_TAILSCALE names it otherwise)")
     if done.returncode != 0:
         sys.exit(f"Tailscale refused to serve it: {(done.stderr or done.stdout).strip()}")
-    on_tailnet().write_text(f"{port}\n")
+    record.write_text(f"{https}\n")
     status = tailscale("status", "--json")
     name = json.loads(status.stdout)["Self"]["DNSName"].rstrip(".") if status and status.returncode == 0 else None
-    print(f"on the tailnet: https://{name}:{port}/" if name else f"on the tailnet, on port {port}")
+    at = "" if https == PLAIN_HTTPS else f":{https}"
+    print(f"on the tailnet: https://{name}{at}/" if name else f"on the tailnet, on port {https}")
+    if https != PLAIN_HTTPS:
+        print("the plain address serves something else already, so the desk is on its own port")
 
 
 def resume_from(asked, stopped, waiting, latest):
