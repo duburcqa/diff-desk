@@ -1608,6 +1608,14 @@
     td.ln { padding: 0 4px 0 6px; }
     td.mark { padding: 0 2px 0 3px; }
     tr.sel td.ln:nth-child(2), tr.hit td.ln:nth-child(2) { box-shadow: inset 3px 0 0 var(--accent); }
+    /* The lines picked by taps are what the bar over the dock speaks of, so they stand out as plainly as it does, over
+       the colour of an added or removed line as well. */
+    tr.sel td:is(.ln, .mark, .code) {
+      background-image: linear-gradient(
+        color-mix(in srgb, var(--accent) 28%, transparent),
+        color-mix(in srgb, var(--accent) 28%, transparent)
+      );
+    }
     /* A wrapped line hangs under its own indentation, two columns further in, so the shape of the code still reads
        (see '--lead' in the row builder). */
     td.code {
