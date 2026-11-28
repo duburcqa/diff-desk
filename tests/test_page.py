@@ -3567,7 +3567,9 @@ def test_the_page_reads_on_a_phone(phone):
     })""")
     assert {count for count, _, _ in numbers} == {1}
     assert all(line == shown for _, line, shown in numbers)
-    # The bar scrolls away with the page, and a file head sticks to the top of the screen in its place.
+    # A file head is a single row, its words left to a menu.
+    assert max(box["height"] for box in (head.bounding_box() for head in phone.locator(".filehead").all())) <= 40
+    # The bar scrolls away with the page, and a file head sticks under the dock in its place.
     phone.evaluate("""() => {
       const cards = [...document.querySelectorAll('section.file')];
       const tall = cards.reduce((one, other) => (other.offsetHeight > one.offsetHeight ? other : one));
@@ -3576,26 +3578,26 @@ def test_the_page_reads_on_a_phone(phone):
     settle(phone)
     held = phone.evaluate("""() => {
       const bar = document.querySelector('header').getBoundingClientRect();
+      const dock = document.getElementById('dock').getBoundingClientRect();
       const head = [...document.querySelectorAll('.filehead')].map((node) => node.getBoundingClientRect())
-        .find((box) => box.bottom > 0);
-      return { bar: bar.bottom, head: head.top };
+        .find((box) => box.bottom > dock.bottom);
+      return { bar: bar.bottom, dock: dock.bottom, head: head.top };
     }""")
     assert held["bar"] <= 0
-    assert abs(held["head"]) <= 1
-    # Turned on its side, a phone is still one: the dock stands at its foot and nothing runs off the side.
+    assert abs(held["head"] - held["dock"]) <= 1
+    # Turned on its side, a phone is still one: the dock stands at its top and nothing runs off the side.
     phone.set_viewport_size({"width": 844, "height": 390})
     settle(phone)
-    dock = phone.locator("#dock").bounding_box()
-    assert round(dock["y"] + dock["height"]) == 390
+    assert phone.locator("#dock").bounding_box()["y"] == 0
     assert phone.evaluate("() => document.documentElement.scrollWidth") <= 844
 
 
 def test_a_phone_shows_one_screen_at_a_time_and_goes_back_from_it(phone, desk):
-    # The dock stands along the foot of the screen, and each screen it opens takes all of the screen above it.
+    # The dock stands along the top of the screen, and each screen it opens takes all of the screen under it.
     dock = phone.locator("#dock").bounding_box()
     width, height = phone.evaluate("() => [document.documentElement.clientWidth, innerHeight]")
-    assert round(dock["y"] + dock["height"]) == height
-    view = (0, 0, width, round(dock["y"]))
+    assert dock["y"] == 0
+    view = (0, round(dock["height"]), width, height - round(dock["height"]))
 
     def box(selector):
         return tuple(round(value) for value in phone.locator(selector).bounding_box().values())
@@ -3604,8 +3606,10 @@ def test_a_phone_shows_one_screen_at_a_time_and_goes_back_from_it(phone, desk):
         return phone.evaluate(f"() => ({SHOWN})")
 
     assert shown() == {"files": False, "chat": False, "log": False}
+    assert phone.get_attribute("#dockdiff", "aria-pressed") == "true"
     phone.tap("#dockfiles")
     assert box("aside") == view
+    assert phone.get_attribute("#dockdiff", "aria-pressed") == "false"
     # The phone's own back closes the screen rather than leaving the page.
     phone.go_back()
     phone.wait_for_selector("aside", state="hidden")
@@ -3619,7 +3623,10 @@ def test_a_phone_shows_one_screen_at_a_time_and_goes_back_from_it(phone, desk):
     phone.wait_for_selector("aside", state="hidden")
     phone.wait_for_function("(at) => state.current === Number(at)", arg=picked)
     phone.wait_for_function("() => history.state === null")
-    # One screen at a time: the chat takes the place of the comments, and one step back is the diff again.
+    # One screen at a time: the chat takes the place of the comments, and one step back is the diff again. The file
+    # just picked has a tab now, which the screens leave in view: the dock is that much taller.
+    tall = round(phone.locator("#dock").bounding_box()["height"])
+    view = (0, tall, width, height - tall)
     phone.tap("#docklog")
     assert box("#log") == view
     phone.tap("#dockchat")
@@ -3629,8 +3636,10 @@ def test_a_phone_shows_one_screen_at_a_time_and_goes_back_from_it(phone, desk):
     phone.go_back()
     phone.wait_for_function("() => !document.body.classList.contains('chat-open')")
     assert shown() == {"files": False, "chat": False, "log": False}
-    # The find box, which a phone has no key for, opens from the bar and closes on the way back as well.
-    phone.tap("#findopen")
+    # What the bar does, the dock's '...' does as well, and the find box opened from there, which a phone has no key
+    # for, closes on the way back too.
+    phone.tap("#dockmore")
+    phone.locator("#sheet button", has_text="Find in the diff").tap()
     assert phone.locator("#fq").is_visible()
     phone.go_back()
     phone.wait_for_selector("#find", state="hidden")
@@ -3675,6 +3684,16 @@ def test_a_phone_steps_through_the_files_from_its_dock_and_by_swiping(phone):
     phone.wait_for_function("() => state.current === 1")
     swipe(phone, "section.file td.code", 1)
     phone.wait_for_function("() => state.current === 0")
+    # Every file gone to has a tab, a tap away: the two stepped between, back and forth.
+    names = [phone.evaluate(f"() => inTreeOrder(view().files)[{index}].path") for index in (0, 1)]
+    assert phone.locator("#filetabs .ftab").evaluate_all("(tabs) => tabs.map((tab) => tab.dataset.path)") == names[::-1]
+    phone.locator(f'#filetabs .ftab[data-path="{names[1]}"] .name').tap()
+    phone.wait_for_function("() => state.current === 1")
+    phone.locator(f'#filetabs .ftab[data-path="{names[0]}"] .name').tap()
+    phone.wait_for_function("() => state.current === 0")
+    # Closed, a tab goes, the file on screen staying as one passed through.
+    phone.locator(f'#filetabs .ftab[data-path="{names[1]}"] .shut').tap()
+    assert phone.locator(f'#filetabs .ftab[data-path="{names[1]}"]').count() == 0
 
 
 def test_a_phone_picks_lines_by_tapping_their_numbers_and_comments_on_them(phone):
@@ -3692,9 +3711,9 @@ def test_a_phone_picks_lines_by_tapping_their_numbers_and_comments_on_them(phone
     # Every row between them, the removed lines among them included.
     seqs = [int(row.get_attribute("data-seq")) for row in (first, last)]
     assert card.locator("tr.sel").count() == seqs[1] - seqs[0] + 1
-    # The bar stands over the dock, clear of it.
+    # The bar stands along the foot of the screen.
     bar = phone.locator("#selbar").bounding_box()
-    assert bar["y"] + bar["height"] <= phone.locator("#dock").bounding_box()["y"]
+    assert phone.evaluate("() => innerHeight") - 20 <= bar["y"] + bar["height"] <= phone.evaluate("() => innerHeight")
     # Its button opens the box on the lines picked, and gives way to it.
     phone.tap("#selcomment")
     box = card.locator("tr[data-composer] textarea")
@@ -3711,6 +3730,40 @@ def test_a_phone_picks_lines_by_tapping_their_numbers_and_comments_on_them(phone
     phone.tap("#selclear")
     assert card.locator("tr.sel").count() == 0
     assert not phone.locator("#selbar").is_visible()
+    # What a file head does beside its tick waits behind its '...', in a sheet rising from the foot of the screen.
+    card.locator(".filehead .more").tap()
+    assert phone.inner_text("#sheettitle").startswith(card.get_attribute("data-path"))
+    phone.locator("#sheet button", has_text="Comment on the file").tap()
+    assert card.locator(".filenote.writing textarea").is_visible()
+    card.locator(".filenote.writing button", has_text="Cancel").tap()
+
+
+def test_a_phone_keeps_the_buttons_of_a_thread_behind_its_menu(phone, desk):
+    branch = phone.evaluate("() => data.branches[0].ref")
+    saying = f"tucked away, number {len(desk.get('/comments')) + 1}"
+    desk.post("/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": saying}])
+    made = desk.get("/comments")[-1]["seq"]
+    desk.post("/reply", {"seq": made, "text": "and answered"}, agent=AGENT)
+    try:
+        phone.evaluate("() => loadNotes().then(render)")
+        thread = phone.locator(f"#note-{made}")
+        thread.wait_for()
+        # The words take the width, their buttons out of sight, until the '...' of a line brings that line's out.
+        head, reply = thread.locator(".thread > .line").first, thread.locator(".line.reply").first
+        assert not head.locator(".tools button", has_text="edit").is_visible()
+        assert not reply.locator("button", has_text="edit").is_visible()
+        head.locator(".said > .more").tap()
+        assert head.locator(".tools button", has_text="edit").is_visible()
+        assert not reply.locator("button", has_text="edit").is_visible()
+        reply.locator(".said > .more").tap()
+        assert reply.locator("button", has_text="edit").is_visible()
+        # Kept out across a redraw of the thread, and put away by the same '...'.
+        phone.evaluate("() => { drawnFor = null; render(); }")
+        assert head.locator(".tools button", has_text="edit").is_visible()
+        head.locator(".said > .more").tap()
+        assert not head.locator(".tools button", has_text="edit").is_visible()
+    finally:
+        desk.post("/drop", {"seq": made})
 
 
 @pytest.mark.parametrize("width", [1500, 1000, 760])

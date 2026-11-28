@@ -1224,11 +1224,9 @@
 
   /* The choices of how the diff is shown, one switch each, a choice that only applies under another set beneath it. */
   /* As tall as the buttons beside it and square: its icon takes the line their words take, inside the same padding. */
-  #settingsopen, #findopen { display: grid; place-items: center; padding: 5px; color: var(--muted); }
-  #settingsopen svg, #findopen svg { width: 1lh; height: 1lh; }
-  #settingsopen:hover, #findopen:hover { color: var(--ink); }
-  /* A keyboard opens the find box with a key (see 'f'), so only a phone, which has none, shows a button for it. */
-  #findopen { display: none; }
+  #settingsopen { display: grid; place-items: center; padding: 5px; color: var(--muted); }
+  #settingsopen svg { width: 1lh; height: 1lh; }
+  #settingsopen:hover { color: var(--ink); }
   .settings { position: fixed; top: calc(var(--head) + 8px); z-index: 60; display: none; }
   .settings[data-open="true"] { display: block; }
   .settings > .body {
@@ -1480,7 +1478,7 @@
   /* The bar of a phone, along the foot of the screen where the thumb rests: the screens it switches between and the
      steps through the files, the share of them reviewed drawn along its top edge. A wider screen has all of it in the
      bar at the top. */
-  .dock, .selbar { display: none; }
+  .dock, .selbar, .sheet, .filehead > .icon.more, .thread .said > .more { display: none; }
   /* The file a swipe across the diff turns to, named at the edge it comes in from while the finger is still down, and
      in the accent once letting go would turn to it. */
   #turn {
@@ -1512,94 +1510,131 @@
   @media (pointer: coarse) and (max-width: 600px), (pointer: coarse) and (max-height: 600px) {
     /* A tap is answered at once rather than held back to see whether a second one makes it a double tap, which would
        zoom: a reader taps through lines and buttons far more often than they zoom, which a pinch still does. */
-    :root { --dock: calc(52px + env(safe-area-inset-bottom)); touch-action: manipulation; }
-    header { position: static; padding: 8px 10px; gap: 6px; }
-    /* What the dock does, the bar does not do again, and the jumps by number are a keyboard's. */
-    header .tally, header .jumps, header > .steps, #logopen, #chatopen, #moved:disabled { display: none; }
-    #findopen { display: grid; }
+    :root { touch-action: manipulation; }
+    /* The dock stands over the top of the page, as tall as 'measureHead' measures it. */
+    body { padding-top: var(--head); }
+    header { position: static; padding: 6px 8px; gap: 6px; }
+    /* What the dock and its sheet do, the bar does not do again: it keeps what is being reviewed. */
+    header .tally, header .jumps, header > .steps, header .search, #settingsopen, #logopen, #chatopen, #moved:disabled { display: none; }
     #scope { flex: 1 1 0; min-width: 0; max-width: none; }
+    /* The dock: a strip of icons along the top of the screen, held there, the share of files reviewed drawn along its
+       foot. Icons alone, since every pixel of height it takes is a line of code fewer. */
     .dock {
       position: fixed;
       left: 0;
       right: 0;
-      bottom: 0;
+      top: 0;
       z-index: 47;
-      display: grid;
-      grid-template-columns: repeat(6, 1fr);
-      height: var(--dock);
-      padding-bottom: env(safe-area-inset-bottom);
+      display: flex;
+      flex-direction: column;
+      padding-top: env(safe-area-inset-top);
       background: var(--surface);
-      border-top: 1px solid var(--rule);
-      box-sizing: border-box;
+      border-bottom: 1px solid var(--rule);
     }
-    .dock::before {
+    .dock .icons { position: relative; display: grid; grid-template-columns: repeat(8, 1fr); height: 40px; }
+    .dock .icons::after {
       content: "";
       position: absolute;
       left: 0;
-      top: -1px;
+      bottom: -1px;
       width: var(--done, 0%);
       height: 2px;
       background: var(--add-ink);
     }
-    .dock button {
+    .dock .icons button {
       position: relative;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 2px;
+      display: grid;
+      place-items: center;
       min-width: 0;
       padding: 0;
       border: 0;
       background: transparent;
       color: var(--muted);
-      font: inherit;
-      font-size: 10px;
-      font-weight: 600;
       -webkit-tap-highlight-color: transparent;
     }
-    .dock button svg { width: 20px; height: 20px; }
-    .dock button[aria-pressed="true"] { color: var(--accent); }
-    #dockdone[aria-pressed="true"] { color: var(--add-ink); }
-    .dock button:disabled { color: var(--faint); opacity: 0.5; }
-    .dock .dot { top: 7px; right: auto; left: calc(50% + 7px); }
+    .dock .icons button svg { width: 20px; height: 20px; }
+    .dock .icons button[aria-pressed="true"] { color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent); }
+    #dockdone[aria-pressed="true"] { color: var(--add-ink); box-shadow: none; }
+    .dock .icons button:disabled { color: var(--faint); opacity: 0.5; }
+    .dock .dot { top: 8px; right: auto; left: calc(50% + 6px); }
     #dockdone .tick { opacity: 0; }
     #dockdone[aria-pressed="true"] .tick { opacity: 1; }
-    /* What a tap on the line numbers has picked, with what can be done with it, standing over the dock. */
+    /* The files gone to, as tabs to go back to in a tap, the one on screen marked, and in italics while it is only
+       passed through rather than gone to (see drawTabs). */
+    .filetabs:not([hidden]) { display: flex; height: 32px; overflow-x: auto; border-top: 1px solid var(--rule); scrollbar-width: none; }
+    .filetabs::-webkit-scrollbar { display: none; }
+    .ftab { display: flex; flex: none; align-items: stretch; max-width: 46vw; border-right: 1px solid var(--rule); color: var(--muted); }
+    .ftab[data-current="true"] { color: var(--ink); background: var(--surface-sunk); box-shadow: inset 0 -2px 0 var(--accent); }
+    .ftab button { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; -webkit-tap-highlight-color: transparent; }
+    .ftab .name { min-width: 0; padding: 0 2px 0 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12px; }
+    .ftab.passing .name { font-style: italic; }
+    .ftab .shut { width: 26px; font-size: 15px; color: var(--faint); }
+    /* What a tap on the line numbers has picked, with what can be done with it, along the foot of the screen. */
     .selbar:not([hidden]) {
       position: fixed;
       left: 8px;
       right: 8px;
-      bottom: calc(var(--dock) + 8px);
+      bottom: calc(8px + env(safe-area-inset-bottom));
       z-index: 47;
       display: flex;
       align-items: center;
       gap: 8px;
-      padding: 6px 6px 6px 14px;
+      padding: 4px 4px 4px 12px;
       background: var(--surface);
       border: 1px solid var(--rule-strong);
       border-radius: 10px;
       box-shadow: var(--shadow);
     }
     .selbar .what { flex: 1; min-width: 0; font-size: 13px; color: var(--muted); }
-    .selbar button { min-height: 40px; padding: 0 14px; font-size: 14px; }
+    .selbar button { min-height: 36px; padding: 0 12px; font-size: 14px; }
+    /* A list of what can be done, rising from the foot of the screen: the rest of the bar from the dock, the rest of a
+       file head from it. */
+    .sheet:not([hidden]) {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 49;
+      display: flex;
+      flex-direction: column;
+      max-height: 70vh;
+      overflow-y: auto;
+      padding: 4px 0 calc(6px + env(safe-area-inset-bottom));
+      background: var(--surface);
+      border-top: 1px solid var(--rule-strong);
+      border-radius: 12px 12px 0 0;
+      box-shadow: 0 -12px 32px rgb(0 0 0 / 30%);
+    }
+    .sheet .title { padding: 8px 16px 4px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+    .sheet .title:empty { display: none; }
+    .sheet .items button {
+      display: block;
+      width: 100%;
+      min-height: 44px;
+      padding: 0 16px;
+      border: 0;
+      background: transparent;
+      color: var(--ink);
+      font: inherit;
+      font-size: 15px;
+      text-align: left;
+    }
+    .sheet .items button:disabled { color: var(--faint); }
     /* The diff from edge to edge: every pixel beside the code is a character fewer on each line. */
-    main { padding: 8px 0 calc(var(--dock) + 60vh); gap: 10px; }
+    main { padding: 6px 0 60vh; gap: 6px; }
     .shell, body.hide-files .shell, body.chat-open .shell, body.chat-open.hide-files .shell { grid-template-columns: minmax(0, 1fr); }
     body.hide-files .rail { display: none; }
-    /* The file box of the bar opens the list of files to pick from by name (see 'focus' on it), so a phone keeps the
-       glass alone and gives its width to the commit. */
-    header .search { flex: 0 0 auto; min-width: 0; margin: 0; }
-    header .search input { width: 38px; padding-right: 0; color: transparent; }
-    header .search input::placeholder { color: transparent; }
-    header .search svg { left: 12px; width: 15px; height: 15px; color: var(--muted); pointer-events: none; }
     .file { border-left: 0; border-right: 0; border-radius: 0; }
-    .filehead { flex-wrap: wrap; row-gap: 0; padding: 2px 6px 0 10px; border-radius: 0; }
-    .filehead .grow { flex-basis: 100%; min-height: 30px; }
-    .filehead .icon { width: 40px; height: 34px; }
+    /* A file head is one row: the path, the tick, and what else it does behind its own '...'. */
+    .filehead { gap: 2px; min-height: 36px; padding: 0 0 0 8px; border-radius: 0; box-sizing: border-box; }
+    .filehead .grow { flex: 1 1 auto; gap: 6px; }
+    .filehead .path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; }
+    .filehead .badge { flex: none; font-size: 9px; padding: 1px 4px; }
+    .filehead > .icon, .filehead .counts, .seen .word, .folderseen .word { display: none; }
+    .filehead > .icon.more { display: grid; width: 36px; height: 36px; }
     .filehead .icon svg { width: 16px; height: 16px; }
-    .filehead .seen { font-size: 13px; padding: 6px; margin: -6px -6px -6px 0; }
-    .seen input { width: 20px; height: 20px; }
+    .filehead .seen { padding: 8px; margin: 0; }
+    .seen input { width: 20px; height: 20px; margin: 0; }
     .body { border-radius: 0; }
     /* One column of numbers: an added or kept line shows its new number, a removed one its old number (see the row
        builder), the marker beside it saying which. The comment pins give way to the bar a tap opens. */
@@ -1626,19 +1661,23 @@
     }
     /* The hunk head as well, whose line of context would otherwise hold the whole table wider than the screen. */
     tr.h td { white-space: normal; overflow-wrap: anywhere; }
-    /* One thing at a time: the file list, the comments and the chat each take the screen above the dock. */
-    aside { position: fixed; inset: 0 0 var(--dock); z-index: 46; max-height: none; overflow-y: auto; background: var(--surface); border: 0; }
-    body.chat-open .chat { left: 0; right: 0; bottom: var(--dock); width: auto; top: 0; }
+    /* One thing at a time: the file list, the comments and the chat each take the screen under the dock. */
+    aside { position: fixed; inset: var(--head) 0 0; z-index: 46; max-height: none; overflow-y: auto; background: var(--surface); border: 0; }
+    body.chat-open .chat { left: 0; right: 0; bottom: 0; width: auto; top: var(--head); height: auto; }
     .chat .grip { display: none; }
-    .log[data-open="true"] { inset: 0 0 var(--dock); width: auto; max-height: none; border: 0; border-radius: 0; padding: 12px 10px; }
+    .log[data-open="true"] { inset: var(--head) 0 0; width: auto; max-height: none; border: 0; border-radius: 0; padding: 12px 10px; }
     #logmove, #logsize { display: none; }
     .log .actions, .log .head { flex-wrap: wrap; }
     #logcount { white-space: nowrap; }
     .logrow { min-height: 44px; box-sizing: border-box; }
-    /* A reply's words take the width of the screen, its buttons a row of their own under them, flush right. */
+    /* What a remark or a reply can be asked to do waits behind its '...', so the words take the whole width and no row
+       of buttons stands between them. Asked for, the buttons take a row of their own under the words, flush right. */
+    .thread .said > .more { display: inline-grid; float: right; margin: 0 0 2px 8px; }
+    .thread .line:not([data-tools="open"]) > .tools > :not(.turn), .thread .line.reply:not([data-tools="open"]) > button.tiny { display: none; }
     .thread .line.reply { flex-wrap: wrap; row-gap: 4px; }
     .thread .line.reply > .said { flex: 1 1 100%; }
     .thread .line.reply > .said + button { margin-left: auto; }
+    .thread .line[data-tools="open"] > .tools { flex-basis: 100%; justify-content: flex-end; }
     button.tiny { font-size: 12px; line-height: 16px; padding: 5px 10px; }
     /* A reply box nobody is writing in shares its row with the button closing the thread, the rest of its buttons
        showing once words or a file are in it. Kept open by what it holds rather than by the keyboard alone: a tap on
@@ -1681,9 +1720,6 @@
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2 14 14"/></svg>
     <input id="q" type="search" placeholder="Go to file" aria-label="Go to file" />
   </label>
-  <button class="toggle" id="findopen" data-tip="Find text in the diff" aria-label="Find text in the diff">
-    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M2 3.5h7M2 7h4M2 10.5h3"/><circle cx="10.5" cy="9.5" r="2.7"/><path d="M12.5 11.5 14.5 13.5"/></svg>
-  </button>
   <button class="toggle" id="settingsopen" aria-pressed="false" data-tip="How the diff is shown" aria-label="Settings">
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6"/><circle cx="10" cy="4.5" r="1.5"/><circle cx="6" cy="11.5" r="1.5"/></svg>
   </button>
@@ -1730,13 +1766,22 @@
 </header>
 
 <nav class="dock" id="dock" aria-label="Review">
-  <button id="dockfiles" type="button" aria-pressed="false"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h9"/></svg>Files</button>
-  <button id="dockprev" type="button"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5 10 7.5l5 5"/></svg>Previous</button>
-  <button id="dockdone" type="button" aria-pressed="false"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="13" height="13" rx="3"/><path class="tick" d="M6.8 10.2 9 12.4l4.4-4.8"/></svg>Reviewed</button>
-  <button id="docknext" type="button"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 7.5 10 12.5l5-5"/></svg>Next</button>
-  <button id="docklog" type="button" aria-pressed="false"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h14v9H9l-4 3v-3H3z"/></svg>Comments<i class="dot" id="docklogdot" aria-hidden="true"></i></button>
-  <button id="dockchat" type="button" aria-pressed="false"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h11v7H7l-3 2.5V10H2z"/><path d="M15.5 6.5H18v7h-2v2.5l-3-2.5H8.5V12"/></svg>Chat<i class="dot" id="dockchatdot" aria-hidden="true"></i></button>
+  <div class="icons">
+  <button id="dockdiff" type="button" aria-pressed="true" aria-label="Diff" data-tip="Diff"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 6 3 10l4 4M13 6l4 4-4 4"/></svg></button>
+  <button id="dockfiles" type="button" aria-pressed="false" aria-label="Files" data-tip="Files"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h9"/></svg></button>
+  <button id="docklog" type="button" aria-pressed="false" aria-label="Comments" data-tip="Comments"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h14v9H9l-4 3v-3H3z"/></svg><i class="dot" id="docklogdot" aria-hidden="true"></i></button>
+  <button id="dockchat" type="button" aria-pressed="false" aria-label="Chat" data-tip="Chat"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h11v7H7l-3 2.5V10H2z"/><path d="M15.5 6.5H18v7h-2v2.5l-3-2.5H8.5V12"/></svg><i class="dot" id="dockchatdot" aria-hidden="true"></i></button>
+  <button id="dockprev" type="button" aria-label="Previous file" data-tip="Previous file"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5 10 7.5l5 5"/></svg></button>
+  <button id="dockdone" type="button" aria-pressed="false" aria-label="Reviewed" data-tip="Reviewed"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="13" height="13" rx="3"/><path class="tick" d="M6.8 10.2 9 12.4l4.4-4.8"/></svg></button>
+  <button id="docknext" type="button" aria-label="Next file" data-tip="Next file"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 7.5 10 12.5l5-5"/></svg></button>
+  <button id="dockmore" type="button" aria-label="More" data-tip="More"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><circle cx="4.5" cy="10" r="1.6"/><circle cx="10" cy="10" r="1.6"/><circle cx="15.5" cy="10" r="1.6"/></svg></button>
+  </div>
+  <div class="filetabs" id="filetabs" hidden></div>
 </nav>
+<div class="sheet" id="sheet" hidden>
+  <div class="title" id="sheettitle"></div>
+  <div class="items" id="sheetitems"></div>
+</div>
 <div id="turn" hidden></div>
 <div class="selbar" id="selbar" hidden>
   <span class="what" id="selwhat"></span>
@@ -1961,7 +2006,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "goback", "foldreviewed", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "loading", "goto", "veil", "palette", "pq", "picks", "find", "fgrip", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "fthreads", "toast", "toastwhere", "toastsaid", "toastmark", "logdot", "chatopen", "chatdot", "chat", "chatgrip", "chatback", "chattitle", "chatcopy", "chatnew", "chatclose", "chatwho", "chatrows", "chatsay", "chatname", "chattext", "chatsend", "chatresult", "filesgrip", "railfold", "logmove", "logsize", "fchat", "chatbuttons", "dock", "dockfiles", "dockprev", "dockdone", "docknext", "docklog", "dockchat", "docklogdot", "dockchatdot", "selbar", "selwhat", "selcomment", "selclear", "turn", "findopen"]) {
+  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "goback", "foldreviewed", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "loading", "goto", "veil", "palette", "pq", "picks", "find", "fgrip", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "fthreads", "toast", "toastwhere", "toastsaid", "toastmark", "logdot", "chatopen", "chatdot", "chat", "chatgrip", "chatback", "chattitle", "chatcopy", "chatnew", "chatclose", "chatwho", "chatrows", "chatsay", "chatname", "chattext", "chatsend", "chatresult", "filesgrip", "railfold", "logmove", "logsize", "fchat", "chatbuttons", "dock", "dockfiles", "dockprev", "dockdone", "docknext", "docklog", "dockchat", "docklogdot", "dockchatdot", "selbar", "selwhat", "selcomment", "selclear", "turn", "dockmore", "sheet", "sheettitle", "sheetitems", "dockdiff", "filetabs"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -2992,6 +3037,26 @@
     return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`;
   }
 
+  // Which lines of the threads have their buttons out on a phone, by thread and place in it, kept across redraws: a
+  // thread is drawn anew whenever news reaches it.
+  const toolsOut = new Set();
+
+  // The '...' of a remark or a reply on a phone, which brings its buttons out under the words and puts them away again.
+  function toolsFor(line, key) {
+    const more = document.createElement("button");
+    more.className = "tiny more";
+    more.type = "button";
+    more.textContent = "\u22ef";
+    more.setAttribute("aria-label", "More");
+    if (toolsOut.has(key)) line.dataset.tools = "open";
+    more.addEventListener("click", () => {
+      const isOut = !toolsOut.delete(key);
+      if (isOut) toolsOut.add(key);
+      line.dataset.tools = isOut ? "open" : "";
+    });
+    return more;
+  }
+
   // A note written where it belongs: on the remark, or on a reply. Several may stand on one reply, and they are read
   // in the order they were written, so notes never stand inside notes.
   function whisperOn(note, on) {
@@ -3222,7 +3287,9 @@
 
   // Where the screen stops being covered by the bar: its lower edge while it is held at the top, or the top of the
   // screen once it has scrolled away, as it does on a phone.
-  const underBar = () => Math.max(0, document.querySelector("header").getBoundingClientRect().bottom);
+  // The dock of a phone stands over the top of the screen as a held bar does (see 'measureHead').
+  const underBar = () =>
+    Math.max(0, document.querySelector("header").getBoundingClientRect().bottom, els.dock.getBoundingClientRect().bottom);
 
   function keepPlace() {
     // Where the reader stands, kept so that going back returns there. Taken only from a reader at rest: a jump made
@@ -3255,6 +3322,7 @@
     folds.set(note.path, { digest: card.dataset.digest, open: true, upTo: latest() });
     els.log.dataset.open = "false";
     toDiff();
+    openTab(note.path);
     keepChoices();
     // The lines of a file the reader was nowhere near are built for this, since the thread hangs among them - built
     // outright rather than settled, which would leave a file they are nowhere near exactly as it was.
@@ -4594,7 +4662,7 @@
     }
     const text = document.createElement("span");
     text.className = "said";
-    text.append(who);
+    text.append(toolsFor(head, `${note.seq}:0`), who);
     const remark = text.appendChild(spoke());
     // Numbered as the find numbers what a thread says: the remark, then each reply in the order it was written.
     remark.dataset.part = "0";
@@ -4607,7 +4675,7 @@
     tools.className = "tools";
     if (note.state === "resolved") {
       const turn = document.createElement("button");
-      turn.className = "tiny";
+      turn.className = "tiny turn";
       turn.textContent = settled ? `resolved${answers ? `, ${answers} repl${answers === 1 ? "y" : "ies"}` : ""}` : "fold";
       turn.dataset.tip = settled ? "Show the whole thread" : "Fold it away again";
       turn.addEventListener("click", () => {
@@ -4804,6 +4872,7 @@
         kind.dataset.tip = "Kept on this desk, whatever the thread sends";
         body.append(kind);
       }
+      body.prepend(toolsFor(said, `${note.seq}:${index + 1}`));
       body.append(from);
       const words = body.appendChild(spoke());
       words.dataset.part = String(index + 1);
@@ -6584,7 +6653,11 @@
     box.type = "checkbox";
     box.checked = status === "done";
     box.addEventListener("change", () => markReviewed(file, box.checked));
-    seenLabel.append(box, document.createTextNode("Reviewed"));
+    // The word goes on a phone, where the tick says it alone.
+    const word = seenLabel.appendChild(document.createElement("span"));
+    word.className = "word";
+    word.textContent = "Reviewed";
+    seenLabel.prepend(box);
 
     const whole = document.createElement("button");
     whole.className = "icon";
@@ -6596,7 +6669,20 @@
       ' 1.6 0 0 1 1.6 1.6z"/></svg>';
     whole.addEventListener("click", () => openFileComposer(wrap, file));
 
-    head.append(grow, copy, opener, counts, whole, seenLabel);
+    // A phone keeps the head to one row: what the icons and the counts beside the path say goes behind this.
+    const more = document.createElement("button");
+    more.className = "icon more";
+    more.setAttribute("aria-label", `More on ${file.path}`);
+    more.innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3.5" cy="8" r="1.3"/><circle cx="8" cy="8" r="1.3"/><circle cx="12.5" cy="8" r="1.3"/></svg>';
+    more.addEventListener("click", () =>
+      openSheet(`${file.path}  +${file.added} \u2212${file.removed}`, [
+        ["Copy the path", () => copy.click()],
+        ["Show every line of the file", () => opener.click()],
+        ["Comment on the file", () => whole.click()],
+      ]),
+    );
+
+    head.append(grow, copy, opener, counts, whole, more, seenLabel);
     wrap.append(head);
 
     for (const note of notesAt(file.path, 0, "file")) {
@@ -6790,6 +6876,7 @@
     const wrap = document.querySelector(`section.file[data-path="${CSS.escape(path)}"]`);
     if (!wrap) return;
     toDiff();
+    openTab(path);
     keepPlace();
     letGo();
     wrap.dataset.open = "true";
@@ -7339,7 +7426,11 @@
         render();
       });
     });
-    seenLabel.append(box, document.createTextNode("Reviewed"));
+    // The word goes on a phone, where the tick says it alone.
+    const word = seenLabel.appendChild(document.createElement("span"));
+    word.className = "word";
+    word.textContent = "Reviewed";
+    seenLabel.prepend(box);
     return seenLabel;
   }
 
@@ -7358,6 +7449,58 @@
     els.dockdone.setAttribute("aria-pressed", String(Boolean(file) && seenState(file) === "done"));
     els.dockprev.disabled = state.current <= 0;
     els.docknext.disabled = state.current >= entries().length - 1;
+    drawTabs();
+  }
+
+  // The files the reader went to (picked, stepped to, reached from a comment or a link), in the order first gone to,
+  // drawn as tabs on a phone: a review moves back and forth between a few files, and a tab is one tap back to one.
+  const fileTabs = [];
+
+  function openTab(path) {
+    if (!fileTabs.includes(path)) fileTabs.push(path);
+    drawTabs();
+  }
+
+  // The file on screen stands among the tabs as well, in italics while it was only scrolled onto.
+  function drawTabs() {
+    const file = inTreeOrder(view().files)[state.current];
+    const here = file ? file.path : null;
+    const paths = here && !fileTabs.includes(here) ? [...fileTabs, here] : fileTabs;
+    els.filetabs.hidden = !fileTabs.length;
+    els.filetabs.replaceChildren(
+      ...paths.map((path) => {
+        const tab = document.createElement("div");
+        tab.className = fileTabs.includes(path) ? "ftab" : "ftab passing";
+        tab.dataset.path = path;
+        tab.dataset.current = String(path === here);
+        const name = tab.appendChild(document.createElement("button"));
+        name.className = "name";
+        name.type = "button";
+        name.textContent = fileName(path);
+        name.addEventListener("click", () => {
+          toDiff();
+          const card = document.querySelector(`section.file[data-path="${CSS.escape(path)}"]`);
+          if (card) jump(Number(card.id.slice(1)));
+        });
+        const shut = tab.appendChild(document.createElement("button"));
+        shut.className = "shut";
+        shut.type = "button";
+        shut.textContent = "\u00d7";
+        shut.setAttribute("aria-label", `Close the tab of ${path}`);
+        shut.addEventListener("click", () => {
+          if (fileTabs.includes(path)) fileTabs.splice(fileTabs.indexOf(path), 1);
+          drawTabs();
+        });
+        return tab;
+      }),
+    );
+    const current = els.filetabs.querySelector('.ftab[data-current="true"]');
+    if (!current) return;
+    const strip = els.filetabs;
+    if (current.offsetLeft < strip.scrollLeft) strip.scrollLeft = current.offsetLeft;
+    else if (current.offsetLeft + current.offsetWidth > strip.scrollLeft + strip.clientWidth) {
+      strip.scrollLeft = current.offsetLeft + current.offsetWidth - strip.clientWidth;
+    }
   }
 
   function readingAt(cards) {
@@ -7481,6 +7624,7 @@
     const target = document.getElementById(`f${index}`);
     if (!target) return;
     state.current = index;
+    openTab(target.dataset.path);
     // Kept where the jump leaves the page until the reader scrolls on from there: a short file at the foot of the page
     // cannot be brought up to the top, and reading the file the reader is on there would take the pick away from them.
     pickedAt = undefined;
@@ -7800,6 +7944,7 @@
     source: [() => els.source.dataset.open === "true", () => els.sourceopen.click()],
     picker: [() => !els.palette.hidden, closePicker],
     find: [() => !els.find.hidden, closeFind],
+    sheet: [() => !els.sheet.hidden, () => (els.sheet.hidden = true)],
   };
   let screenOn = null;
   function screensMoved() {
@@ -7807,6 +7952,7 @@
     for (const [button, name] of [[els.dockfiles, "files"], [els.docklog, "log"], [els.dockchat, "chat"]]) {
       button.setAttribute("aria-pressed", String(open.includes(name)));
     }
+    els.dockdiff.setAttribute("aria-pressed", String(!["files", "log", "chat"].some((name) => open.includes(name))));
     if (!isPhone()) {
       screenOn = null;
       return;
@@ -7823,7 +7969,7 @@
   const screenWatch = new MutationObserver(screensMoved);
   screenWatch.observe(document.body, { attributes: true, attributeFilter: ["class"] });
   for (const node of [els.log, els.settings, els.source]) screenWatch.observe(node, { attributes: true, attributeFilter: ["data-open"] });
-  screenWatch.observe(els.find, { attributes: true, attributeFilter: ["hidden"] });
+  for (const node of [els.find, els.sheet]) screenWatch.observe(node, { attributes: true, attributeFilter: ["hidden"] });
   window.addEventListener("popstate", (event) => {
     if (!isPhone()) return;
     const want = event.state && event.state.screen;
@@ -7831,6 +7977,26 @@
     // Forward onto a screen closed since: the entry stands for nothing any more.
     if (want && !screens[want][0]()) history.replaceState(null, "");
   });
+
+  // A list of what can be done, rising from the foot of a phone's screen, each item an action and whether it can be
+  // taken now. Taking one closes the list first, so what it opens has the screen.
+  function openSheet(title, items) {
+    els.sheettitle.textContent = title;
+    els.sheetitems.replaceChildren(
+      ...items.map(([label, act, isOn = true]) => {
+        const item = document.createElement("button");
+        item.type = "button";
+        item.textContent = label;
+        item.disabled = !isOn;
+        item.addEventListener("click", () => {
+          els.sheet.hidden = true;
+          act();
+        });
+        return item;
+      }),
+    );
+    els.sheet.hidden = false;
+  }
 
   // What is reached in the diff, from a screen of a phone, is reached on the diff itself: the screen gives way.
   function toDiff() {
@@ -7852,12 +8018,34 @@
   });
   els.docklog.addEventListener("click", () => els.logopen.click());
   els.dockchat.addEventListener("click", () => els.chatopen.click());
+  els.dockdiff.addEventListener("click", toDiff);
+  els.dockmore.addEventListener("click", () => {
+    if (!els.sheet.hidden) {
+      els.sheet.hidden = true;
+      return;
+    }
+    // The bar scrolls away on a phone, so all it does is reached from here as well, with what a keyboard has keys for.
+    openSheet("", [
+      ["Go to file", openPicker],
+      ["Find in the diff", openFind],
+      ["Previous comment", () => els.cback.click(), !els.cback.disabled],
+      ["Next comment", () => els.cnext.click(), !els.cnext.disabled],
+      ["Back to where you were", goBack, !els.goback.disabled],
+      ["Fold every reviewed file", foldReviewed],
+      ["Refresh the diffs", () => els.moved.click(), !els.moved.disabled],
+      ["Branches and pull requests", () => els.sourceopen.click()],
+      ["Settings", () => openSettings(true)],
+    ]);
+  });
+  // A sheet goes as soon as the reader touches anything else.
+  document.addEventListener("pointerdown", (event) => {
+    if (!els.sheet.hidden && !els.sheet.contains(event.target) && !els.dockmore.contains(event.target)) els.sheet.hidden = true;
+  });
   els.selcomment.addEventListener("click", () => {
     composeSel();
     els.selbar.hidden = true;
   });
   els.selclear.addEventListener("click", clearSel);
-  els.findopen.addEventListener("click", openFind);
 
   // A swipe across the diff steps to the file after or before, as a page is turned, and one across a screen closes it
   // the way it slid over the diff. The edges of the screen are left to the phone, whose own back gesture starts there,
@@ -8344,14 +8532,17 @@
   for (const ending of ["pointerdown", "keydown", "scroll"]) document.addEventListener(ending, hideTip, true);
 
   // What the file heads stick under: the bar while it is held at the top, nothing where it scrolls away with the page.
+  // What stands over the top of the screen, which the file heads stick under: the bar where it is held, the dock of a
+  // phone, where the bar scrolls away.
   const measureHead = () => {
     const header = document.querySelector("header");
     const isHeld = getComputedStyle(header).position === "sticky";
-    const tall = isHeld ? Math.round(header.getBoundingClientRect().height) : 0;
+    const holder = isHeld ? header : els.dock.getClientRects().length ? els.dock : null;
+    const tall = holder ? Math.round(holder.getBoundingClientRect().height) : 0;
     document.documentElement.style.setProperty("--head", `${tall}px`);
   };
   addEventListener("resize", measureHead);
-  new ResizeObserver(measureHead).observe(document.querySelector("header"));
+  for (const node of [document.querySelector("header"), els.dock]) new ResizeObserver(measureHead).observe(node);
   measureHead();
 
   loadSeen();
