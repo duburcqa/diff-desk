@@ -25,8 +25,10 @@ Endpoints, all on 127.0.0.1 so nothing is exposed off the machine:
   POST /open                  {path} - open a file on disk with the application this machine opens it with, or show it
                               in its folder where opening it would run it, for a page on this machine alone
   GET  /chat                  every message of the chat, threads and all
-  POST /chat/edit             {id, text} - reword a message of the chat, by whoever said it, keeping what it said before
-  POST /chat/drop             {id} - take back a message of the chat, by whoever said it: gone, or a line saying so
+  POST /chat/edit             {id, text} - reword a message of the chat, by whoever said it or the reader, keeping what
+                              it said before
+  POST /chat/drop             {id} - delete a message of the chat, by whoever said it or the reader: gone, or a line
+                              saying so
                               where answers stand under it
   GET  /chat/export?thread=N  one thread of the chat as plain text, to be kept or read back
   POST /chat                  {thread, title, text, images, on, report} - say something in a thread, answering the
@@ -1491,7 +1493,7 @@ def chat_export(thread):
     for message in thread:
         answering = f", answering #{message['on']}" if message.get("on") else ""
         heading = f"## {spoken_name(message['who'])}, {message['at']}, #{message['id']}{answering}"
-        out += ["", heading, "", "(taken back)" if message.get("deleted") else message["text"].rstrip()]
+        out += ["", heading, "", "(deleted)" if message.get("deleted") else message["text"].rstrip()]
         if message.get("report"):
             out += ["", f"Report{' (pinned)' if message.get('pinned') else ''}: {message['report']['source']}"]
         elif message.get("pinned"):
@@ -1982,7 +1984,8 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": True, "id": said["id"], "thread": said["thread"]})
 
     def _chat_change(self, order, change):
-        """Change one message of the chat, as `change` does to it and the list it stands in, for whoever said it alone.
+        """Change one message of the chat, as `change` does to it and the list it stands in, for whoever said it or the
+        reader, who keeps the desk.
 
         Answer with what is refused, or nothing once it is done and written.
         """
@@ -1991,8 +1994,8 @@ class Handler(BaseHTTPRequestHandler):
             found = next((message for message in messages if message["id"] == order.get("id")), None)
             if found is None or found.get("deleted"):
                 return f"no message #{order.get('id')} to change"
-            if found["who"] != self.author:
-                return f"message #{found['id']} is {spoken_name(found['who'])}'s word, changed by them alone"
+            if self.author != READER and found["who"] != self.author:
+                return f"message #{found['id']} is {spoken_name(found['who'])}'s word, theirs or the reader's to change"
             change(found, messages)
             gen_diff_data.write_whole(CHAT, "".join(json.dumps(message) + "\n" for message in messages))
         told()
@@ -2054,11 +2057,11 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, wanted.read_bytes(), kind, headers=(sandbox,))
 
     def _chat_drop(self):
-        """Take back a message of the chat. One that opens its thread, or that answers stand under, leaves a line saying
-        it was taken back, so the thread keeps its title and the answers what they answer; any other is gone."""
+        """Delete a message of the chat. One that opens its thread, or that answers stand under, leaves a line saying it
+        was deleted, so the thread keeps its title and the answers what they answer; any other is gone."""
         order = self._body()
 
-        def take_back(said, messages):
+        def delete(said, messages):
             if said["id"] == said["thread"] or any(message.get("on") == said["id"] for message in messages):
                 for key in ("text", "images", "edits"):
                     said.pop(key, None)
@@ -2067,7 +2070,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 messages.remove(said)
 
-        refused = self._chat_change(order, take_back)
+        refused = self._chat_change(order, delete)
         self._json({"ok": not refused, **({"error": refused} if refused else {})})
 
     def _lines(self, query):
