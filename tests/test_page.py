@@ -4334,6 +4334,38 @@ def test_a_reply_quoting_a_passage_shows_it_as_a_quote(page, desk):
     assert "what I make of it" in answer
     assert ">" not in answer
     assert page.locator(f"#note-{made} .line.reply code").first.inner_text() == "code"
+    # A reply to one message rather than to the end of the thread starts with that message quoted.
+    page.locator(f"#note-{made} .thread > .line .tools button.tiny", has_text="reply").click()
+    box = page.locator(f"#note-{made} .line.actions:not(.aside) textarea")
+    assert box.input_value() == f"> {saying}\n\n"
+    box.fill("")
+
+
+def test_a_thread_whispers_from_its_box_when_asked(page, desk):
+    card = sample(page)
+    line = card.locator("tr.a[data-line]").first
+    line.locator("td.code").first.hover()
+    line.locator("button.pin").first.click()
+    submit(page, f"whispered about, number {len(desk.get('/comments')) + 1}")
+    made = desk.get("/comments")[-1]["seq"]
+    actions = page.locator(f"#note-{made} .line.actions:not(.aside)")
+    # Switched to whispering, the box says so, and what it sends stays on this desk.
+    actions.locator("button.hush").click()
+    assert actions.locator("textarea").get_attribute("placeholder") == "Whisper, kept on this desk"
+    actions.locator("textarea").fill("between us")
+    actions.locator("button", has_text="Reply").click()
+    until(lambda: len({row["seq"]: row for row in desk.get("/comments")}[made].get("replies") or []) == 1)
+    # Kept whispering across the redraw the reply brings, until switched back to the open.
+    actions.locator("button.hush").click()
+    actions.locator("textarea").fill("for everyone")
+    actions.locator("button", has_text="Reply").click()
+    until(lambda: len({row["seq"]: row for row in desk.get("/comments")}[made].get("replies") or []) == 2)
+    replies = {row["seq"]: row for row in desk.get("/comments")}[made]["replies"]
+    assert [(reply["text"], bool(reply.get("whisper"))) for reply in replies] == [
+        ("between us", True),
+        ("for everyone", False),
+    ]
+    desk.post("/drop", {"seq": made})
 
 
 def test_a_recorded_comment_shows_the_number_it_is_referred_to_by(page, desk):
