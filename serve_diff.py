@@ -25,8 +25,12 @@ Endpoints, all on 127.0.0.1 so nothing is exposed off the machine:
   POST /open                  {path} - open a file on disk with the application this machine opens it with, or show it
                               in its folder where opening it would run it, for a page on this machine alone
   GET  /chat                  every message of the chat, threads and all
+  POST /chat/edit             {id, text} - reword a message of the chat, by whoever said it, keeping what it said before
+  POST /chat/drop             {id} - take back a message of the chat, by whoever said it: gone, or a line saying so
+                              where answers stand under it
   GET  /chat/export?thread=N  one thread of the chat as plain text, to be kept or read back
-  POST /chat                  {thread, title, text, images} - say something in a thread, or open one with a title
+  POST /chat                  {thread, title, text, images, on} - say something in a thread, answering the message
+                              numbered `on` of that thread where it names one, or open a thread with a title
   POST /comments              {comments: [...], github: bool} - a batch as submitted, or a bare list of comments
   POST /bind                  {seq: [...], github} - mark comments as bound for the pull request, or keep them local
   POST /edit                  {seq, text, reply} - rewrite a comment, or the reply at that place in its thread,
@@ -187,6 +191,8 @@ AUTHORED = (
     "/publish",
     "/sync",
     "/chat",
+    "/chat/edit",
+    "/chat/drop",
 )
 # Who an author recorded in the log can be, apart from an agent and the pull request's own authors: the reader, the
 # pull request as a whole for what a sync brings in, and the desk itself for its own bookkeeping, which wakes nobody.
@@ -1465,8 +1471,9 @@ def chat_export(thread):
     first = thread[0]
     out = [f"# {first.get('title') or 'Untitled'}", "", f"Chat thread {first['thread']}, {len(thread)} message(s)."]
     for message in thread:
-        heading = f"## {spoken_name(message['who'])}, {message['at']}, #{message['id']}"
-        out += ["", heading, "", message["text"].rstrip()]
+        answering = f", answering #{message['on']}" if message.get("on") else ""
+        heading = f"## {spoken_name(message['who'])}, {message['at']}, #{message['id']}{answering}"
+        out += ["", heading, "", "(taken back)" if message.get("deleted") else message["text"].rstrip()]
         out += [f"[{image['name']}]({MEDIA / image['file']})" for image in message.get("images") or ()]
     return "\n".join(out) + "\n"
 
@@ -1907,6 +1914,11 @@ class Handler(BaseHTTPRequestHandler):
                 refused = "a new thread needs a title, which is what it is found by"
             elif thread is not None and thread not in threads:
                 refused = f"no chat thread numbered {thread}"
+            # A message answers one of its own thread, which is where it is read under.
+            elif order.get("on") is not None and order["on"] not in {
+                said["id"] for said in threads.get(thread, ()) if not said.get("deleted")
+            }:
+                refused = f"no message #{order['on']} in that thread to answer"
             else:
                 refused = ""
             if refused:
@@ -1922,6 +1934,8 @@ class Handler(BaseHTTPRequestHandler):
             }
             if thread is None:
                 said["title"] = title
+            if order.get("on") is not None:
+                said["on"] = order["on"]
             if order.get("images"):
                 said["images"] = carried(order)
             messages.append(said)
@@ -1929,6 +1943,55 @@ class Handler(BaseHTTPRequestHandler):
         told()
         print(f"CHAT [{said['thread']}] {said['who']}: {' '.join(text.split())}", flush=True)
         self._json({"ok": True, "id": said["id"], "thread": said["thread"]})
+
+    def _chat_change(self, order, change):
+        """Change one message of the chat, as `change` does to it and the list it stands in, for whoever said it alone.
+
+        Answer with what is refused, or nothing once it is done and written.
+        """
+        with CHANGING:
+            messages = read_chat()
+            found = next((message for message in messages if message["id"] == order.get("id")), None)
+            if found is None or found.get("deleted"):
+                return f"no message #{order.get('id')} to change"
+            if found["who"] != self.author:
+                return f"message #{found['id']} is {spoken_name(found['who'])}'s word, changed by them alone"
+            change(found, messages)
+            gen_diff_data.write_whole(CHAT, "".join(json.dumps(message) + "\n" for message in messages))
+        told()
+        return ""
+
+    def _chat_edit(self):
+        """Reword a message of the chat, keeping each earlier wording, as a comment keeps its own."""
+        order = self._body()
+        text = (order.get("text") or "").strip()
+        if not text:
+            self._json({"ok": False, "error": "an empty message says nothing"})
+            return
+
+        def reword(said, messages):
+            said.setdefault("edits", []).append({"at": time.strftime("%Y-%m-%d %H:%M:%S"), "text": said["text"]})
+            said["text"] = text
+
+        refused = self._chat_change(order, reword)
+        self._json({"ok": not refused, **({"error": refused} if refused else {})})
+
+    def _chat_drop(self):
+        """Take back a message of the chat. One that opens its thread, or that answers stand under, leaves a line saying
+        it was taken back, so the thread keeps its title and the answers what they answer; any other is gone."""
+        order = self._body()
+
+        def take_back(said, messages):
+            if said["id"] == said["thread"] or any(message.get("on") == said["id"] for message in messages):
+                for key in ("text", "images", "edits"):
+                    said.pop(key, None)
+                said["text"] = ""
+                said["deleted"] = True
+            else:
+                messages.remove(said)
+
+        refused = self._chat_change(order, take_back)
+        self._json({"ok": not refused, **({"error": refused} if refused else {})})
 
     def _lines(self, query):
         """A slice of a file at a revision, which is how the page fills the gaps between hunks.
@@ -2073,6 +2136,8 @@ class Handler(BaseHTTPRequestHandler):
             "/publish": self._publish,
             "/sync": self._sync,
             "/chat": self._chat,
+            "/chat/edit": self._chat_edit,
+            "/chat/drop": self._chat_drop,
             "/stop": self._stop,
         }
         serving = routes.get(path)

@@ -3679,6 +3679,8 @@ def test_a_phone_leaves_a_chat_thread_the_way_it_leaves_a_screen(phone, desk):
     phone.wait_for_selector(".chat .msg")
     assert not phone.locator("#chatnew").is_visible()
     assert not phone.locator("#chattitle").is_visible()
+    # What a message can be asked to do stands in view, a finger having no pointer to show it by.
+    assert phone.locator(".chat .msg .acts .answer").first.is_visible()
     assert not phone.locator("#chatback").is_visible()
     assert not phone.locator("#chattabs").is_visible()
     phone.go_back()
@@ -5738,6 +5740,78 @@ def test_a_message_of_the_chat_is_named_by_its_number(page, desk):
     assert page.locator("#chattitle").inner_text() == "Where it was said"
     assert "flash" in reached.get_attribute("class")
     assert reached.is_visible()
+
+
+def test_a_message_of_the_chat_is_answered_folded_reworded_and_taken_back(page, desk):
+    opened = desk.post("/chat", {"title": "Answered on the page", "text": "Which tolerance?"}, agent=AGENT)
+    thread = opened["thread"]
+    desk.post("/chat", {"thread": thread, "text": "the default one", "on": opened["id"]}, agent="astra")
+    page.evaluate("() => loadNotes()")
+    page.locator("#chatopen").click()
+    page.locator(f".chat .topic[data-thread='{thread}']").click()
+    first = page.locator(f".chat .msg[data-id='{opened['id']}']")
+    first.wait_for()
+    # An answer stands under what it answers, a step in.
+    depth = "(line) => getComputedStyle(line).marginLeft"
+    answer = page.locator(".chat .msg").nth(1)
+    assert float(answer.evaluate(depth).removesuffix("px")) > float(first.evaluate(depth).removesuffix("px"))
+    # Answered from the page: the box says what it answers, and the message sent stands under it.
+    first.hover()
+    first.locator(".acts .answer").click()
+    assert page.inner_text("#chatanswerwhat").startswith(f"Answering {AGENT} #{opened['id']}")
+    page.locator("#chattext").fill("the tighter one, then")
+    page.locator("#chatsend").click()
+    page.wait_for_function("() => document.querySelectorAll('.chat .msg').length === 3")
+    mine = [message for message in desk.get("/chat")["messages"] if message["thread"] == thread][-1]
+    assert mine["on"] == opened["id"]
+    assert not page.locator("#chatanswering").is_visible()
+    # Folded, a message is its first words and how many answers it holds, its answers out of sight until unfolded.
+    first.locator(".foldmsg").click()
+    assert first.locator(".gist").inner_text() == "Which tolerance? \u00b7 2 answers"
+    assert page.locator(".chat .msg").count() == 1
+    first.locator(".foldmsg").click()
+    page.wait_for_function("() => document.querySelectorAll('.chat .msg').length === 3")
+    # Reworded and taken back by the reader, who said it, and by nobody else: an agent's message offers neither.
+    assert first.locator(".acts .edit").count() == 0
+    own = page.locator(f".chat .msg[data-id='{mine['id']}']")
+    own.hover()
+    own.locator(".acts .edit").click()
+    own.locator("textarea").fill("the tighter one, surely")
+    own.locator("button", has_text="Save").click()
+    page.wait_for_function(
+        "(id) => document.querySelector(`.chat .msg[data-id='${id}'] .said`).innerText.includes('surely')",
+        arg=mine["id"],
+    )
+    page.on("dialog", lambda dialog: dialog.accept())
+    own.hover()
+    own.locator(".acts .drop").click()
+    page.wait_for_function("(id) => !document.querySelector(`.chat .msg[data-id='${id}']`)", arg=mine["id"])
+
+
+def test_a_remark_or_a_reply_folds_to_its_first_words(page, desk):
+    branch = page.evaluate("() => data.branches[0].ref")
+    saying = f"folded away, number {len(desk.get('/comments')) + 1}\n\nwith more said under it"
+    made = desk.post(
+        "/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": saying}]
+    )["seq"]
+    desk.post("/reply", {"seq": made, "text": "answered at length\n\nover two paragraphs"}, agent=AGENT)
+    try:
+        page.reload(wait_until="load")
+        page.wait_for_selector(f"#note-{made} .line.reply")
+        head = page.locator(f"#note-{made} .thread > .line").first.locator(".said")
+        reply = page.locator(f"#note-{made} .line.reply").first.locator(".said")
+        # Each folds alone, to the line of its author and its first words, and is kept folded across a reload.
+        reply.locator(".foldmsg").click()
+        assert not reply.locator(".text").is_visible()
+        assert reply.locator(".gist").inner_text() == "answered at length over two paragraphs"
+        assert head.locator(".text").is_visible()
+        page.reload(wait_until="load")
+        page.wait_for_selector(f"#note-{made} .line.reply")
+        assert not page.locator(f"#note-{made} .line.reply .said .text").first.is_visible()
+        page.locator(f"#note-{made} .line.reply .said .foldmsg").first.click()
+        assert page.locator(f"#note-{made} .line.reply .said .text").first.is_visible()
+    finally:
+        desk.post("/drop", {"seq": made})
 
 
 def test_a_message_of_the_chat_carries_files_and_shows_its_links(page, desk, site, shot, tmp_path):

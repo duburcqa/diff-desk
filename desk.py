@@ -25,6 +25,8 @@ desk.py tailnet [--off]                              reach the desk from the oth
 desk.py chat                                         the threads of the chat, newest last
 desk.py chat 3                                       one thread of the chat, as plain text to keep or read back
 desk.py say 3 "..."                                  say something in a thread of the chat
+desk.py say 3 "..." --on 12                          answer message #12 of the thread, read under it
+desk.py say --edit 12 "..."  /  say --drop 12        reword or take back message #12, said by you
 desk.py say --new "title" "..."                      open a thread of the chat
 desk.py say 3 "..." --attach plot.png                say it with an image or a video; name any other file by its path
 """
@@ -479,7 +481,8 @@ def spoken(message):
     opened = " (new thread)" if message["id"] == message["thread"] else ""
     print(f"chat [{message['thread']}] {message['title']}{opened}", flush=True)
     who = message["who"].removeprefix("agent:")
-    print(f"      #{message['id']} {who} {message['at']}: {' '.join(message['text'].split())}", flush=True)
+    answering = f" (answering #{message['on']})" if message.get("on") else ""
+    print(f"      #{message['id']} {who} {message['at']}{answering}: {' '.join(message['text'].split())}", flush=True)
     carried(message, "          ")
 
 
@@ -509,13 +512,30 @@ def chat(args):
 
 
 def say(args):
-    """Say something in a thread of the chat, or open a new one under a title."""
+    """Say something in a thread of the chat, open a new one under a title, or reword or take back a message said."""
     words = list(args.words)
+    if args.edit is not None or args.drop is not None:
+        route, order = (
+            ("/chat/edit", {"id": args.edit, "text": " ".join(words)})
+            if args.edit
+            else ("/chat/drop", {"id": args.drop})
+        )
+        outcome = ask(route, order)
+        if outcome is None:
+            sys.exit("nothing is serving")
+        if not outcome.get("ok"):
+            sys.exit(outcome.get("error", "the change was refused"))
+        print(f"{'reworded' if args.edit else 'took back'} message #{order['id']}")
+        return
+    if not words:
+        sys.exit("say what: the thread's number then the message, or the message alone with --new")
     order = {"title": args.new} if args.new is not None else {}
     if args.new is None:
         if not words[0].isdigit() or not words[1:]:
             sys.exit("name the thread to say it in, then the message, or open a thread with --new <title>")
         order["thread"] = int(words.pop(0))
+    if args.on is not None:
+        order["on"] = args.on
     order["text"] = " ".join(words)
     # Each file is kept on the desk first, as a box of the page keeps what is dropped into it, and the message then
     # carries what the desk calls it.
@@ -833,9 +853,14 @@ job.set_defaults(run=chat)
 
 job = jobs.add_parser("say", help="say something in a thread of the chat, or open one")
 job.add_argument(
-    "words", nargs="+", help="the thread's number then the message in markdown, or the message alone with --new"
+    "words",
+    nargs="*",
+    help="the thread's number then the message in markdown, or the message alone with --new or --edit",
 )
 job.add_argument("--new", metavar="TITLE", help="open a new thread under this title")
+job.add_argument("--on", type=int, metavar="N", help="answer message #N of the thread, read under it")
+job.add_argument("--edit", type=int, metavar="N", help="reword message #N, said by you, with the words given")
+job.add_argument("--drop", type=int, metavar="N", help="take back message #N, said by you")
 job.add_argument(
     "--attach", action="append", metavar="PATH", help="an image or a video the message carries; repeatable"
 )

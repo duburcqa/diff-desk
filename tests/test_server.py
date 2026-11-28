@@ -2103,6 +2103,44 @@ def test_the_chat_holds_threads_between_the_reader_and_the_agents(desk):
     assert "name the thread" in refused.communicate(timeout=60)[0] and refused.returncode != 0
 
 
+def test_a_message_of_the_chat_answers_another_and_is_reworded_or_taken_back_by_its_author(desk):
+    opened = desk.post("/chat", {"title": "Answered in place", "text": "which tolerance?"}, agent=AGENT)
+    thread = opened["thread"]
+    # An answer names the message it answers, one of its own thread.
+    answer = desk.post("/chat", {"thread": thread, "text": "the default one", "on": opened["id"]})
+    other = desk.post("/chat", {"title": "Elsewhere", "text": "unrelated"}, agent=AGENT)
+    refused = desk.post("/chat", {"thread": thread, "text": "lost", "on": other["id"]})
+    assert refused["ok"] is False
+    assert "no message" in refused["error"]
+    said = {message["id"]: message for message in desk.get("/chat")["messages"]}
+    assert said[answer["id"]]["on"] == opened["id"]
+    # Reworded by whoever said it, its earlier wording kept, and by nobody else.
+    assert desk.post("/chat/edit", {"id": answer["id"], "text": "the tighter one"})["ok"]
+    assert desk.post("/chat/edit", {"id": answer["id"], "text": "not mine"}, agent=AGENT)["ok"] is False
+    said = {message["id"]: message for message in desk.get("/chat")["messages"]}
+    assert said[answer["id"]]["text"] == "the tighter one"
+    assert [earlier["text"] for earlier in said[answer["id"]]["edits"]] == ["the default one"]
+    exported = desk.cli("chat", str(thread)).communicate(timeout=60)[0]
+    assert f"#{answer['id']}, answering #{opened['id']}" in exported
+    # Taken back: a message answers stand under leaves a line saying so, the others go, and only their author takes
+    # them back.
+    assert desk.post("/chat/drop", {"id": opened["id"]})["ok"] is False
+    assert desk.post("/chat/drop", {"id": opened["id"]}, agent=AGENT)["ok"]
+    assert desk.post("/chat/drop", {"id": answer["id"]})["ok"]
+    said = {message["id"]: message for message in desk.get("/chat")["messages"]}
+    assert (said[opened["id"]]["deleted"], said[opened["id"]]["text"]) == (True, "")
+    assert answer["id"] not in said
+    # From the command line as well, an agent answering, rewording and taking back its own words.
+    told = desk.cli("say", str(other["thread"]), "answered from the shell", "--on", str(other["id"])).communicate(
+        timeout=60
+    )[0]
+    made = int(told.split("[")[1].split("]")[0])
+    assert {message["id"]: message for message in desk.get("/chat")["messages"]}[made]["on"] == other["id"]
+    assert "reworded" in desk.cli("say", "--edit", str(made), "reworded from the shell").communicate(timeout=60)[0]
+    assert "took back" in desk.cli("say", "--drop", str(made)).communicate(timeout=60)[0]
+    assert made not in {message["id"] for message in desk.get("/chat")["messages"]}
+
+
 def test_a_link_of_the_chat_is_shown_by_what_it_says_of_itself(desk, site, shot, tmp_path):
     def ask(route, as_reader=True):
         named = {"Cookie": desk.as_reader()} if as_reader else {"X-Desk-Agent": AGENT}
