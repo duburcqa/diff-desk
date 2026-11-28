@@ -1406,6 +1406,10 @@
   .chat .head strong { margin-bottom: 10px; }
   #chatnew svg { display: none; }
   #logflip, #logmore { display: none; }
+  /* A button standing as its word on a wide screen and as its icon on a phone. */
+  .iconword svg { display: none; }
+  .iconword[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+  .line.actions[data-whisper="true"] > textarea { border-style: dashed; background: var(--surface-sunk); }
   .chat .head strong { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
   /* Who watches, on a line of its own under the buttons of the head. */
   .chat .present { flex-basis: 100%; margin: 0 -12px; padding: 6px 12px; color: var(--muted); font-size: 11.5px; border-top: 1px solid var(--rule); }
@@ -1677,6 +1681,8 @@
     }
     /* The hunk head as well, whose line of context would otherwise hold the whole table wider than the screen. */
     tr.h td { white-space: normal; overflow-wrap: anywhere; }
+    /* The line the hunk opens in takes a line of its own under the buttons, read whole rather than wrapped beside them. */
+    tr.h td .at { display: block; margin-top: 4px; }
     /* One thing at a time: the file list, the comments and the chat each take the screen under the dock. */
     aside { position: fixed; inset: var(--head) 0 var(--foot, 0px); z-index: 46; max-height: none; overflow-y: auto; background: var(--surface); border: 0; }
     body.chat-open .chat { left: 0; right: 0; bottom: 0; width: auto; top: var(--head); height: auto; }
@@ -1711,13 +1717,21 @@
     .thread .line.reply > .said + button { margin-left: auto; }
     .thread .line[data-tools="open"] > .tools { flex-basis: 100%; justify-content: flex-end; }
     button.tiny { font-size: 12px; line-height: 16px; padding: 5px 10px; }
+    /* The delete pill as tall and as wide as a short word beside it, its cross at the size of the letters. */
+    button.tiny.drop { height: 28px; min-width: 40px; padding: 0 10px; }
+    button.tiny.drop svg { width: 9px; height: 9px; }
     /* A reply box nobody is writing in shares its row with the button closing the thread, the rest of its buttons
        showing once words or a file are in it. Kept open by what it holds rather than by the keyboard alone: a tap on
        one of its buttons takes the keyboard away before the tap lands. */
     .thread .line.actions:not(.aside) > textarea { flex: 1 1 0; min-width: 0; }
     .thread .line.actions .carrying:empty { display: none; }
-    .thread .line.actions:not(.aside):not(:focus-within):has(> textarea:placeholder-shown):not(:has(.carrying > *)) > :is(button, input):not(.closing) { display: none; }
-    .thread .line.actions:not(.aside):is(:focus-within, :has(> textarea:not(:placeholder-shown)), :has(.carrying > *)) > textarea { flex-basis: 100%; }
+    .thread .line.actions:not(.aside):not(:has(> textarea:focus)):has(> textarea:placeholder-shown):not(:has(.carrying > *)) > :is(button, input):not(.closing, .hush) { display: none; }
+    .iconword { display: grid; place-items: center; width: 40px; height: 36px; padding: 0; }
+    .thread .line.actions:not(.aside) > textarea { min-height: 36px; box-sizing: border-box; }
+    .iconword svg { display: block; width: 20px; height: 20px; }
+    .iconword .word { display: none; }
+    .iconword.solid { color: var(--surface); }
+    .thread .line.actions:not(.aside):is(:has(> textarea:focus), :has(> textarea:not(:placeholder-shown)), :has(.carrying > *)) > textarea { flex-basis: 100%; }
     /* A thread hangs inside the table of code, whose letters it would otherwise take. */
     .noterow td { font-family: var(--sans); }
     .notebox .row { flex-wrap: wrap; }
@@ -3242,6 +3256,29 @@
       line.dataset.tools = isOut ? "open" : "";
     });
     return more;
+  }
+
+  // The threads whose box whispers: everything said from it stays on this desk, kept across redraws.
+  const whispering = new Set();
+
+  // A reply to one message of a thread rather than to its end: the box at the foot of the thread starts with that
+  // message quoted, which is how a thread on the pull request says what an answer is to.
+  function quoteFor(text) {
+    const quote = document.createElement("button");
+    quote.className = "tiny";
+    quote.type = "button";
+    quote.textContent = "reply";
+    quote.dataset.tip = "Reply to this, quoted at the head of the reply";
+    quote.addEventListener("click", () => {
+      const box = quote.closest(".thread").querySelector(".line.actions:not(.aside) textarea");
+      if (!box) return;
+      const quoted = String(text).trim().split("\n").map((line) => `> ${line}`).join("\n");
+      box.value = `${quoted}\n\n${box.value}`;
+      box.dispatchEvent(new Event("input"));
+      box.focus();
+      box.setSelectionRange(box.value.length, box.value.length);
+    });
+    return quote;
   }
 
   // A note written where it belongs: on the remark, or on a reply. Several may stand on one reply, and they are read
@@ -5029,6 +5066,7 @@
     ];
     // Every comment carries one way to add a note about it, the remark included: it stands on the last note about
     // that comment, or on the comment itself while none stands there.
+    if (!note.pending && notes.live) tools.append(quoteFor(note.text));
     if (!note.pending && notes.live && !whispersOn(null).length) tools.append(whisperOn(note, null));
     // Nothing said is left unread, whatever an anchor written before this says.
     for (const entry of said_of) if (!ordered.includes(entry)) ordered.push(entry);
@@ -5089,6 +5127,7 @@
       // reply itself while nothing stands on it yet. A note on the thread is written from the box at the foot.
       // Only what was written here can be reworded: a reply carried back from the pull request is its author's word,
       // said on the copy everyone else reads, so this desk shows it and leaves it alone.
+      if (!note.pending && notes.live) said.append(quoteFor(answer.text));
       if (!note.pending && notes.live && carries) said.append(whisperOn(note, groupOf(entry)));
       if (!note.pending && notes.live && (isReader(answer.who) || isAgent(answer.who))) {
         const change = document.createElement("button");
@@ -5172,7 +5211,27 @@
       actions.className = "line actions";
       const say = document.createElement("textarea");
       say.rows = 1;
-      say.placeholder = note.state === "resolved" ? "Reopen with a reply" : "Reply";
+      const talk = note.state === "resolved" ? "Reopen with a reply" : "Reply";
+      const hush = document.createElement("button");
+      hush.className = "ghost hush iconword";
+      hush.type = "button";
+      hush.innerHTML = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="7" width="9" height="6.5" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg><span class="word">Whisper</span>`;
+      // Whispering or not, said by the box itself as well as by the button, which is what the reader writes into.
+      const sayHow = () => {
+        const isWhispering = whispering.has(note.seq);
+        actions.dataset.whisper = String(isWhispering);
+        hush.setAttribute("aria-pressed", String(isWhispering));
+        hush.dataset.tip = isWhispering ? "Answer in the open again" : "Whisper here: what this box says stays on this desk";
+        hush.setAttribute("aria-label", hush.dataset.tip);
+        say.placeholder = isWhispering ? "Whisper, kept on this desk" : talk;
+      };
+      hush.addEventListener("click", () => {
+        if (!whispering.delete(note.seq)) whispering.add(note.seq);
+        sayHow();
+        // A phone's keyboard would come up over the thread, and the box it rises for moves the button under the tap.
+        if (!isPhone()) say.focus();
+      });
+      sayHow();
       say.value = writing.get(note.seq) || "";
       say.addEventListener("input", () => writing.set(note.seq, say.value));
       grows(say);
@@ -5183,7 +5242,8 @@
         if (!say.value.trim() || send.disabled) return;
         send.disabled = true;
         try {
-          await post("reply", { seq: note.seq, text: say.value.trim(), images: attached() });
+          const quietly = whispering.has(note.seq) ? { whisper: true } : {};
+          await post("reply", { seq: note.seq, text: say.value.trim(), images: attached(), ...quietly });
         } finally {
           send.disabled = false;
         }
@@ -5195,15 +5255,20 @@
         render();
       });
       const close = document.createElement("button");
-      close.className = note.state === "resolved" ? "ghost closing" : "solid closing";
-      close.textContent = note.state === "resolved" ? "Reopen" : "Resolve";
+      close.className = note.state === "resolved" ? "ghost closing iconword" : "solid closing iconword";
+      close.innerHTML = note.state === "resolved" ? `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 8A5.5 5.5 0 1 1 11.6 3.8"/><path d="M12 1.6v2.6H9.4"/></svg><span class="word">Reopen</span>` : `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.2"/><path d="m5.4 8.2 1.8 1.8 3.4-3.7"/></svg><span class="word">Resolve</span>`;
+      close.setAttribute("aria-label", note.state === "resolved" ? "Reopen" : "Resolve");
       close.addEventListener("click", async () => {
         const shutting = note.state !== "resolved";
+        // A box whispering says its words as a whisper, and the thread closes on nothing said in the open.
+        const words = say.value.trim();
+        const isWhispering = whispering.has(note.seq);
+        if (isWhispering && words) await post("reply", { seq: note.seq, text: words, images: attached(), whisper: true });
         await post("resolve", {
           seq: [note.seq],
-          answer: say.value.trim(),
+          answer: isWhispering ? "" : words,
           resolved: shutting,
-          images: attached(),
+          images: isWhispering ? [] : attached(),
         });
         writing.delete(note.seq);
         await loadNotes();
@@ -5223,7 +5288,7 @@
         drawLog();
         render();
       });
-      actions.append(say, send, close);
+      actions.append(say, send, hush, close);
       const attached = attaching(say, actions, actions);
       // What this thread owes the pull request, sent as it now reads. Offered only when there is something to send,
       // which is what makes the button say what pressing it would do.
