@@ -3824,6 +3824,19 @@ def test_a_phone_keeps_the_buttons_of_a_thread_behind_its_menu(phone, desk):
         thread = phone.locator(f"#note-{made}")
         thread.wait_for()
         # The words take the width, their buttons out of sight, until the '...' of a line brings that line's out.
+        # The whisper switch and the check that resolves stand as icons at the centre of their buttons.
+        off = thread.locator(".line.actions .iconword").evaluate_all(
+            """(buttons) => buttons.map((button) => {
+              const box = button.getBoundingClientRect();
+              const icon = button.querySelector('svg').getBoundingClientRect();
+              return Math.max(
+                Math.abs(icon.left + icon.width / 2 - box.left - box.width / 2),
+                Math.abs(icon.top + icon.height / 2 - box.top - box.height / 2),
+              );
+            })"""
+        )
+        assert len(off) == 2
+        assert max(off) < 0.5
         head, reply = thread.locator(".thread > .line").first, thread.locator(".line.reply").first
         assert not head.locator(".tools button", has_text="edit").is_visible()
         assert not reply.locator("button", has_text="edit").is_visible()
