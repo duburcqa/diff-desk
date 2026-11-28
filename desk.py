@@ -320,9 +320,12 @@ def stop(args):
         )
     ask("/stop", {})
     print("stopped")
-    # A desk put down takes its address on the tailnet with it, which would otherwise answer with nothing.
-    if is_on_tailnet():
+    # A desk put down takes its address on the tailnet with it, which would otherwise answer with nothing. Tailscale is
+    # asked only where the reader put the desk there: a desk never put on the tailnet never runs it.
+    asked = on_tailnet()
+    if asked.exists():
         tailscale("serve", f"--https={serve_diff.PORT}", "off")
+        asked.unlink()
         print("and taken off the tailnet")
 
 
@@ -334,10 +337,9 @@ def tailscale(*words):
         return None
 
 
-def is_on_tailnet():
-    """Whether Tailscale serves this desk's port on the tailnet."""
-    done = tailscale("serve", "status", "--json")
-    return done is not None and done.returncode == 0 and f":{serve_diff.PORT}" in done.stdout
+def on_tailnet():
+    """The record that the reader put the desk on this port on the tailnet, which exists only while it is there."""
+    return serve_diff.HOME / f"tailnet.{serve_diff.PORT}"
 
 
 def tailnet(args):
@@ -355,6 +357,7 @@ def tailnet(args):
             sys.exit(
                 f"Tailscale did not take it off: {(done.stderr if done else 'tailscale is not installed').strip()}"
             )
+        on_tailnet().unlink(missing_ok=True)
         print("no longer on the tailnet")
         return
     if ask("/data") is None:
@@ -364,6 +367,7 @@ def tailnet(args):
         sys.exit("tailscale is not installed, or not on the PATH (DIFF_DESK_TAILSCALE names it otherwise)")
     if done.returncode != 0:
         sys.exit(f"Tailscale refused to serve it: {(done.stderr or done.stdout).strip()}")
+    on_tailnet().write_text(f"{port}\n")
     status = tailscale("status", "--json")
     name = json.loads(status.stdout)["Self"]["DNSName"].rstrip(".") if status and status.returncode == 0 else None
     print(f"on the tailnet: https://{name}:{port}/" if name else f"on the tailnet, on port {port}")

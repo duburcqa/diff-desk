@@ -114,7 +114,7 @@ A watch hears the chat too. A message wakes an agent when it opens a thread, whe
     python3 desk.py tailnet           # https://<this machine>.<tailnet>.ts.net:8787/
     python3 desk.py tailnet --off
 
-Tailscale serves the running desk over HTTPS at this machine's name on your tailnet, on the desk's own port, to the devices of the tailnet alone: the desk keeps answering on `127.0.0.1`, and the tailnet reaches it through Tailscale (`tailscale serve`, never `funnel`). A page opened there is the reader's, as one opened on the machine is. `desk.py stop` takes it off the tailnet as well. It needs Tailscale installed and logged in on both ends.
+Tailscale serves the running desk over HTTPS at this machine's name on your tailnet, on the desk's own port, to the devices of the tailnet alone: the desk keeps answering on `127.0.0.1`, and the tailnet reaches it through Tailscale (`tailscale serve`, never `funnel`). A page opened there is the reader's, as one opened on the machine is. `desk.py stop` takes it off the tailnet as well. It is opt-in: the desk never runs Tailscale, not even to look, until `desk.py tailnet` is asked for. It needs Tailscale installed and logged in on both ends.
 
 On a phone, a touch screen narrow one way or the other (upright or on its side), the page is laid out for a thumb:
 
