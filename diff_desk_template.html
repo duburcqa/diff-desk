@@ -1441,14 +1441,13 @@
   .chat .card .text { color: var(--muted); font-size: 12px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
   .chat .card img { flex: none; width: 72px; height: 72px; object-fit: cover; border-radius: 4px; }
   .chat .msg .who .num { margin-left: 6px; color: var(--faint); font-family: var(--mono); font-weight: 400; }
-  /* Offered where the pointer is, and always on a touch screen, which has no pointer to show it by. */
+  /* Offered where the pointer is. */
   .chat .msg .who .copy { display: inline-grid; place-items: center; margin-left: 6px; padding: 2px 4px; vertical-align: middle; color: var(--faint); background: transparent; border: 0; border-radius: 4px; cursor: pointer; visibility: hidden; }
   .chat .msg .who .copy svg { width: 13px; height: 13px; }
   .chat .msg .who .copy:hover { color: var(--accent); }
   .chat .msg .who .copy[data-copied="true"] { color: var(--add-ink); }
   .chat .msg .who .copy[data-copied="false"] { color: var(--del-ink); }
   .chat .msg:hover .who .copy, .chat .msg .who .copy:focus-visible { visibility: visible; }
-  @media (pointer: coarse) { .chat .msg .who .copy { visibility: visible; } }
   /* Keys a touch screen has none of. */
   @media (pointer: coarse) { .keys { display: none; } }
   .chat .msg.flash { background: color-mix(in srgb, var(--accent) 14%, transparent); }
@@ -1721,6 +1720,8 @@
     button.expand { padding: 6px 12px; font-size: 12px; }
     /* Keys a touch screen has none of. */
     aside .hint { display: none; }
+    /* What the dock and the back gesture close, and what a long press copies, take no button of their own. */
+    #chatclose, #logclose, #hidefiles, #chatcopy, .chat .msg .who .copy { display: none; }
   }
 </style>
 
