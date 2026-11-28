@@ -1,5 +1,5 @@
 <title>Genesis Diff Desk</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <style>
   :root {
     --ground: #f6f7f9;
@@ -1445,6 +1445,8 @@
   .chat .msg .who .copy { margin-left: 8px; font-weight: 400; visibility: hidden; }
   .chat .msg:hover .who .copy, .chat .msg .who .copy:focus-visible { visibility: visible; }
   @media (pointer: coarse) { .chat .msg .who .copy { visibility: visible; } }
+  /* Keys a touch screen has none of. */
+  @media (pointer: coarse) { .keys { display: none; } }
   .chat .msg.flash { background: color-mix(in srgb, var(--accent) 14%, transparent); }
   .chat .msg .said { color: var(--ink); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
   .chat .msg .said .text > p:first-child { margin-top: 2px; }
@@ -1473,21 +1475,178 @@
   .chat .say .status:empty { display: none; }
   .chat .empty { padding: 24px 8px; }
 
-  /* A phone: the bar scrolls away with the page, since held it would take a third of the screen, and the file heads
-     stick to the top of the screen instead (see measureHead). A file's path takes a line of its own above its buttons,
-     and a line of code wraps rather than having a finger scroll each file sideways. A narrow window with a mouse keeps
-     the lines as they are written, each file scrolled across under the pointer. */
-  @media (max-width: 600px) and (pointer: coarse) {
-    header { position: static; }
-    .filehead { flex-wrap: wrap; row-gap: 4px; }
-    .filehead .grow { flex-basis: 100%; }
-    td.code { white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* The bar of a phone, along the foot of the screen where the thumb rests: the screens it switches between and the
+     steps through the files, the share of them reviewed drawn along its top edge. A wider screen has all of it in the
+     bar at the top. */
+  .dock, .selbar { display: none; }
+  /* The file a swipe across the diff turns to, named at the edge it comes in from while the finger is still down, and
+     in the accent once letting go would turn to it. */
+  #turn {
+    position: fixed;
+    top: 45%;
+    z-index: 48;
+    max-width: 60vw;
+    padding: 8px 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px solid var(--rule-strong);
+    border-radius: 999px;
+    box-shadow: var(--shadow);
+    pointer-events: none;
+  }
+  #turn[hidden] { display: none; }
+  #turn[data-side="right"] { right: 8px; }
+  #turn[data-side="left"] { left: 8px; }
+  #turn[data-ready="true"] { color: var(--surface); background: var(--accent); border-color: var(--accent); }
+  /* A phone, a touch screen narrow one way or the other (held upright or turned on its side): the bar scrolls away
+     with the page, since held it would take a third of the screen, and the file heads stick to the top of the screen
+     instead (see measureHead). A file's path takes a line of its own above its buttons, and a line of code wraps rather
+     than having a finger scroll each file sideways. A narrow window with a mouse keeps the lines as they are written,
+     each file scrolled across under the pointer. Keep in step with isPhone. */
+  @media (pointer: coarse) and (max-width: 600px), (pointer: coarse) and (max-height: 600px) {
+    /* A tap is answered at once rather than held back to see whether a second one makes it a double tap, which would
+       zoom: a reader taps through lines and buttons far more often than they zoom, which a pinch still does. */
+    :root { --dock: calc(52px + env(safe-area-inset-bottom)); touch-action: manipulation; }
+    header { position: static; padding: 8px 10px; gap: 6px; }
+    /* What the dock does, the bar does not do again, and the jumps by number are a keyboard's. */
+    header .tally, header .jumps, header > .steps, #logopen, #chatopen, #moved:disabled { display: none; }
+    #scope { flex: 1 1 0; min-width: 0; max-width: none; }
+    .dock {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 47;
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      height: var(--dock);
+      padding-bottom: env(safe-area-inset-bottom);
+      background: var(--surface);
+      border-top: 1px solid var(--rule);
+      box-sizing: border-box;
+    }
+    .dock::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: -1px;
+      width: var(--done, 0%);
+      height: 2px;
+      background: var(--add-ink);
+    }
+    .dock button {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      min-width: 0;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      font-size: 10px;
+      font-weight: 600;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .dock button svg { width: 20px; height: 20px; }
+    .dock button[aria-pressed="true"] { color: var(--accent); }
+    #dockdone[aria-pressed="true"] { color: var(--add-ink); }
+    .dock button:disabled { color: var(--faint); opacity: 0.5; }
+    .dock .dot { top: 7px; right: auto; left: calc(50% + 7px); }
+    #dockdone .tick { opacity: 0; }
+    #dockdone[aria-pressed="true"] .tick { opacity: 1; }
+    /* What a tap on the line numbers has picked, with what can be done with it, standing over the dock. */
+    .selbar:not([hidden]) {
+      position: fixed;
+      left: 8px;
+      right: 8px;
+      bottom: calc(var(--dock) + 8px);
+      z-index: 47;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 6px 6px 14px;
+      background: var(--surface);
+      border: 1px solid var(--rule-strong);
+      border-radius: 10px;
+      box-shadow: var(--shadow);
+    }
+    .selbar .what { flex: 1; min-width: 0; font-size: 13px; color: var(--muted); }
+    .selbar button { min-height: 40px; padding: 0 14px; font-size: 14px; }
+    /* The diff from edge to edge: every pixel beside the code is a character fewer on each line. */
+    main { padding: 8px 0 calc(var(--dock) + 60vh); gap: 10px; }
+    .shell, body.hide-files .shell, body.chat-open .shell, body.chat-open.hide-files .shell { grid-template-columns: minmax(0, 1fr); }
+    body.hide-files .rail { display: none; }
+    /* The file box of the bar opens the list of files to pick from by name (see 'focus' on it), so a phone keeps the
+       glass alone and gives its width to the commit. */
+    header .search { flex: 0 0 auto; min-width: 0; margin: 0; }
+    header .search input { width: 38px; padding-right: 0; color: transparent; }
+    header .search input::placeholder { color: transparent; }
+    header .search svg { left: 12px; width: 15px; height: 15px; color: var(--muted); pointer-events: none; }
+    .file { border-left: 0; border-right: 0; border-radius: 0; }
+    .filehead { flex-wrap: wrap; row-gap: 0; padding: 2px 6px 0 10px; border-radius: 0; }
+    .filehead .grow { flex-basis: 100%; min-height: 30px; }
+    .filehead .icon { width: 40px; height: 34px; }
+    .filehead .icon svg { width: 16px; height: 16px; }
+    .filehead .seen { font-size: 13px; padding: 6px; margin: -6px -6px -6px 0; }
+    .seen input { width: 20px; height: 20px; }
+    .body { border-radius: 0; }
+    /* One column of numbers: an added or kept line shows its new number, a removed one its old number (see the row
+       builder), the marker beside it saying which. The comment pins give way to the bar a tap opens. */
+    table:not(.aligned) td.ln:first-child, table:not(.aligned) td.gut { display: none; }
+    tr.d td.ln[data-old]::before { content: attr(data-old); }
+    td.ln { padding: 0 4px 0 6px; }
+    td.mark { padding: 0 2px 0 3px; }
+    tr.sel td.ln:nth-child(2), tr.hit td.ln:nth-child(2) { box-shadow: inset 3px 0 0 var(--accent); }
+    /* A wrapped line hangs under its own indentation, two columns further in, so the shape of the code still reads
+       (see '--lead' in the row builder). */
+    td.code {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      padding-left: calc((var(--lead, 0) + 2) * 1ch + 4px);
+      text-indent: calc((var(--lead, 0) + 2) * -1ch);
+    }
     /* The hunk head as well, whose line of context would otherwise hold the whole table wider than the screen. */
     tr.h td { white-space: normal; overflow-wrap: anywhere; }
-    /* One thing at a time: the file list, when asked for, and the chat each take the whole screen over the diff. */
-    aside { position: fixed; inset: 0; z-index: 46; max-height: none; overflow-y: auto; background: var(--surface); border: 0; }
-    body.chat-open .chat { left: 0; right: 0; width: auto; }
+    /* One thing at a time: the file list, the comments and the chat each take the screen above the dock. */
+    aside { position: fixed; inset: 0 0 var(--dock); z-index: 46; max-height: none; overflow-y: auto; background: var(--surface); border: 0; }
+    body.chat-open .chat { left: 0; right: 0; bottom: var(--dock); width: auto; top: 0; }
     .chat .grip { display: none; }
+    .log[data-open="true"] { inset: 0 0 var(--dock); width: auto; max-height: none; border: 0; border-radius: 0; padding: 12px 10px; }
+    #logmove, #logsize { display: none; }
+    .log .actions, .log .head { flex-wrap: wrap; }
+    #logcount { white-space: nowrap; }
+    .logrow { min-height: 44px; box-sizing: border-box; }
+    /* A reply's words take the width of the screen, its buttons a row of their own under them, flush right. */
+    .thread .line.reply { flex-wrap: wrap; row-gap: 4px; }
+    .thread .line.reply > .said { flex: 1 1 100%; }
+    .thread .line.reply > .said + button { margin-left: auto; }
+    button.tiny { font-size: 12px; line-height: 16px; padding: 5px 10px; }
+    /* A reply box nobody is writing in shares its row with the button closing the thread, the rest of its buttons
+       showing once words or a file are in it. Kept open by what it holds rather than by the keyboard alone: a tap on
+       one of its buttons takes the keyboard away before the tap lands. */
+    .thread .line.actions:not(.aside) > textarea { flex: 1 1 0; min-width: 0; }
+    .thread .line.actions .carrying:empty { display: none; }
+    .thread .line.actions:not(.aside):not(:focus-within):has(> textarea:placeholder-shown):not(:has(.carrying > *)) > :is(button, input):not(.closing) { display: none; }
+    .thread .line.actions:not(.aside):is(:focus-within, :has(> textarea:not(:placeholder-shown)), :has(.carrying > *)) > textarea { flex-basis: 100%; }
+    /* A thread hangs inside the table of code, whose letters it would otherwise take. */
+    .noterow td { font-family: var(--sans); }
+    .notebox .row { flex-wrap: wrap; }
+    /* A phone zooms the page onto any field written in smaller letters the moment it takes the keyboard, and leaves
+       it zoomed. Every field is set apart by its own rule, so only an override reaches them all. */
+    input, textarea, select { font-size: 16px !important; }
+    /* Rows and buttons a finger can hit: the size of a fingertip, rather than of a pointer. */
+    .fileitem, .foldername { min-height: 44px; }
+    .fileitem .name { font-size: 13px; }
+    #hidefiles, #foldreviewed { width: 44px; height: 40px; }
+    #hidefiles svg, #foldreviewed svg { width: 16px; height: 16px; }
     /* Keys a touch screen has none of. */
     aside .hint { display: none; }
   }
@@ -1549,6 +1708,21 @@
   <button class="solid" id="moved" disabled data-tip="Refresh the diffs once the branch has moved on">Refresh</button>
   <div id="loading" aria-hidden="true"></div>
 </header>
+
+<nav class="dock" id="dock" aria-label="Review">
+  <button id="dockfiles" type="button" aria-pressed="false"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h9"/></svg>Files</button>
+  <button id="dockprev" type="button"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5 10 7.5l5 5"/></svg>Previous</button>
+  <button id="dockdone" type="button" aria-pressed="false"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="13" height="13" rx="3"/><path class="tick" d="M6.8 10.2 9 12.4l4.4-4.8"/></svg>Reviewed</button>
+  <button id="docknext" type="button"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 7.5 10 12.5l5-5"/></svg>Next</button>
+  <button id="docklog" type="button" aria-pressed="false"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h14v9H9l-4 3v-3H3z"/></svg>Comments<i class="dot" id="docklogdot" aria-hidden="true"></i></button>
+  <button id="dockchat" type="button" aria-pressed="false"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h11v7H7l-3 2.5V10H2z"/><path d="M15.5 6.5H18v7h-2v2.5l-3-2.5H8.5V12"/></svg>Chat<i class="dot" id="dockchatdot" aria-hidden="true"></i></button>
+</nav>
+<div id="turn" hidden></div>
+<div class="selbar" id="selbar" hidden>
+  <span class="what" id="selwhat"></span>
+  <button class="solid" id="selcomment" type="button">Comment</button>
+  <button class="ghost" id="selclear" type="button" aria-label="Clear the selection">&#215;</button>
+</div>
 
 <div class="settings" id="settings" data-open="false">
   <div class="body">
@@ -1767,7 +1941,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "goback", "foldreviewed", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "loading", "goto", "veil", "palette", "pq", "picks", "find", "fgrip", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "fthreads", "toast", "toastwhere", "toastsaid", "toastmark", "logdot", "chatopen", "chatdot", "chat", "chatgrip", "chatback", "chattitle", "chatcopy", "chatnew", "chatclose", "chatwho", "chatrows", "chatsay", "chatname", "chattext", "chatsend", "chatresult", "filesgrip", "railfold", "logmove", "logsize", "fchat", "chatbuttons"]) {
+  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "goback", "foldreviewed", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "loading", "goto", "veil", "palette", "pq", "picks", "find", "fgrip", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "fthreads", "toast", "toastwhere", "toastsaid", "toastmark", "logdot", "chatopen", "chatdot", "chat", "chatgrip", "chatback", "chattitle", "chatcopy", "chatnew", "chatclose", "chatwho", "chatrows", "chatsay", "chatname", "chattext", "chatsend", "chatresult", "filesgrip", "railfold", "logmove", "logsize", "fchat", "chatbuttons", "dock", "dockfiles", "dockprev", "dockdone", "docknext", "docklog", "dockchat", "docklogdot", "dockchatdot", "selbar", "selwhat", "selcomment", "selclear", "turn"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -1812,7 +1986,8 @@
   let logPlace = null;
   function placeLog() {
     const style = els.log.style;
-    if (!logPlace) {
+    // A phone gives the panel the whole screen, wherever it was put on a wider one.
+    if (!logPlace || isPhone()) {
       for (const key of ["left", "top", "right", "bottom", "width", "height", "maxHeight"]) style[key] = "";
       return;
     }
@@ -2493,7 +2668,7 @@
       chat.read[chat.open] = thread[thread.length - 1].id;
       keepChatRead();
     }
-    els.chatdot.dataset.on = String([...threads.values()].some((thread) => unreadIn(thread) > 0));
+    els.chatdot.dataset.on = els.dockchatdot.dataset.on = String([...threads.values()].some((thread) => unreadIn(thread) > 0));
     // Each name in the colour its words are read in, so who is watching is told at a glance from who is talking.
     els.chatwho.replaceChildren();
     if (!notes.live) els.chatwho.textContent = "The desk is not answering";
@@ -2681,13 +2856,12 @@
     chat.open = where;
     els.chatresult.textContent = "";
     drawChat();
-    (where === "new" ? els.chatname : els.chattext).focus();
+    // A phone brings its keyboard up over half the screen with the caret, so a thread opened there is read first.
+    if (where === "new" || !isPhone()) (where === "new" ? els.chatname : els.chattext).focus();
   }
 
   function showChat(open) {
     document.body.classList.toggle("chat-open", open);
-    // On a phone the chat takes the screen the file list would cover it with.
-    if (open && isPhone()) showFiles(false);
     // The diff narrows or widens, and the find box standing over it follows its edge.
     if (!els.find.hidden) requestAnimationFrame(placeFind);
     els.chatopen.setAttribute("aria-pressed", String(open));
@@ -2953,7 +3127,7 @@
     if (posted) counted.push(`${posted} on the PR`);
     els.logcount.textContent = counted.join(" \u00b7 ");
     // Always in the layout, so saying that something is waiting cannot move the button it is said on.
-    els.logdot.dataset.on = String(owed.length > 0);
+    els.logdot.dataset.on = els.docklogdot.dataset.on = String(owed.length > 0);
     const local = all.filter((note) => note.github === "none");
     els.logretry.disabled = !owed.length;
     els.logbind.disabled = !local.length || !branch().pr;
@@ -3022,8 +3196,9 @@
     return draftKeys.get(draft);
   }
 
-  // A phone: a narrow touch screen, where the file list, the diff and the chat each take the whole screen in turn.
-  const isPhone = () => matchMedia("(max-width: 600px) and (pointer: coarse)").matches;
+  // A phone: a touch screen narrow one way or the other, where the file list, the diff and the chat each take the whole
+  // screen in turn (see the '@media' of the phone).
+  const isPhone = () => matchMedia("(pointer: coarse) and (max-width: 600px), (pointer: coarse) and (max-height: 600px)").matches;
 
   // Where the screen stops being covered by the bar: its lower edge while it is held at the top, or the top of the
   // screen once it has scrolled away, as it does on a phone.
@@ -3059,6 +3234,7 @@
     card.dataset.reveal = "true";
     folds.set(note.path, { digest: card.dataset.digest, open: true, upTo: latest() });
     els.log.dataset.open = "false";
+    toDiff();
     keepChoices();
     // The lines of a file the reader was nowhere near are built for this, since the thread hangs among them - built
     // outright rather than settled, which would leave a file they are nowhere near exactly as it was.
@@ -4735,7 +4911,7 @@
         render();
       });
       const close = document.createElement("button");
-      close.className = note.state === "resolved" ? "ghost" : "solid";
+      close.className = note.state === "resolved" ? "ghost closing" : "solid closing";
       close.textContent = note.state === "resolved" ? "Reopen" : "Resolve";
       close.addEventListener("click", async () => {
         const shutting = note.state !== "resolved";
@@ -4811,6 +4987,7 @@
   function clearSel() {
     sel.path = sel.from = sel.to = null;
     document.querySelectorAll("tr.sel").forEach((row) => row.classList.remove("sel"));
+    els.selbar.hidden = true;
   }
 
   function selRows() {
@@ -4826,6 +5003,12 @@
   function paintSel() {
     document.querySelectorAll("tr.sel").forEach((row) => row.classList.remove("sel"));
     for (const row of selRows()) row.classList.add("sel");
+    // A phone has no pin to press and no key to hold: what is picked, and the comment on it, stand in a bar of their own.
+    const spot = isPhone() && !els.main.querySelector("tr[data-composer]") ? anchorSel() : null;
+    els.selbar.hidden = !spot;
+    if (!spot) return;
+    const lines = spot.line === spot.endLine ? `Line ${spot.line}` : `Lines ${spot.line}-${spot.endLine}`;
+    els.selwhat.textContent = `${lines} of ${fileName(sel.path)}`;
   }
 
   function pick(row, extend) {
@@ -5085,7 +5268,7 @@
     cancel.className = "ghost";
     cancel.textContent = "Cancel";
     const hint = document.createElement("span");
-    hint.className = "status";
+    hint.className = "status keys";
     hint.textContent = "\u2318/Ctrl + Enter";
     controls.append(now, send, cancel);
     box.append(field, controls);
@@ -6009,6 +6192,7 @@
     els.ptext.dataset.stale = String(Boolean(staleCount));
     els.ptext.dataset.tip = staleCount ? `${staleCount} file(s) changed since they were reviewed, and are marked as such` : "Files marked reviewed";
     els.pfill.style.width = shown.length ? `${Math.round((done / shown.length) * 100)}%` : "0%";
+    els.dock.style.setProperty("--done", els.pfill.style.width);
     if (!els.palette.hidden) drawPicks();
     sayWhereToStep();
     showStatus(staleCount);
@@ -6585,6 +6769,7 @@
   function reachLine(path, line, side) {
     const wrap = document.querySelector(`section.file[data-path="${CSS.escape(path)}"]`);
     if (!wrap) return;
+    toDiff();
     keepPlace();
     letGo();
     wrap.dataset.open = "true";
@@ -6787,10 +6972,17 @@
 
   // A row a comment can be written on: a click on its rail picks it, and a press there starts a range.
   function armRow(row, rail) {
-    const select = (event) => pick(row, event.shiftKey);
+    const select = (event) => {
+      // On a phone a tap picks a line, a tap on another line of the same file stretches the pick to it, and a tap on
+      // the one line picked lets it go: a finger cannot hold Shift, nor drag without scrolling the page.
+      if (!isPhone() || sel.path !== row.dataset.path) pick(row, event.shiftKey);
+      else if (sel.from === sel.to && sel.from === Number(row.dataset.seq)) clearSel();
+      else pick(row, true);
+    };
     for (const cell of rail) cell.addEventListener("click", select);
     row.addEventListener("pointerdown", (event) => {
-      if (event.button !== 0 || event.shiftKey) return;
+      // A finger set down on the numbers is a tap or the start of a scroll, never a drag across lines.
+      if (event.button !== 0 || event.shiftKey || event.pointerType === "touch") return;
       if (event.target.closest("button, textarea, input")) return;
       // Only the rail starts a range: it carries no text. Dragging across the code is how one selects the code
       // itself, and a range drag there would wipe that selection the moment it left the line.
@@ -6889,12 +7081,17 @@
         const right = document.createElement("td");
         right.className = "ln";
         right.textContent = kind === "d" ? "" : String(newNo);
+        // The number a phone shows for a removed line in the one column it keeps.
+        if (kind === "d") right.dataset.old = String(oldNo);
         const gut = commentGutter(row);
         const mark = document.createElement("td");
         mark.className = "mark";
         mark.textContent = kind === "a" ? "+" : kind === "d" ? "−" : " ";
         const code = document.createElement("td");
         code.className = "code";
+        // How far the line is indented, in columns, which a wrapped line hangs under (see 'td.code' on a phone).
+        const lead = /^[ \t]*/.exec(text)[0];
+        if (lead) code.style.setProperty("--lead", String(lead.length + 7 * (lead.split("\t").length - 1)));
         const coloured = painted.get(order);
         if (coloured === undefined) code.textContent = text;
         else code.innerHTML = coloured;
@@ -7135,6 +7332,12 @@
   function markCurrent() {
     // Files sit at whatever depth the tree puts them, so the current one is found by the index it carries.
     for (const node of entries()) node.setAttribute("data-current", String(Number(node.dataset.index) === state.current));
+    // The dock acts on the file the reader is on, and says whether it is reviewed.
+    const file = inTreeOrder(view().files)[state.current];
+    els.dockdone.disabled = !file;
+    els.dockdone.setAttribute("aria-pressed", String(Boolean(file) && seenState(file) === "done"));
+    els.dockprev.disabled = state.current <= 0;
+    els.docknext.disabled = state.current >= entries().length - 1;
   }
 
   function readingAt(cards) {
@@ -7564,6 +7767,134 @@
   }
   els.hidefiles.addEventListener("click", () => showFiles(els.hidefiles.getAttribute("aria-pressed") === "true"));
   els.showfiles.addEventListener("click", () => els.hidefiles.click());
+
+  // On a phone each screen (the file list, the comments, the chat, the settings, the sources, the pick of a file by
+  // name, the find box) covers the diff or the controls over it, so opening one closes whichever was open, and the back
+  // gesture of the phone closes it as it would leave a page.
+  // Each is told by whether it is open and closed its own way, whatever opened it: a button, a key, a link.
+  const screens = {
+    files: [() => !document.body.classList.contains("hide-files"), () => showFiles(false)],
+    log: [() => els.log.dataset.open === "true", () => els.logclose.click()],
+    chat: [() => document.body.classList.contains("chat-open"), () => showChat(false)],
+    settings: [() => els.settings.dataset.open === "true", () => openSettings(false)],
+    source: [() => els.source.dataset.open === "true", () => els.sourceopen.click()],
+    picker: [() => !els.palette.hidden, closePicker],
+    find: [() => !els.find.hidden, closeFind],
+  };
+  let screenOn = null;
+  function screensMoved() {
+    const open = Object.keys(screens).filter((name) => screens[name][0]());
+    for (const [button, name] of [[els.dockfiles, "files"], [els.docklog, "log"], [els.dockchat, "chat"]]) {
+      button.setAttribute("aria-pressed", String(open.includes(name)));
+    }
+    if (!isPhone()) {
+      screenOn = null;
+      return;
+    }
+    const fresh = open.find((name) => name !== screenOn) || (open.length ? screenOn : null);
+    screenOn = fresh;
+    for (const name of open) if (name !== fresh) screens[name][1]();
+    // One entry of the history for whichever screen is up, replaced as another takes its place, so a single back
+    // returns to the diff.
+    const held = history.state && history.state.screen;
+    if (fresh && held !== fresh) history[held ? "replaceState" : "pushState"]({ screen: fresh }, "");
+    else if (!fresh && held) history.back();
+  }
+  const screenWatch = new MutationObserver(screensMoved);
+  screenWatch.observe(document.body, { attributes: true, attributeFilter: ["class"] });
+  for (const node of [els.log, els.settings, els.source]) screenWatch.observe(node, { attributes: true, attributeFilter: ["data-open"] });
+  screenWatch.observe(els.find, { attributes: true, attributeFilter: ["hidden"] });
+  window.addEventListener("popstate", (event) => {
+    if (!isPhone()) return;
+    const want = event.state && event.state.screen;
+    for (const name of Object.keys(screens)) if (name !== want && screens[name][0]()) screens[name][1]();
+    // Forward onto a screen closed since: the entry stands for nothing any more.
+    if (want && !screens[want][0]()) history.replaceState(null, "");
+  });
+
+  // What is reached in the diff, from a screen of a phone, is reached on the diff itself: the screen gives way.
+  function toDiff() {
+    if (!isPhone()) return;
+    for (const name of Object.keys(screens)) if (screens[name][0]()) screens[name][1]();
+  }
+
+  function stepFile(down) {
+    toDiff();
+    const count = entries().length;
+    if (count) jump(Math.min(Math.max(state.current + (down ? 1 : -1), 0), count - 1));
+  }
+  els.dockfiles.addEventListener("click", () => showFiles(document.body.classList.contains("hide-files")));
+  els.dockprev.addEventListener("click", () => stepFile(false));
+  els.docknext.addEventListener("click", () => stepFile(true));
+  els.dockdone.addEventListener("click", () => {
+    const file = inTreeOrder(view().files)[state.current];
+    if (file) markReviewed(file, seenState(file) !== "done");
+  });
+  els.docklog.addEventListener("click", () => els.logopen.click());
+  els.dockchat.addEventListener("click", () => els.chatopen.click());
+  els.selcomment.addEventListener("click", () => {
+    composeSel();
+    els.selbar.hidden = true;
+  });
+  els.selclear.addEventListener("click", clearSel);
+
+  // A swipe across the diff steps to the file after or before, as a page is turned, and one across a screen closes it
+  // the way it slid over the diff. The edges of the screen are left to the phone, whose own back gesture starts there,
+  // and whatever scrolls sideways under the finger (a wide table) keeps the swipe for itself.
+  let swipe = null;
+  document.addEventListener(
+    "touchstart",
+    (event) => {
+      swipe = null;
+      if (!isPhone() || event.touches.length !== 1) return;
+      const { clientX, clientY } = event.touches[0];
+      if (clientX < 24 || clientX > innerWidth - 24) return;
+      for (let node = event.target; node && node !== document.body; node = node.parentElement) {
+        if (node.scrollWidth > node.clientWidth + 1 && /auto|scroll/.test(getComputedStyle(node).overflowX)) return;
+      }
+      swipe = { x: clientX, y: clientY, at: event.timeStamp, target: event.target };
+    },
+    { passive: true },
+  );
+  // How far a finger has to travel across, mostly sideways, for a swipe to count.
+  const SWIPE = 80;
+  document.addEventListener(
+    "touchmove",
+    (event) => {
+      els.turn.hidden = true;
+      if (!swipe || screenOn !== null || !els.main.contains(swipe.target) || event.touches.length !== 1) return;
+      const dx = event.touches[0].clientX - swipe.x;
+      const dy = event.touches[0].clientY - swipe.y;
+      if (Math.abs(dx) < 24 || Math.abs(dx) < 2 * Math.abs(dy)) return;
+      const files = inTreeOrder(view().files);
+      const next = files[state.current + (dx < 0 ? 1 : -1)];
+      els.turn.hidden = false;
+      els.turn.dataset.side = dx < 0 ? "right" : "left";
+      els.turn.dataset.ready = String(Boolean(next) && Math.abs(dx) >= SWIPE);
+      els.turn.textContent = next ? (dx < 0 ? `${fileName(next.path)} \u203a` : `\u2039 ${fileName(next.path)}`) : dx < 0 ? "Last file" : "First file";
+    },
+    { passive: true },
+  );
+  document.addEventListener("touchcancel", () => (els.turn.hidden = true), { passive: true });
+  document.addEventListener(
+    "touchend",
+    (event) => {
+      const from = swipe;
+      swipe = null;
+      els.turn.hidden = true;
+      if (!from || event.changedTouches.length !== 1) return;
+      const dx = event.changedTouches[0].clientX - from.x;
+      const dy = event.changedTouches[0].clientY - from.y;
+      if (Math.abs(dx) < SWIPE || Math.abs(dx) < 2 * Math.abs(dy) || event.timeStamp - from.at > 800) return;
+      // A finger drawn across words to select them is no swipe.
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed) return;
+      if (screenOn === "files" && dx < 0) showFiles(false);
+      else if ((screenOn === "chat" || screenOn === "log") && dx > 0) screens[screenOn][1]();
+      else if (screenOn === null && els.main.contains(from.target)) stepFile(dx < 0);
+    },
+    { passive: true },
+  );
   // Open under its button, and kept open while the reader flips several choices: a press anywhere else closes it.
   function openSettings(open) {
     els.settings.dataset.open = String(open);
