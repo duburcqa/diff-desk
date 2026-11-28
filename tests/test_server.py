@@ -2173,6 +2173,11 @@ def test_the_chat_pins_messages_over_a_thread_and_reports_under_it(desk, tmp_pat
         with pytest.raises(urllib.error.HTTPError) as answer:
             urllib.request.urlopen(f"{desk.url}/report/{wrong}", timeout=30)
         assert answer.value.code == 404
+    # It says when its file was last written, as it stands when asked, so that writing it again is seen.
+    assert report["report"]["at"] == (folder / "index.html").stat().st_mtime_ns // 1_000_000
+    os.utime(folder / "index.html", ns=(0, (folder / "index.html").stat().st_mtime_ns + 5_000_000_000))
+    rewritten = {message["id"]: message for message in desk.get("/chat")["messages"]}[made]["report"]["at"]
+    assert rewritten == report["report"]["at"] + 5000
     # A report on the web is kept as its address, and one named by anything else is refused.
     web = desk.post(
         "/chat", {"thread": thread, "text": "Dashboard", "report": "https://example.com/run/7"}, agent=AGENT

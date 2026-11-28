@@ -1357,6 +1357,7 @@
   }
   button.expand:hover { color: var(--accent); border-color: var(--accent); }
   tr.h .at { color: var(--faint); }
+  tr.h .hunkhead { display: flex; align-items: center; }
 
   /* Narrow views keep every control and fold the bar instead, so the one thing that gives way is the base ref, which
      the Source panel says in full. */
@@ -1462,13 +1463,13 @@
   .foldmsg { display: inline-grid; place-items: center; flex: none; margin: 0 2px 0 -4px; padding: 2px; color: var(--faint); background: transparent; border: 0; border-radius: 4px; cursor: pointer; }
   .foldmsg svg { width: 11px; height: 11px; transition: transform 0.1s; }
   .foldmsg:hover { color: var(--accent); }
-  [data-folded="true"] > .who .foldmsg svg, .said[data-folded="true"] > .foldmsg svg { transform: rotate(-90deg); }
-  /* Folded, a message is the line of its author with its first words, and how many answers it holds. */
+  .foldmsg:disabled { visibility: hidden; }
+  [data-folded="true"] > .who .foldmsg svg, .thread[data-folded="true"] .said > .foldmsg svg { transform: rotate(-90deg); }
+  /* Folded, a message keeps its words and says how many answers it puts out of sight. */
   /* Drawn from its attribute: the words are on the page already, and a search or a lookup by text finds them once. */
   .gist::before { content: attr(data-gist); }
   .chat .msg .gist { display: none; flex: 1 1 auto; min-width: 0; margin-left: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-weight: 400; }
   .chat .msg[data-folded="true"] .gist { display: block; }
-  .chat .msg[data-folded="true"] > .said, .chat .msg[data-folded="true"] .acts { display: none; }
   /* The actions of a message stand flush right on the line of its author. Under a pointer every one of them shows with
      the pointer. A touch screen shows the answer and a '...' always, and the '...' gives way to a filled capsule holding
      every action, as the toolbar of a chat does, until a tap lands anywhere else. */
@@ -1493,11 +1494,10 @@
   .chat .msg .said.gone { color: var(--faint); font-style: italic; }
   .chat .msg .said textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 6px 8px; color: var(--ink); background: var(--surface); border: 1px solid var(--rule-strong); border-radius: 6px; }
   .chat .msg .said .row { display: flex; gap: 8px; margin-top: 6px; }
-  /* A remark or a reply folded is the line of its author and its first words. */
+  /* A thread folded is its remark alone, saying how many replies it puts out of sight. */
   .thread .said .gist { display: none; margin-left: 4px; color: var(--muted); }
-  .thread .said[data-folded="true"] { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .thread .said[data-folded="true"] .gist { display: inline; }
-  .thread .said[data-folded="true"] > :not(.who, .foldmsg, .gist, .more, .mark) { display: none; }
+  .thread[data-folded="true"] .said .gist { display: inline; }
+  .thread[data-folded="true"] .line.reply { display: none; }
   .thread .said > .foldmsg { display: inline-grid; vertical-align: middle; margin: 0 2px 0 -2px; }
   /* The messages pinned over a thread, each a line a tap takes to it. */
   .chat .pins:not([hidden]) { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-bottom: 1px solid var(--rule); background: var(--surface-sunk); }
@@ -1506,7 +1506,10 @@
   .chat .pins svg, .chat .reports svg, .chat .reportcard svg { flex: none; width: 13px; height: 13px; color: var(--accent); }
   /* The reports pinned under a thread, chips a tap opens in place of the chat. */
   .chat .reports:not([hidden]) { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 10px; border-top: 1px solid var(--rule); }
-  .chat .reports .reportchip { border: 1px solid var(--rule-strong); border-radius: 999px; padding: 4px 10px; max-width: 100%; }
+  .chat .reports .reportchip > span, .chat .pins .pinned { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chat .reports .reportchip > span { min-width: 0; }
+  .chat .reports .reportchip .dot { top: 2px; right: 6px; }
+  .chat .reports .reportchip { position: relative; border: 1px solid var(--rule-strong); border-radius: 999px; padding: 4px 14px 4px 10px; max-width: min(100%, 260px); }
   .chat .reportcard { margin-top: 6px; padding: 6px 10px; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface-sunk); }
   /* A report opened fills the chat, the way back at the top right. */
   .chat .viewer:not([hidden]) { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; background: var(--surface); }
@@ -1701,7 +1704,7 @@
     body.hide-files .rail { display: none; }
     .file { border-left: 0; border-right: 0; border-radius: 0; }
     /* A file head is one row: the path, the tick, and what else it does behind its own '...'. */
-    .filehead { gap: 2px; min-height: 36px; padding: 0 0 0 8px; border-radius: 0; box-sizing: border-box; }
+    .filehead { gap: 2px; min-height: 36px; padding: 0 8px; border-radius: 0; box-sizing: border-box; }
     .filehead .grow { flex: 1 1 auto; gap: 6px; }
     .filehead .path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; }
     .filehead .badge { flex: none; font-size: 9px; padding: 1px 4px; }
@@ -1736,11 +1739,16 @@
     }
     /* The hunk head as well, whose line of context would otherwise hold the whole table wider than the screen. */
     tr.h td { white-space: normal; overflow-wrap: anywhere; }
-    /* The line the hunk opens in takes a line of its own under the buttons, read whole rather than wrapped beside them. */
-    tr.h td .at { display: block; margin-top: 4px; }
+    /* The line the hunk opens in takes a line of its own over the buttons, read whole rather than wrapped beside them,
+       and read before the buttons that open the lines around it. */
+    tr.h td .hunkhead { flex-wrap: wrap; row-gap: 4px; }
+    tr.h td .at { order: -1; flex-basis: 100%; }
     /* One thing at a time: the file list, the comments and the chat each take the screen under the dock. */
     aside { position: fixed; inset: var(--head) 0 var(--foot, 0px); z-index: 46; height: auto; overflow-y: auto; background: var(--surface); border: 0; }
     body.chat-open .chat { left: 0; right: 0; bottom: 0; width: auto; top: var(--head); height: auto; }
+    /* The page under a screen taking all of it stays still: scrolled, it showed a second scrollbar beside the screen's
+       own, and Safari folded its bars away as it went, cutting the foot of the screen off. */
+    html[data-covered="true"], html[data-covered="true"] body { overflow: hidden; }
     .chat .grip { display: none; }
     .log[data-open="true"] { inset: var(--head) 0 0; width: auto; max-height: none; border: 0; border-radius: 0; padding: 12px 10px; }
     #logmove, #logsize { display: none; }
@@ -2174,7 +2182,7 @@
   // being opened), and per thread the last message the reader has had on screen, kept in this browser.
   // `folded` holds the messages the reader folded, `answering` the message the box answers, `editing` the message being
   // reworded and its draft: each outlives the redraws a thread goes through while it is read.
-  const chat = { messages: [], open: null, read: {}, drawn: null, drawnThread: null, folded: new Set(), answering: null, editing: null, actsOut: new Set() };
+  const chat = { messages: [], open: null, read: {}, drawn: null, drawnThread: null, folded: new Set(), answering: null, editing: null, actsOut: new Set(), reportsSeen: {} };
   // A selection is a span of rendered rows, held as the row order within the file rather than as line numbers on one
   // side, which is what lets one range cover removed and added lines together.
   const sel = { path: null, from: null, to: null };
@@ -2325,7 +2333,8 @@
     try {
       chat.read = JSON.parse(localStorage.getItem("diffdesk.chatRead") || "{}");
       chat.folded = new Set(JSON.parse(localStorage.getItem("diffdesk.chatFolded") || "[]"));
-      for (const key of JSON.parse(localStorage.getItem("diffdesk.saidFolded") || "[]")) saidFolded.add(key);
+      chat.reportsSeen = JSON.parse(localStorage.getItem("diffdesk.reportsSeen") || "{}");
+      for (const seq of JSON.parse(localStorage.getItem("diffdesk.threadsFolded") || "[]")) threadsFolded.add(seq);
       for (const [variable, key] of [["--chat-width", "diffdesk.chatWidth"], ["--files-width", "diffdesk.filesWidth"]]) {
         const width = Number(localStorage.getItem(key));
         if (width) document.documentElement.style.setProperty(variable, `${width}px`);
@@ -2984,8 +2993,8 @@
       })),
     );
     // Drawn again only for what moved, so a thread being read keeps its place between two rounds that heard nothing.
-    const changed = chat.messages.map((m) => `${m.id}:${(m.edits || []).length}:${Boolean(m.deleted)}:${Boolean(m.pinned)}`);
-    const held = [[...chat.folded], chat.editing && chat.editing.id];
+    const changed = chat.messages.map((m) => `${m.id}:${(m.edits || []).length}:${Boolean(m.deleted)}:${Boolean(m.pinned)}:${m.report && m.report.at}`);
+    const held = [[...chat.folded], chat.editing && chat.editing.id, chat.reportsSeen];
     const drawing = JSON.stringify([chat.open, changed, isThread ? null : chat.read, data.viewer, held]);
     if (drawing === chat.drawn) return;
     const atFoot = els.chatrows.scrollHeight - els.chatrows.scrollTop - els.chatrows.clientHeight < 40;
@@ -3025,12 +3034,14 @@
         voiced(line, message.who);
         const who = line.appendChild(document.createElement("div"));
         who.className = "who";
-        // Folded, a message is its first words on the line of its author, with how many answers it holds.
+        // Folded, a message keeps its words and puts its answers out of sight, saying how many they are. One nobody
+        // answered has nothing to fold, its chevron kept as room so that every author stands at the same place.
         const fold = who.appendChild(document.createElement("button"));
         fold.className = "foldmsg";
         fold.type = "button";
+        fold.disabled = !below;
         fold.innerHTML = `<svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 3.8 5 6.3l2.5-2.5"/></svg>`;
-        fold.setAttribute("aria-label", chat.folded.has(message.id) ? "Unfold this message" : "Fold this message");
+        fold.setAttribute("aria-label", chat.folded.has(message.id) ? "Show the answers" : "Hide the answers");
         fold.addEventListener("click", () => {
           if (!chat.folded.delete(message.id)) chat.folded.add(message.id);
           keepChatFolded();
@@ -3047,7 +3058,7 @@
         number.dataset.tip = `Refer to this message as #${message.id}`;
         const gist = who.appendChild(document.createElement("span"));
         gist.className = "gist";
-        gist.dataset.gist = `${message.deleted ? "deleted" : outline(message.text)}${below ? ` \u00b7 ${plural(below, "answer")}` : ""}`;
+        gist.dataset.gist = plural(below, "answer");
         // What a message can be asked to do: answered and pinned by anyone, reworded and deleted by whoever said it and
         // by the reader, who keeps the desk. A touch screen keeps the rest behind a '...' (see '.acts .extra').
         const acts = who.appendChild(document.createElement("span"));
@@ -3372,7 +3383,10 @@
       ...reports.map((message) => {
         const item = Object.assign(document.createElement("button"), { type: "button", className: "reportchip" });
         item.innerHTML = `<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><path d="M3 1.5h5.5L11 4v8.5H3z"/><path d="M8.5 1.5V4H11M5 7h4M5 9.5h4"/></svg>`;
-        item.append(outline(message.text) || reportName(message.report));
+        item.append(Object.assign(document.createElement("span"), { textContent: outline(message.text) || reportName(message.report) }));
+        // A report on disk written again since the reader last opened it, or never opened, carries a dot (see '/chat').
+        const dot = item.appendChild(Object.assign(document.createElement("i"), { className: "dot" }));
+        dot.dataset.on = String(Boolean(message.report.at) && chat.reportsSeen[message.id] !== message.report.at);
         item.dataset.tip = message.report.source;
         item.addEventListener("click", () => openReport(message));
         return item;
@@ -3385,6 +3399,13 @@
   // its own.
   function openReport(message) {
     const { source, key } = message.report;
+    chat.reportsSeen[message.id] = message.report.at;
+    try {
+      localStorage.setItem("diffdesk.reportsSeen", JSON.stringify(chat.reportsSeen));
+    } catch (error) {
+      // What has been opened is the reader's for this page alone.
+    }
+    drawChat();
     const isPage = !key || /\.(?:html?|svg)$/i.test(source);
     const src = key ? `report/${key}/${encodeURIComponent(source.split("/").pop())}` : source;
     // A fresh frame each time: changing the address of one already on the page adds a step to the page's history,
@@ -3518,7 +3539,10 @@
   const VOICES = 8;
   function voiced(node, who) {
     node.className = `${node.className} ${voiceOf(who)}`.trim();
-    if (who && !isReader(who)) node.style.setProperty("--voice", `var(--voice-${Math.max(0, voiceOrder().indexOf(who)) % VOICES})`);
+    // The reader's colour is set as well as everyone else's: a node standing inside somebody else's words, a mention of
+    // the reader in an agent's message, would otherwise take that speaker's.
+    const voice = !who || isReader(who) ? "var(--add-ink)" : `var(--voice-${Math.max(0, voiceOrder().indexOf(who)) % VOICES})`;
+    node.style.setProperty("--voice", voice);
     return node;
   }
   // Who opened a thread: a remark written here by the reader names nobody.
@@ -3561,31 +3585,8 @@
     return more;
   }
 
-  // The remarks and replies the reader folded to their first words, by thread and place in it, kept in this browser.
-  const saidFolded = new Set();
-
-  // The fold of a remark or a reply, and the first words it shows folded, for the words held by `holder`.
-  function foldFor(holder, key, words) {
-    holder.dataset.folded = String(saidFolded.has(key));
-    const fold = document.createElement("button");
-    fold.className = "foldmsg";
-    fold.type = "button";
-    fold.innerHTML = `<svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 3.8 5 6.3l2.5-2.5"/></svg>`;
-    fold.setAttribute("aria-label", "Fold or unfold these words");
-    fold.addEventListener("click", () => {
-      if (!saidFolded.delete(key)) saidFolded.add(key);
-      holder.dataset.folded = String(saidFolded.has(key));
-      try {
-        localStorage.setItem("diffdesk.saidFolded", JSON.stringify([...saidFolded]));
-      } catch (error) {
-        // What is folded is the reader's for this page alone.
-      }
-    });
-    const gist = document.createElement("span");
-    gist.className = "gist";
-    gist.dataset.gist = outline(words);
-    return [fold, gist];
-  }
+  // The threads of the comments whose replies the reader folded away, by number, kept in this browser.
+  const threadsFolded = new Set();
 
   // What a message of the chat, a remark or a reply can be asked to do, drawn the same wherever it is offered.
   const actIcons = {
@@ -5201,7 +5202,10 @@
     box.className = note.pending ? "thread draft" : note.state === "resolved" ? "thread done" : "thread";
     // What the reader has been shown is what has been on their screen: rendering it is not reading it, and a thread
     // built inside a folded file or below the fold would otherwise count as read without ever being seen.
-    if (!note.pending && !settled) {
+    const isFolded = threadsFolded.has(note.seq) && (note.replies || []).length > 0;
+    box.dataset.folded = String(isFolded);
+    // A folded thread shows none of its replies, so being on screen reads none of them.
+    if (!note.pending && !settled && !isFolded) {
       box.dataset.seq = note.seq;
       box.dataset.answers = answers;
       noticed.observe(box);
@@ -5242,7 +5246,27 @@
     }
     const text = document.createElement("span");
     text.className = "said";
-    const [fold, gist] = foldFor(text, `${note.seq}:0`, note.text);
+    // Folded, a thread keeps its remark and puts its replies out of sight, saying how many they are. A remark nobody
+    // answered has nothing to fold, its chevron kept as room so that every thread starts at the same place.
+    const replied = (note.replies || []).length;
+    const fold = document.createElement("button");
+    fold.className = "foldmsg";
+    fold.type = "button";
+    fold.disabled = !replied;
+    fold.innerHTML = `<svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 3.8 5 6.3l2.5-2.5"/></svg>`;
+    fold.setAttribute("aria-label", isFolded ? "Show the replies" : "Hide the replies");
+    fold.addEventListener("click", () => {
+      if (!threadsFolded.delete(note.seq)) threadsFolded.add(note.seq);
+      try {
+        localStorage.setItem("diffdesk.threadsFolded", JSON.stringify([...threadsFolded]));
+      } catch (error) {
+        // What is folded is the reader's for this page alone.
+      }
+      render();
+    });
+    const gist = document.createElement("span");
+    gist.className = "gist";
+    gist.dataset.gist = `${replied} repl${replied === 1 ? "y" : "ies"}`;
     text.append(toolsFor(head, `${note.seq}:0`), fold, who, gist);
     const remark = text.appendChild(spoke());
     // Numbered as the find numbers what a thread says: the remark, then each reply in the order it was written.
@@ -5450,8 +5474,7 @@
         body.append(kind);
       }
       body.prepend(toolsFor(said, `${note.seq}:${index + 1}`));
-      const [fold, gist] = foldFor(body, `${note.seq}:${index + 1}`, answer.text);
-      body.append(fold, from, gist);
+      body.append(from);
       const words = body.appendChild(spoke());
       words.dataset.part = String(index + 1);
       written(words, answer.text);
@@ -7740,8 +7763,11 @@
         const row = document.createElement("tr");
         row.className = kind;
         if (kind === "h") {
-          const cell = document.createElement("td");
-          cell.colSpan = 5;
+          const holder = document.createElement("td");
+          holder.colSpan = 5;
+          // A box of its own to lay out: a table cell laid out as a flex box stops spanning the columns.
+          const cell = holder.appendChild(document.createElement("div"));
+          cell.className = "hunkhead";
           const above = lastNumbered(file.lines.slice(0, order));
           const room = newNo - (above ? above[2] : 0) - 1;
           if (room <= 0) continue;
@@ -7768,7 +7794,7 @@
           label.className = "at";
           label.textContent = text ? ` ${text}` : "";
           cell.append(label);
-          row.append(cell);
+          row.append(holder);
           tbody.append(row);
           continue;
         }
@@ -8565,6 +8591,8 @@
     tray: [() => els.tray.dataset.folded === "false", () => (els.tray.dataset.folded = "true")],
     find: [() => !els.find.hidden, closeFind],
   };
+  // The screens that take the whole page, rather than standing over part of it.
+  const COVERING = ["files", "log", "chat", "settings", "source"];
   let screenOn = null;
   // The screen the top entry of the history stands for, as this page last made it. The history itself says so only
   // once a step back has landed, and the screens are looked at again in the meantime, each look on the same entry:
@@ -8580,10 +8608,13 @@
     els.docksettings.setAttribute("aria-pressed", String(open.includes("settings")));
     if (!isPhone()) {
       screenOn = null;
+      delete document.documentElement.dataset.covered;
       return;
     }
     const fresh = open.find((name) => name !== screenOn) || (open.length ? screenOn : null);
     screenOn = fresh;
+    // A screen taking the whole page holds the page under it still (see 'html[data-covered]').
+    document.documentElement.dataset.covered = String(COVERING.includes(fresh));
     for (const name of open) if (name !== fresh) screens[name][1]();
     // One entry of the history for whichever screen is up, replaced as another takes its place, so a single back
     // returns to the diff.

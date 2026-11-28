@@ -1363,6 +1363,21 @@ def read_chat():
     return [json.loads(line) for line in CHAT.read_text().splitlines() if line.strip()]
 
 
+def timed_reports(messages):
+    """The messages of the chat, each report on disk carrying when its file was last written, in milliseconds, as it
+    stands when asked: an agent writes a report again where it pinned it, and the page marks what changed since."""
+    for message in messages:
+        report = message.get("report") or {}
+        if not report.get("key"):
+            continue
+        try:
+            report["at"] = pathlib.Path(report["source"]).stat().st_mtime_ns // 1_000_000
+        except OSError:
+            # Gone since it was pinned: nothing to mark, and opening it answers with nothing.
+            continue
+    return messages
+
+
 def chat_threads(messages):
     """The threads of the chat by number, each the list of its messages, the one opening it first."""
     threads = {}
@@ -1695,7 +1710,7 @@ class Handler(BaseHTTPRequestHandler):
             "/reviewed": lambda: {"marks": read_ticks()},
             "/progress": lambda: dict(gen_diff_data.COLLECTING),
             "/watching": lambda: {"agents": watching()},
-            "/chat": lambda: {"messages": read_chat()},
+            "/chat": lambda: {"messages": timed_reports(read_chat())},
         }
         # What is answered from the arguments it is asked with.
         asked = {

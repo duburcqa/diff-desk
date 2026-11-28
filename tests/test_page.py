@@ -6,6 +6,7 @@ engine is skipped, never silently dropped from the run.
 
 import base64
 import json
+import os
 import re
 
 import pytest
@@ -3575,6 +3576,15 @@ def test_the_page_reads_on_a_phone(phone):
     assert all(line == shown for _, line, shown in numbers)
     # A file head is a single row, its words left to a menu.
     assert max(box["height"] for box in (head.bounding_box() for head in phone.locator(".filehead").all())) <= 40
+    # Its tick stands clear of the edge, where a scrollbar would cover it.
+    assert 390 - phone.locator(".filehead .seen input").first.bounding_box()["x"] - 18 >= 14
+    # The line a hunk opens in is read before the buttons opening the lines around it, which stand under it.
+    order = phone.evaluate("""() => {
+      const at = [...document.querySelectorAll('tr.h .at')].find((line) => line.textContent.trim());
+      const button = at.closest('tr').querySelector('button.expand');
+      return [at.getBoundingClientRect().bottom, button.getBoundingClientRect().top];
+    }""")
+    assert order[0] <= order[1]
     # The bar scrolls away with the page, and a file head sticks under the dock in its place.
     phone.evaluate("""() => {
       const cards = [...document.querySelectorAll('section.file')];
@@ -3601,10 +3611,10 @@ def test_the_page_reads_on_a_phone(phone):
 def test_a_phone_shows_one_screen_at_a_time_and_goes_back_from_it(phone, desk):
     # The dock stands along the top of the screen, and each screen it opens takes all of the screen under it, down to
     # the tabs along the foot where they stand.
-    width, height = phone.evaluate("() => [document.documentElement.clientWidth, innerHeight]")
     assert phone.locator("#dock").bounding_box()["y"] == 0
 
     def fills(selector):
+        width, height = phone.evaluate("() => [document.documentElement.clientWidth, innerHeight]")
         under = round(phone.locator("#dock").bounding_box()["height"])
         foot = round(phone.locator("#tabbar").bounding_box()["height"])
         return tuple(round(value) for value in phone.locator(selector).bounding_box().values()) == (
@@ -3620,6 +3630,12 @@ def test_a_phone_shows_one_screen_at_a_time_and_goes_back_from_it(phone, desk):
     assert shown() == {"files": False, "chat": False, "log": False}
     phone.tap("#dockfiles")
     assert fills("aside")
+    # The page under it stays still: a wheel over the dock, which scrolls nothing of its own, moves nothing.
+    box = phone.locator("#dock").bounding_box()
+    phone.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    phone.mouse.wheel(0, 600)
+    phone.wait_for_timeout(200)
+    assert phone.evaluate("() => scrollY") == 0
     # The file list is a way through the diff, opened from the diff's own row: the diff stays the view up.
     assert phone.get_attribute("#dockfiles", "aria-pressed") == "true"
     assert phone.get_attribute("#dockdiff", "aria-pressed") == "true"
@@ -5804,12 +5820,15 @@ def test_a_message_of_the_chat_is_answered_folded_reworded_and_taken_back(page, 
     mine = [message for message in desk.get("/chat")["messages"] if message["thread"] == thread][-1]
     assert mine["on"] == opened["id"]
     assert not page.locator("#chatanswering").is_visible()
-    # Folded, a message is its first words and how many answers it holds, its answers out of sight until unfolded.
+    # Folded, a message keeps its words and puts its answers out of sight until unfolded, saying how many they are.
     first.locator(".foldmsg").click()
-    assert first.locator(".gist").evaluate(PSEUDO) == '"Which tolerance? \u00b7 2 answers"'
+    assert first.locator(".gist").evaluate(PSEUDO) == '"2 answers"'
+    assert first.locator(".said").is_visible()
     assert page.locator(".chat .msg").count() == 1
     first.locator(".foldmsg").click()
     page.wait_for_function("() => document.querySelectorAll('.chat .msg').length === 3")
+    # One nobody answered has nothing to fold.
+    assert not page.locator(".chat .msg").last.locator(".foldmsg").is_visible()
     # Reworded and deleted by the reader, who keeps the desk, whoever said it: an agent's message offers both as well.
     assert first.locator(".acts .edit").count() == first.locator(".acts .drop").count() == 1
     own = page.locator(f".chat .msg[data-id='{mine['id']}']")
@@ -5835,7 +5854,8 @@ def test_the_chat_pins_messages_over_a_thread_and_opens_its_reports_in_place(pag
     report.write_text(f'<h1 id="said">Benchmark</h1>{ran}')
     opened = desk.post("/chat", {"title": "Read this first", "text": "the jitter is the warm start"}, agent=AGENT)
     thread = opened["thread"]
-    desk.post("/chat", {"thread": thread, "text": "Benchmark", "report": str(report)}, agent=AGENT)
+    named = "Benchmark of the contact jitter over every tolerance, with the spectra and the stored checks"
+    desk.post("/chat", {"thread": thread, "text": named, "report": str(report)}, agent=AGENT)
     page.evaluate("() => loadNotes()")
     page.locator("#chatopen").click()
     page.locator(f".chat .topic[data-thread='{thread}']").click()
@@ -5849,7 +5869,12 @@ def test_the_chat_pins_messages_over_a_thread_and_opens_its_reports_in_place(pag
     assert page.inner_text("#chatpins .pinned") == f"{AGENT}: the jitter is the warm start"
     # A report stands under the thread, and opens in place of the chat, filling it, its page in a sandbox.
     chip = page.locator("#chatreports .reportchip")
-    assert chip.inner_text() == "Benchmark"
+    assert chip.locator("span").inner_text() == named
+    # Named by the message pinning it, cut short to leave the thread its room.
+    assert chip.bounding_box()["width"] <= 260
+    # Never opened, it carries a dot, which opening it takes away.
+    lit = "(dot) => getComputedStyle(dot).opacity"
+    assert chip.locator(".dot").evaluate(lit) == "1"
     chip.click()
     frame = page.locator("#chatviewframe")
     # Within the chat's border.
@@ -5863,32 +5888,40 @@ def test_the_chat_pins_messages_over_a_thread_and_opens_its_reports_in_place(pag
     page.locator("#chatviewclose").click()
     assert not page.locator("#chatviewer").is_visible()
     assert first.is_visible()
+    assert chip.locator(".dot").evaluate(lit) == "0"
+    # Written again by its agent, it carries the dot again.
+    os.utime(report, ns=(0, report.stat().st_mtime_ns + 5_000_000_000))
+    page.evaluate("() => loadNotes()")
+    page.wait_for_function(f"() => ({lit})(document.querySelector('#chatreports .reportchip .dot')) === '1'")
 
 
-def test_a_remark_or_a_reply_folds_to_its_first_words(page, desk):
+def test_a_thread_of_the_comments_folds_its_replies_away(page, desk):
     branch = page.evaluate("() => data.branches[0].ref")
-    saying = f"folded away, number {len(desk.get('/comments')) + 1}\n\nwith more said under it"
-    made = desk.post(
-        "/comments", [{"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new", "text": saying}]
-    )["seq"]
+    saying = f"folded away, number {len(desk.get('/comments')) + 1}"
+    on = {"branch": branch, "path": "sample.py", "line": FIRST_EDIT, "side": "new"}
+    made, alone = desk.post("/comments", [{**on, "text": saying}, {**on, "text": f"{saying}, unanswered"}])["seqs"]
     desk.post("/reply", {"seq": made, "text": "answered at length\n\nover two paragraphs"}, agent=AGENT)
     try:
         page.reload(wait_until="load")
         page.wait_for_selector(f"#note-{made} .line.reply")
         head = page.locator(f"#note-{made} .thread > .line").first.locator(".said")
-        reply = page.locator(f"#note-{made} .line.reply").first.locator(".said")
-        # Each folds alone, to the line of its author and its first words, and is kept folded across a reload.
-        reply.locator(".foldmsg").click()
-        assert not reply.locator(".text").is_visible()
-        assert reply.locator(".gist").evaluate(PSEUDO) == '"answered at length over two paragraphs"'
+        reply = page.locator(f"#note-{made} .line.reply").first
+        # Folded, a thread keeps its remark and puts its replies out of sight, saying how many they are, and is kept
+        # folded across a reload.
+        head.locator(":scope > .foldmsg").click()
+        assert not reply.is_visible()
         assert head.locator(".text").is_visible()
+        assert head.locator(".gist").evaluate(PSEUDO) == '"1 reply"'
         page.reload(wait_until="load")
-        page.wait_for_selector(f"#note-{made} .line.reply")
-        assert not page.locator(f"#note-{made} .line.reply .said .text").first.is_visible()
-        page.locator(f"#note-{made} .line.reply .said .foldmsg").first.click()
-        assert page.locator(f"#note-{made} .line.reply .said .text").first.is_visible()
+        page.wait_for_selector(f"#note-{made} .line.reply", state="attached")
+        assert not reply.is_visible()
+        head.locator(":scope > .foldmsg").click()
+        assert reply.is_visible()
+        # A remark nobody answered has nothing to fold.
+        assert not page.locator(f"#note-{alone} .said > .foldmsg").is_visible()
     finally:
         desk.post("/drop", {"seq": made})
+        desk.post("/drop", {"seq": alone})
 
 
 def test_a_message_of_the_chat_carries_files_and_shows_its_links(page, desk, site, shot, tmp_path):
@@ -5896,7 +5929,7 @@ def test_a_message_of_the_chat_carries_files_and_shows_its_links(page, desk, sit
     plot.write_bytes(shot)
     title = f"Carried, number {len(desk.get('/chat')['messages']) + 1}"
     thread = desk.post("/chat", {"title": title, "text": "the run is done"}, agent=AGENT)["thread"]
-    said = f"@{AGENT} the benchmark is at {site}/page.html and the plot at {plot}."
+    said = f"@{AGENT} @you the benchmark is at {site}/page.html and the plot at {plot}."
     desk.post("/chat", {"thread": thread, "text": said}, agent="astra")
     page.evaluate("() => loadNotes()")
     page.locator("#chatopen").click()
@@ -5904,9 +5937,11 @@ def test_a_message_of_the_chat_carries_files_and_shows_its_links(page, desk, sit
     page.wait_for_selector(".chat .card .title")
 
     # A mention of an author who has said something here is read in their colour.
-    colour = "(node) => getComputedStyle(node).color"
+    ink = "(node) => getComputedStyle(node).color"
     mention = page.locator(".chat .msg .mention", has_text=f"@{AGENT}")
-    assert mention.evaluate(colour) == page.locator(".chat .msg .who").first.evaluate(colour)
+    assert mention.evaluate(ink) == page.locator(".chat .msg .who").first.evaluate(ink)
+    # The reader is read in their own colour too, whoever's message names them.
+    assert page.locator(".chat .msg .mention", has_text="@you").evaluate(ink) == colour(page, "--add-ink")
     # Its links are shown under it: a page by what it says of itself, an image on disk as the image.
     assert page.locator(".chat .card .title").inner_text() == "Standing-wave benchmark"
     shown = "(img) => img.complete && img.naturalWidth"
