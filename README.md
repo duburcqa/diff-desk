@@ -119,8 +119,8 @@ Tailscale serves the running desk over HTTPS at this machine's name on your tail
 On a phone, a touch screen narrow one way or the other (upright or on its side), the page is laid out for a thumb and keeps every pixel it can for the code:
 
 - A strip of icons is held along the top of the screen: the diff, the file list, the comments and the chat, then the previous file, Reviewed for the file on screen, the next file, and `...` for everything else (go to file, find, the comment steps, folding reviewed files, refreshing, branches, settings). The share of files reviewed is drawn along its edge.
-- Each of the file list, the comments and the chat takes the screen under the strip, one at a time, and the phone's back gesture closes it.
-- Every file gone to (picked, stepped to, reached from a comment or a link) gets a tab under the strip, which stays in view over the chat and the comments: a tap is back to that file.
+- Each of the file list, the comments and the chat takes the screen under the strip, one at a time, and the phone's back gesture closes it. Its head takes the right half of the strip, where the steps through the files stood, and a chat thread is left for the list of threads the same way: back, a swipe to the right, or the chat's tab pressed again.
+- Every file gone to (picked, stepped to, reached from a comment or a link) gets a tab under the strip: a tap is back to that file.
 - The diff runs from edge to edge with one column of line numbers, and a long line wraps under its own indentation. A file head is one row, its path and its tick, with the rest behind its `...`. A remark or a reply shows its words alone, its buttons behind its own `...`.
 - A swipe across the code turns to the next file or back to the one before, naming it at the edge while the finger is down. A swipe across the file list, the comments or the chat closes it.
 - Tapping a line number picks the line, tapping another line of the same file stretches the pick to it, and the bar that shows up along the foot of the screen opens the comment box on the lines picked.
