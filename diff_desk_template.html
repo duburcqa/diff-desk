@@ -1734,7 +1734,7 @@
     .chat .head strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
     .chat .present { flex: 0 1 auto; min-width: 0; margin: 0; padding: 0; border: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
     .chat .present[data-none="true"] { display: none; }
-    #chatnew { display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; background: transparent; color: var(--muted); }
+    #chatnew { display: grid; place-items: center; margin-left: auto; width: 36px; height: 36px; padding: 0; border: 0; background: transparent; color: var(--muted); }
     #chatnew svg { display: block; width: 18px; height: 18px; }
     #chatnew .word { display: none; }
     /* A screen up (the file list, the comments, the chat) has the steps through the files and the file tabs no use: they
@@ -1744,6 +1744,10 @@
       visibility: hidden;
     }
     body:is(.chat-open, :not(.hide-files), :has(#log[data-open="true"])) #filetabs { display: none; }
+    body:not(.chat-open) #chattabs, #chattitle { display: none; }
+    .ftab.threadtab .name { display: flex; align-items: center; gap: 5px; font-family: var(--sans); font-size: 12.5px; }
+    .ftab.threadtab .name svg { flex: none; width: 13px; height: 13px; color: var(--accent); }
+    .chat .head .present { flex: 1 1 auto; }
     aside, body.chat-open .chat, .log[data-open="true"] { z-index: 48; }
     body.chat-open .chat .head, .log[data-open="true"] > .head, aside .asidehead {
       position: fixed;
@@ -1835,6 +1839,7 @@
   <button id="dockmore" type="button" aria-label="More" data-tip="More"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><circle cx="4.5" cy="10" r="1.6"/><circle cx="10" cy="10" r="1.6"/><circle cx="15.5" cy="10" r="1.6"/></svg></button>
   </div>
   <div class="filetabs" id="filetabs" hidden></div>
+  <div class="filetabs" id="chattabs" hidden></div>
 </nav>
 <div class="sheet" id="sheet" hidden>
   <div class="title" id="sheettitle"></div>
@@ -2064,7 +2069,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "goback", "foldreviewed", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "loading", "goto", "veil", "palette", "pq", "picks", "find", "fgrip", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "fthreads", "toast", "toastwhere", "toastsaid", "toastmark", "logdot", "chatopen", "chatdot", "chat", "chatgrip", "chatback", "chattitle", "chatcopy", "chatnew", "chatclose", "chatwho", "chatrows", "chatsay", "chatname", "chattext", "chatsend", "chatresult", "filesgrip", "railfold", "logmove", "logsize", "fchat", "chatbuttons", "dock", "dockfiles", "dockprev", "dockdone", "docknext", "docklog", "dockchat", "docklogdot", "dockchatdot", "selbar", "selwhat", "selcomment", "selclear", "turn", "dockmore", "sheet", "sheettitle", "sheetitems", "dockdiff", "filetabs"]) {
+  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "goback", "foldreviewed", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "loading", "goto", "veil", "palette", "pq", "picks", "find", "fgrip", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "fthreads", "toast", "toastwhere", "toastsaid", "toastmark", "logdot", "chatopen", "chatdot", "chat", "chatgrip", "chatback", "chattitle", "chatcopy", "chatnew", "chatclose", "chatwho", "chatrows", "chatsay", "chatname", "chattext", "chatsend", "chatresult", "filesgrip", "railfold", "logmove", "logsize", "fchat", "chatbuttons", "dock", "dockfiles", "dockprev", "dockdone", "docknext", "docklog", "dockchat", "docklogdot", "dockchatdot", "selbar", "selwhat", "selcomment", "selclear", "turn", "dockmore", "sheet", "sheettitle", "sheetitems", "dockdiff", "filetabs", "chattabs"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -2762,6 +2767,10 @@
   }
 
   // The threads of the chat by number, each the list of its messages, the one opening it first.
+  // The threads of the chat the reader opened, in the order first opened, named as tabs on a phone once there are two
+  // to go between (see drawChat).
+  const chatTabs = [];
+
   function chatThreads() {
     const threads = new Map();
     for (const message of chat.messages) {
@@ -2813,6 +2822,24 @@
     els.chatnew.hidden = isNew || isThread;
     els.chatname.hidden = !isNew;
     els.chattitle.textContent = isThread ? threads.get(chat.open)[0].title || "Untitled" : isNew ? "New thread" : "Chat";
+    const tabs = chatTabs.filter((id) => threads.has(id));
+    els.chattabs.hidden = tabs.length < 2;
+    drawTabStrip(
+      els.chattabs,
+      tabs.map((id) => ({
+        key: String(id),
+        label: threads.get(id)[0].title || "Untitled",
+        isCurrent: id === chat.open,
+        isPassing: false,
+        isChat: true,
+        open: () => openChat(id),
+        shut: () => {
+          chatTabs.splice(chatTabs.indexOf(id), 1);
+          if (chat.open === id) openChat(null);
+          else drawChat();
+        },
+      })),
+    );
     // Drawn again only for what moved, so a thread being read keeps its place between two rounds that heard nothing.
     const drawing = JSON.stringify([chat.open, chat.messages.length, isThread ? null : chat.read, data.viewer]);
     if (drawing === chat.drawn) return;
@@ -2993,6 +3020,7 @@
       if (where !== null && !isInThread) history.pushState({ screen: "chat", thread: true }, "");
     }
     chat.open = where;
+    if (typeof where === "number" && !chatTabs.includes(where)) chatTabs.push(where);
     els.chatresult.textContent = "";
     drawChat();
     // A phone brings its keyboard up over half the screen with the caret, so a thread opened there is read first.
@@ -7541,36 +7569,58 @@
     const here = file ? file.path : null;
     const paths = here && !fileTabs.includes(here) ? [...fileTabs, here] : fileTabs;
     els.filetabs.hidden = !fileTabs.length;
-    els.filetabs.replaceChildren(
-      ...paths.map((path) => {
-        const tab = document.createElement("div");
-        tab.className = fileTabs.includes(path) ? "ftab" : "ftab passing";
-        tab.dataset.path = path;
-        tab.dataset.current = String(path === here);
-        const name = tab.appendChild(document.createElement("button"));
-        name.className = "name";
-        name.type = "button";
-        name.textContent = fileName(path);
-        name.addEventListener("click", () => {
+    drawTabStrip(
+      els.filetabs,
+      paths.map((path) => ({
+        key: path,
+        label: fileName(path),
+        isCurrent: path === here,
+        isPassing: !fileTabs.includes(path),
+        isChat: false,
+        open: () => {
           toDiff();
           const card = document.querySelector(`section.file[data-path="${CSS.escape(path)}"]`);
           if (card) jump(Number(card.id.slice(1)));
-        });
-        const shut = tab.appendChild(document.createElement("button"));
-        shut.className = "shut";
-        shut.type = "button";
-        shut.textContent = "\u00d7";
-        shut.setAttribute("aria-label", `Close the tab of ${path}`);
-        shut.addEventListener("click", () => {
+        },
+        shut: () => {
           if (fileTabs.includes(path)) fileTabs.splice(fileTabs.indexOf(path), 1);
           drawTabs();
-        });
+        },
+      })),
+    );
+  }
+
+  const CHAT_BUBBLE =
+    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg>';
+
+  // A row of tabs on a phone, each named by its key and opened by its label, closed by its cross, the current one
+  // scrolled into view.
+  function drawTabStrip(strip, tabs) {
+    strip.replaceChildren(
+      ...tabs.map(({ key, label, isCurrent, isPassing, isChat, open, shut }) => {
+        const tab = document.createElement("div");
+        tab.className = `ftab${isPassing ? " passing" : ""}${isChat ? " threadtab" : ""}`;
+        tab.dataset.key = key;
+        tab.dataset.current = String(isCurrent);
+        const name = tab.appendChild(document.createElement("button"));
+        name.className = "name";
+        name.type = "button";
+        // A thread of the chat reads as talk rather than as a file: a bubble before words in the page's own letters.
+        if (isChat) name.innerHTML = CHAT_BUBBLE;
+        name.append(label);
+        name.addEventListener("click", open);
+        const cross = tab.appendChild(document.createElement("button"));
+        cross.className = "shut";
+        cross.type = "button";
+        cross.textContent = "\u00d7";
+        cross.setAttribute("aria-label", `Close the tab of ${label}`);
+        cross.addEventListener("click", shut);
         return tab;
       }),
     );
-    const current = els.filetabs.querySelector('.ftab[data-current="true"]');
+    const current = strip.querySelector('.ftab[data-current="true"]');
     if (!current) return;
-    const strip = els.filetabs;
     if (current.offsetLeft < strip.scrollLeft) strip.scrollLeft = current.offsetLeft;
     else if (current.offsetLeft + current.offsetWidth > strip.scrollLeft + strip.clientWidth) {
       strip.scrollLeft = current.offsetLeft + current.offsetWidth - strip.clientWidth;

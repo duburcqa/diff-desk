@@ -3668,16 +3668,29 @@ def test_a_phone_shows_one_screen_at_a_time_and_goes_back_from_it(phone, desk):
 
 
 def test_a_phone_leaves_a_chat_thread_the_way_it_leaves_a_screen(phone, desk):
-    thread = desk.post("/chat", {"title": "Stepped into", "text": "a word"}, agent=AGENT)["thread"]
+    thread, other = (
+        desk.post("/chat", {"title": title, "text": "a word"}, agent=AGENT)["thread"]
+        for title in ("Stepped into", "Stepped across")
+    )
     phone.evaluate("() => loadNotes()")
     phone.tap("#dockchat")
-    # The head of the chat stands in the dock's row, its title and a new thread there, no button back to the list.
+    # The head of the chat stands in the dock's row, a new thread there, and neither a title nor a button back to the
+    # list: a thread is named by a tab once there are two of them to go between, a bubble telling it from a file.
     topic = phone.locator(f".chat .topic[data-thread='{thread}']")
     topic.tap()
     phone.wait_for_selector(".chat .msg")
-    assert phone.inner_text("#chattitle") == "Stepped into"
-    assert phone.locator("#chattitle").bounding_box()["y"] < phone.locator("#dock").bounding_box()["height"]
+    assert phone.locator("#chatnew").bounding_box()["y"] < phone.locator("#dock").bounding_box()["height"]
+    assert not phone.locator("#chattitle").is_visible()
     assert not phone.locator("#chatback").is_visible()
+    assert not phone.locator("#chattabs").is_visible()
+    phone.go_back()
+    phone.locator(f".chat .topic[data-thread='{other}']").tap()
+    phone.wait_for_function("(other) => chat.open === other", arg=other)
+    tabs = phone.locator("#chattabs .ftab.threadtab")
+    assert tabs.locator(".name").all_inner_texts() == ["Stepped into", "Stepped across"]
+    assert tabs.locator("svg").count() == 2
+    tabs.first.locator(".name").tap()
+    phone.wait_for_function("(thread) => chat.open === thread", arg=thread)
     # Out of a thread, back to the list, by the phone's back gesture, and one more step back is the diff.
     phone.go_back()
     topic.wait_for()
@@ -3724,14 +3737,14 @@ def test_a_phone_steps_through_the_files_from_its_dock_and_by_swiping(phone):
     phone.wait_for_function("() => state.current === 0")
     # Every file gone to has a tab, a tap away: the two stepped between, back and forth.
     names = [phone.evaluate(f"() => inTreeOrder(view().files)[{index}].path") for index in (0, 1)]
-    assert phone.locator("#filetabs .ftab").evaluate_all("(tabs) => tabs.map((tab) => tab.dataset.path)") == names[::-1]
-    phone.locator(f'#filetabs .ftab[data-path="{names[1]}"] .name').tap()
+    assert phone.locator("#filetabs .ftab").evaluate_all("(tabs) => tabs.map((tab) => tab.dataset.key)") == names[::-1]
+    phone.locator(f'#filetabs .ftab[data-key="{names[1]}"] .name').tap()
     phone.wait_for_function("() => state.current === 1")
-    phone.locator(f'#filetabs .ftab[data-path="{names[0]}"] .name').tap()
+    phone.locator(f'#filetabs .ftab[data-key="{names[0]}"] .name').tap()
     phone.wait_for_function("() => state.current === 0")
     # Closed, a tab goes, the file on screen staying as one passed through.
-    phone.locator(f'#filetabs .ftab[data-path="{names[1]}"] .shut').tap()
-    assert phone.locator(f'#filetabs .ftab[data-path="{names[1]}"]').count() == 0
+    phone.locator(f'#filetabs .ftab[data-key="{names[1]}"] .shut').tap()
+    assert phone.locator(f'#filetabs .ftab[data-key="{names[1]}"]').count() == 0
 
 
 def test_a_phone_picks_lines_by_tapping_their_numbers_and_comments_on_them(phone):
