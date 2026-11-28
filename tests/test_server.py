@@ -2141,6 +2141,48 @@ def test_a_message_of_the_chat_answers_another_and_is_reworded_or_taken_back_by_
     assert made not in {message["id"] for message in desk.get("/chat")["messages"]}
 
 
+def test_the_chat_pins_messages_over_a_thread_and_reports_under_it(desk, tmp_path):
+    opened = desk.post("/chat", {"title": "Pinned and reported", "text": "what to read first"}, agent=AGENT)
+    thread = opened["thread"]
+    # A message is pinned over its thread by whoever reads it, and the pin comes off the same way.
+    assert desk.post("/chat/pin", {"id": opened["id"], "pinned": True})["ok"]
+    said = {message["id"]: message for message in desk.get("/chat")["messages"]}
+    assert said[opened["id"]]["pinned"] is True
+    assert "unpinned" in desk.cli("say", "--unpin", str(opened["id"])).communicate(timeout=60)[0]
+    assert {message["id"]: message for message in desk.get("/chat")["messages"]}[opened["id"]]["pinned"] is False
+    # A report on disk is pinned under the thread, its folder served under a key of its own, to anyone holding it, and
+    # nothing outside that folder.
+    folder = tmp_path / "report"
+    folder.mkdir()
+    (folder / "index.html").write_text('<img src="plot.svg">')
+    (folder / "plot.svg").write_text("<svg/>")
+    (tmp_path / "secret.txt").write_text("not the report's")
+    told = desk.cli("say", str(thread), "Benchmark", "--report", str(folder / "index.html")).communicate(timeout=60)[0]
+    made = int(told.split("[")[1].split("]")[0])
+    report = {message["id"]: message for message in desk.get("/chat")["messages"]}[made]
+    assert (report["pinned"], report["report"]["source"]) == (True, str(folder / "index.html"))
+    key = report["report"]["key"]
+    with urllib.request.urlopen(f"{desk.url}/report/{key}/index.html", timeout=30) as answer:
+        assert answer.read() == b'<img src="plot.svg">'
+        # Run in a sandbox wherever it is opened, so its scripts never act as the reader on this desk.
+        assert answer.headers["Content-Security-Policy"].startswith("sandbox")
+    with urllib.request.urlopen(f"{desk.url}/report/{key}/plot.svg", timeout=30) as answer:
+        assert answer.headers.get_content_type() == "image/svg+xml"
+    for wrong in (f"{key}/..%2Fsecret.txt", f"{key}/missing.png", "not-a-key/index.html"):
+        with pytest.raises(urllib.error.HTTPError) as answer:
+            urllib.request.urlopen(f"{desk.url}/report/{wrong}", timeout=30)
+        assert answer.value.code == 404
+    # A report on the web is kept as its address, and one named by anything else is refused.
+    web = desk.post(
+        "/chat", {"thread": thread, "text": "Dashboard", "report": "https://example.com/run/7"}, agent=AGENT
+    )
+    assert {message["id"]: message for message in desk.get("/chat")["messages"]}[web["id"]]["report"] == {
+        "source": "https://example.com/run/7"
+    }
+    refused = desk.post("/chat", {"thread": thread, "text": "lost", "report": "relative/report.html"}, agent=AGENT)
+    assert refused["ok"] is False
+
+
 def test_a_link_of_the_chat_is_shown_by_what_it_says_of_itself(desk, site, shot, tmp_path):
     def ask(route, as_reader=True):
         named = {"Cookie": desk.as_reader()} if as_reader else {"X-Desk-Agent": AGENT}

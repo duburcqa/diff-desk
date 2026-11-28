@@ -29,8 +29,11 @@ Endpoints, all on 127.0.0.1 so nothing is exposed off the machine:
   POST /chat/drop             {id} - take back a message of the chat, by whoever said it: gone, or a line saying so
                               where answers stand under it
   GET  /chat/export?thread=N  one thread of the chat as plain text, to be kept or read back
-  POST /chat                  {thread, title, text, images, on} - say something in a thread, answering the message
-                              numbered `on` of that thread where it names one, or open a thread with a title
+  POST /chat                  {thread, title, text, images, on, report} - say something in a thread, answering the
+                              message numbered `on` of that thread where it names one, or open a thread with a title;
+                              `report` (an absolute path on disk or a web address) pins a report under the thread
+  POST /chat/pin              {id, pinned} - pin a message of the chat over its thread, or take the pin off
+  GET  /report/<key>/<file>   the files of a report pinned in the chat, read from the folder it stands in
   POST /comments              {comments: [...], github: bool} - a batch as submitted, or a bare list of comments
   POST /bind                  {seq: [...], github} - mark comments as bound for the pull request, or keep them local
   POST /edit                  {seq, text, reply} - rewrite a comment, or the reply at that place in its thread,
@@ -112,6 +115,7 @@ import hashlib
 import hmac
 import http.cookies
 import json
+import mimetypes
 import os
 import pathlib
 import re
@@ -130,7 +134,7 @@ import urllib.request
 from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import NamedTuple
-from urllib.parse import parse_qs, quote, urljoin, urlparse
+from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse
 
 import gen_diff_data
 import semantic
@@ -193,6 +197,7 @@ AUTHORED = (
     "/chat",
     "/chat/edit",
     "/chat/drop",
+    "/chat/pin",
 )
 # Who an author recorded in the log can be, apart from an agent and the pull request's own authors: the reader, the
 # pull request as a whole for what a sync brings in, and the desk itself for its own bookkeeping, which wakes nobody.
@@ -1465,6 +1470,19 @@ def page_card(url):
     return card
 
 
+def pinned_report(source):
+    """What a report pinned in the chat is kept as, and why it is refused where it is.
+
+    On disk, its folder is served under a key nobody can guess, which is what its own pictures and scripts are asked for
+    by (see '_report'). On the web, the page opens the address itself.
+    """
+    if source.startswith(("http://", "https://")):
+        return {"source": source}, ""
+    if not pathlib.Path(source).is_absolute() or not pathlib.Path(source).is_file():
+        return None, f"no report at {source}: name a file by its absolute path, or a web address"
+    return {"source": source, "key": secrets.token_urlsafe(16)}, ""
+
+
 def chat_export(thread):
     """One thread of the chat as plain markdown: its title, then every message under who said it, when, and the number
     it is referred to by."""
@@ -1474,6 +1492,10 @@ def chat_export(thread):
         answering = f", answering #{message['on']}" if message.get("on") else ""
         heading = f"## {spoken_name(message['who'])}, {message['at']}, #{message['id']}{answering}"
         out += ["", heading, "", "(taken back)" if message.get("deleted") else message["text"].rstrip()]
+        if message.get("report"):
+            out += ["", f"Report{' (pinned)' if message.get('pinned') else ''}: {message['report']['source']}"]
+        elif message.get("pinned"):
+            out += ["", "(pinned)"]
         out += [f"[{image['name']}]({MEDIA / image['file']})" for image in message.get("images") or ()]
     return "\n".join(out) + "\n"
 
@@ -1683,6 +1705,15 @@ class Handler(BaseHTTPRequestHandler):
             "/unfurl": self._unfurl,
             "/file": self._file,
         }
+        # What is answered from the rest of its path: a file a comment carries, a file of a report pinned in the chat.
+        prefixed = next(
+            (
+                (prefix, serving)
+                for prefix, serving in (("/media/", self._kept), ("/report/", self._report))
+                if path.startswith(prefix)
+            ),
+            None,
+        )
         if path in ("", "/index.html"):
             print(f"PAGE served to {self.headers.get('User-Agent', '?')}", flush=True)
             # Sent as it was last built, at once: collecting a long branch takes seconds, and a page held back that
@@ -1729,8 +1760,8 @@ class Handler(BaseHTTPRequestHandler):
             )
         elif path in asked:
             asked[path](query)
-        elif path.startswith("/media/"):
-            self._kept(path[len("/media/") :])
+        elif prefixed:
+            prefixed[1](route.path[len(prefixed[0]) :])
         elif path == "/favicon.ico":
             self._send(204)
         elif path == "/comments":
@@ -1936,6 +1967,12 @@ class Handler(BaseHTTPRequestHandler):
                 said["title"] = title
             if order.get("on") is not None:
                 said["on"] = order["on"]
+            if order.get("report"):
+                said["report"], refused = pinned_report(str(order["report"]))
+                if refused:
+                    self._json({"ok": False, "error": refused})
+                    return
+                said["pinned"] = True
             if order.get("images"):
                 said["images"] = carried(order)
             messages.append(said)
@@ -1975,6 +2012,46 @@ class Handler(BaseHTTPRequestHandler):
 
         refused = self._chat_change(order, reword)
         self._json({"ok": not refused, **({"error": refused} if refused else {})})
+
+    def _chat_pin(self):
+        """Pin a message of the chat over its thread, or take the pin off, which is anybody's to do: a pin says what the
+        thread is to be read for, and whoever reads it may say so."""
+        order = self._body()
+        with CHANGING:
+            messages = read_chat()
+            found = next((message for message in messages if message["id"] == order.get("id")), None)
+            if found is None or found.get("deleted"):
+                self._json({"ok": False, "error": f"no message #{order.get('id')} to pin"})
+                return
+            found["pinned"] = bool(order.get("pinned"))
+            gen_diff_data.write_whole(CHAT, "".join(json.dumps(message) + "\n" for message in messages))
+        told()
+        self._json({"ok": True})
+
+    def _report(self, rest):
+        """A file of a report pinned in the chat: the report itself, or anything in the folder it stands in, which is
+        what the report reads its pictures and scripts from.
+
+        Named by the key the pin was given rather than by the reader's cookie: the page shows a report in a frame of an
+        origin of its own, which keeps the report's scripts away from the desk and its cookie away from them. A page
+        of the report runs under that same sandbox wherever it is opened.
+        """
+        key, _, inside = rest.partition("/")
+        pinned = next(
+            (message["report"] for message in read_chat() if (message.get("report") or {}).get("key") == key), None
+        )
+        if not key or pinned is None:
+            self._send(404)
+            return
+        source = pathlib.Path(pinned["source"])
+        folder = source.parent.resolve()
+        wanted = (folder / unquote(inside)).resolve() if inside else source.resolve()
+        if not wanted.is_file() or not wanted.is_relative_to(folder):
+            self._send(404)
+            return
+        kind = mimetypes.guess_type(wanted.name)[0] or "application/octet-stream"
+        sandbox = ("Content-Security-Policy", "sandbox allow-scripts allow-popups allow-forms")
+        self._send(200, wanted.read_bytes(), kind, headers=(sandbox,))
 
     def _chat_drop(self):
         """Take back a message of the chat. One that opens its thread, or that answers stand under, leaves a line saying
@@ -2138,6 +2215,7 @@ class Handler(BaseHTTPRequestHandler):
             "/chat": self._chat,
             "/chat/edit": self._chat_edit,
             "/chat/drop": self._chat_drop,
+            "/chat/pin": self._chat_pin,
             "/stop": self._stop,
         }
         serving = routes.get(path)

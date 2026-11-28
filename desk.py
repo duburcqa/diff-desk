@@ -27,6 +27,8 @@ desk.py chat 3                                       one thread of the chat, as 
 desk.py say 3 "..."                                  say something in a thread of the chat
 desk.py say 3 "..." --on 12                          answer message #12 of the thread, read under it
 desk.py say --edit 12 "..."  /  say --drop 12        reword or take back message #12, said by you
+desk.py say 3 "Benchmark" --report out/report.html   pin a report under the thread, opened in place in the chat
+desk.py say --pin 12  /  say --unpin 12              pin message #12 over its thread, or take the pin off
 desk.py say --new "title" "..."                      open a thread of the chat
 desk.py say 3 "..." --attach plot.png                say it with an image or a video; name any other file by its path
 """
@@ -511,21 +513,32 @@ def chat(args):
         print(f"  [{number}] {thread[0]['title']} - {len(thread)} message(s), last by {who} {last['at']}")
 
 
+def change_message(args):
+    """Reword, take back, pin or unpin a message of the chat, as 'say' is asked to."""
+    if args.pin is not None or args.unpin is not None:
+        number = args.pin or args.unpin
+        route, order, done = (
+            "/chat/pin",
+            {"id": number, "pinned": args.pin is not None},
+            "pinned" if args.pin else "unpinned",
+        )
+    elif args.edit is not None:
+        route, order, done = "/chat/edit", {"id": args.edit, "text": " ".join(args.words)}, "reworded"
+    else:
+        route, order, done = "/chat/drop", {"id": args.drop}, "took back"
+    outcome = ask(route, order)
+    if outcome is None:
+        sys.exit("nothing is serving")
+    if not outcome.get("ok"):
+        sys.exit(outcome.get("error", "the change was refused"))
+    print(f"{done} message #{order['id']}")
+
+
 def say(args):
     """Say something in a thread of the chat, open a new one under a title, or reword or take back a message said."""
     words = list(args.words)
-    if args.edit is not None or args.drop is not None:
-        route, order = (
-            ("/chat/edit", {"id": args.edit, "text": " ".join(words)})
-            if args.edit
-            else ("/chat/drop", {"id": args.drop})
-        )
-        outcome = ask(route, order)
-        if outcome is None:
-            sys.exit("nothing is serving")
-        if not outcome.get("ok"):
-            sys.exit(outcome.get("error", "the change was refused"))
-        print(f"{'reworded' if args.edit else 'took back'} message #{order['id']}")
+    if any(number is not None for number in (args.edit, args.drop, args.pin, args.unpin)):
+        change_message(args)
         return
     if not words:
         sys.exit("say what: the thread's number then the message, or the message alone with --new")
@@ -536,6 +549,9 @@ def say(args):
         order["thread"] = int(words.pop(0))
     if args.on is not None:
         order["on"] = args.on
+    if args.report is not None:
+        is_web = args.report.startswith(("http://", "https://"))
+        order["report"] = args.report if is_web else str(pathlib.Path(args.report).resolve())
     order["text"] = " ".join(words)
     # Each file is kept on the desk first, as a box of the page keeps what is dropped into it, and the message then
     # carries what the desk calls it.
@@ -861,6 +877,13 @@ job.add_argument("--new", metavar="TITLE", help="open a new thread under this ti
 job.add_argument("--on", type=int, metavar="N", help="answer message #N of the thread, read under it")
 job.add_argument("--edit", type=int, metavar="N", help="reword message #N, said by you, with the words given")
 job.add_argument("--drop", type=int, metavar="N", help="take back message #N, said by you")
+job.add_argument(
+    "--report",
+    metavar="SOURCE",
+    help="pin a report under the thread: a file (an HTML page, a PDF, a plot) or a web address",
+)
+job.add_argument("--pin", type=int, metavar="N", help="pin message #N over its thread")
+job.add_argument("--unpin", type=int, metavar="N", help="take the pin off message #N")
 job.add_argument(
     "--attach", action="append", metavar="PATH", help="an image or a video the message carries; repeatable"
 )
