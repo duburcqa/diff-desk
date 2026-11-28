@@ -8259,6 +8259,10 @@
     find: [() => !els.find.hidden, closeFind],
   };
   let screenOn = null;
+  // The screen the top entry of the history stands for, as this page last made it. The history itself says so only
+  // once a step back has landed, and the screens are looked at again in the meantime, each look on the same entry:
+  // read off the history, two looks would each step back and the second would leave the page.
+  let screenHeld = null;
   function screensMoved() {
     const open = Object.keys(screens).filter((name) => screens[name][0]());
     for (const [button, name] of [[els.dockfiles, "files"], [els.docklog, "log"], [els.dockchat, "chat"]]) {
@@ -8276,12 +8280,15 @@
     for (const name of open) if (name !== fresh) screens[name][1]();
     // One entry of the history for whichever screen is up, replaced as another takes its place, so a single back
     // returns to the diff.
-    const held = history.state && history.state.screen;
-    if (fresh && held !== fresh) {
-      history[held ? "replaceState" : "pushState"]({ screen: fresh }, "");
+    if (fresh && screenHeld !== fresh) {
+      history[screenHeld ? "replaceState" : "pushState"]({ screen: fresh }, "");
+      screenHeld = fresh;
       // The chat opens on the thread it was left on, a step in from its list (see openChat).
       if (fresh === "chat" && chat.open !== null) history.pushState({ screen: "chat", thread: true }, "");
-    } else if (!fresh && held) history.go(history.state.thread ? -2 : -1);
+    } else if (!fresh && screenHeld) {
+      screenHeld = null;
+      history.go(history.state && history.state.thread ? -2 : -1);
+    }
   }
   const screenWatch = new MutationObserver(screensMoved);
   screenWatch.observe(document.body, { attributes: true, attributeFilter: ["class"] });
@@ -8291,9 +8298,13 @@
   window.addEventListener("popstate", (event) => {
     if (!isPhone()) return;
     const want = event.state && event.state.screen;
+    screenHeld = want || null;
     for (const name of Object.keys(screens)) if (name !== want && screens[name][0]()) screens[name][1]();
     // Forward onto a screen closed since: the entry stands for nothing any more.
-    if (want && !screens[want][0]()) history.replaceState(null, "");
+    if (want && !screens[want][0]()) {
+      history.replaceState(null, "");
+      screenHeld = null;
+    }
     // Back out of a thread of the chat, to its list.
     else if (want === "chat" && !event.state.thread && chat.open !== null) {
       chat.open = null;
