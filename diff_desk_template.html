@@ -1461,9 +1461,10 @@
   .chat .say .write { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
   /* The files the box holds stand under it once there are some, and take no room before. */
   .chat .say .carrying:empty { display: none; }
-  .chat .say textarea { min-height: 64px; resize: vertical; }
+  .chat .say textarea { flex: 1; min-height: 64px; resize: vertical; }
   .chat .say .buttons { display: flex; flex-direction: column-reverse; gap: 6px; }
-  .chat .say .actions { display: flex; align-items: flex-end; gap: 8px; }
+  /* The box as tall as the buttons beside it, so their edges meet, and the buttons at its foot when it is made taller. */
+  .chat .say .actions { display: flex; align-items: stretch; gap: 8px; }
   .chat .say .status { color: var(--muted); font-size: 11.5px; }
   .chat .say .status:empty { display: none; }
   .chat .empty { padding: 24px 8px; }
@@ -1479,6 +1480,12 @@
     td.code { white-space: pre-wrap; overflow-wrap: anywhere; }
     /* The hunk head as well, whose line of context would otherwise hold the whole table wider than the screen. */
     tr.h td { white-space: normal; overflow-wrap: anywhere; }
+    /* One thing at a time: the file list, when asked for, and the chat each take the whole screen over the diff. */
+    aside { position: fixed; inset: 0; z-index: 46; max-height: none; overflow-y: auto; background: var(--surface); border: 0; }
+    body.chat-open .chat { left: 0; right: 0; width: auto; }
+    .chat .grip { display: none; }
+    /* Keys a touch screen has none of. */
+    aside .hint { display: none; }
   }
 </style>
 
@@ -1882,8 +1889,10 @@
     els.hidedone.setAttribute("aria-pressed", String(Boolean(choices.hideDone)));
     document.body.classList.toggle("hide-done", Boolean(choices.hideDone));
     els.reactnow.setAttribute("aria-pressed", String(choices.reactNow !== false));
-    els.hidefiles.setAttribute("aria-pressed", String(Boolean(choices.hideFiles)));
-    document.body.classList.toggle("hide-files", Boolean(choices.hideFiles));
+    // A phone opens on the diff, the file list being a screen of its own it is taken to when asked.
+    const hideFiles = isPhone() || Boolean(choices.hideFiles);
+    els.hidefiles.setAttribute("aria-pressed", String(hideFiles));
+    document.body.classList.toggle("hide-files", hideFiles);
     els.hideclosed.setAttribute("aria-pressed", String(Boolean(choices.hideClosed)));
     document.body.classList.toggle("hide-closed", Boolean(choices.hideClosed));
     els.semantic.setAttribute("aria-pressed", String(Boolean(choices.semantic)));
@@ -2658,6 +2667,8 @@
 
   function showChat(open) {
     document.body.classList.toggle("chat-open", open);
+    // On a phone the chat takes the screen the file list would cover it with.
+    if (open && isPhone()) showFiles(false);
     // The diff narrows or widens, and the find box standing over it follows its edge.
     if (!els.find.hidden) requestAnimationFrame(placeFind);
     els.chatopen.setAttribute("aria-pressed", String(open));
@@ -2991,6 +3002,9 @@
     if (!draftKeys.has(draft)) draftKeys.set(draft, `draft-${(draftsNamed += 1)}`);
     return draftKeys.get(draft);
   }
+
+  // A phone: a narrow touch screen, where the file list, the diff and the chat each take the whole screen in turn.
+  const isPhone = () => matchMedia("(max-width: 600px) and (pointer: coarse)").matches;
 
   // Where the screen stops being covered by the bar: its lower edge while it is held at the top, or the top of the
   // screen once it has scrolled away, as it does on a phone.
@@ -6988,7 +7002,11 @@
     const name = item.querySelector(".name");
     name.textContent = file.path.split("/").pop();
     name.dataset.tip = file.path;
-    item.addEventListener("click", () => jump(index));
+    item.addEventListener("click", () => {
+      jump(index);
+      // Picked on a phone, the file is what the reader goes to, so the list covering it goes away.
+      if (isPhone()) showFiles(false);
+    });
     return item;
   }
 
@@ -7520,12 +7538,12 @@
     await loadNotes();
     render();
   }
-  els.hidefiles.addEventListener("click", () => {
-    const on = els.hidefiles.getAttribute("aria-pressed") !== "true";
-    els.hidefiles.setAttribute("aria-pressed", String(on));
-    document.body.classList.toggle("hide-files", on);
+  function showFiles(open) {
+    els.hidefiles.setAttribute("aria-pressed", String(!open));
+    document.body.classList.toggle("hide-files", !open);
     keepChoices();
-  });
+  }
+  els.hidefiles.addEventListener("click", () => showFiles(els.hidefiles.getAttribute("aria-pressed") === "true"));
   els.showfiles.addEventListener("click", () => els.hidefiles.click());
   // Open under its button, and kept open while the reader flips several choices: a press anywhere else closes it.
   function openSettings(open) {

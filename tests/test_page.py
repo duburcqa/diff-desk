@@ -3510,7 +3510,11 @@ def test_the_page_reads_on_a_phone(browser, desk):
         assert laid["page"] <= 390
         assert max(laid["tables"]) <= 0
         # The bar scrolls away with the page, and a file head sticks to the top of the screen in its place.
-        page.evaluate("() => window.scrollTo(0, 1200)")
+        page.evaluate("""() => {
+          const cards = [...document.querySelectorAll('section.file')];
+          const tall = cards.reduce((one, other) => (other.offsetHeight > one.offsetHeight ? other : one));
+          window.scrollTo(0, window.scrollY + tall.getBoundingClientRect().top + tall.offsetHeight / 2);
+        }""")
         settle(page)
         held = page.evaluate("""() => {
           const bar = document.querySelector('header').getBoundingClientRect();
@@ -3520,6 +3524,29 @@ def test_the_page_reads_on_a_phone(browser, desk):
         }""")
         assert held["bar"] <= 0
         assert abs(held["head"]) <= 1
+
+        # One thing at a time: the list of files opens on its own over the whole screen, and goes once a file is
+        # picked from it, which is then the one in front of the reader.
+        # The screen, less a scrollbar where the engine draws one beside the page rather than over it.
+        view = (0, 0, *page.evaluate("() => [document.documentElement.clientWidth, innerHeight]"))
+
+        def box(selector):
+            return tuple(round(value) for value in page.locator(selector).bounding_box().values())
+
+        assert not page.locator("aside").is_visible()
+        page.locator("#showfiles").click()
+        assert box("aside") == view
+        last = page.locator("#filelist .fileitem").last
+        picked = last.get_attribute("data-index")
+        last.click()
+        page.wait_for_selector("aside", state="hidden")
+        page.wait_for_function("(at) => state.current === Number(at)", arg=picked)
+        # And so does the chat, which the list never stands over.
+        page.locator("#showfiles").click()
+        page.locator("#chatopen").scroll_into_view_if_needed()
+        page.evaluate("() => showChat(true)")
+        assert box("#chat") == view
+        assert not page.locator("aside").is_visible()
     finally:
         context.close()
 
