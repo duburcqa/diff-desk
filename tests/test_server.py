@@ -2184,6 +2184,13 @@ def test_the_chat_pins_messages_over_a_thread_and_reports_under_it(desk, tmp_pat
     again = int(told.split("[")[1].split("]")[0])
     said = {message["id"]: message for message in desk.get("/chat")["messages"]}
     assert (said[made]["pinned"], said[again]["pinned"]) == (False, True)
+    # Its pin moved back by hand stays one pin, and taken off, it leaves the report pinned nowhere in the thread.
+    assert desk.post("/chat/pin", {"id": made, "pinned": True})["ok"]
+    said = {message["id"]: message for message in desk.get("/chat")["messages"]}
+    assert (said[made]["pinned"], said[again]["pinned"]) == (True, False)
+    assert desk.post("/chat/pin", {"id": again, "pinned": False})["ok"]
+    said = {message["id"]: message for message in desk.get("/chat")["messages"]}
+    assert (said[made]["pinned"], said[again]["pinned"]) == (False, False)
     # A report on the web is kept as its address, and one named by anything else is refused.
     web = desk.post(
         "/chat", {"thread": thread, "text": "Dashboard", "report": "https://example.com/run/7"}, agent=AGENT
@@ -2283,6 +2290,12 @@ def test_a_file_named_on_disk_opens_on_this_machine_alone(desk, tmp_path):
     assert ask(script) == {"ok": True, "revealed": True}
     shown = f"-R {script}" if sys.platform == "darwin" else str(script.parent)
     until(lambda: shown in opened.read_text().splitlines())
+    # A kind no application of this machine opens is shown in its folder, rather than nothing happening.
+    archive = tmp_path / "wall_trace.nokind"
+    archive.write_bytes(b"walls")
+    assert ask(archive) == {"ok": True, "revealed": True}
+    revealed = f"-R {archive}" if sys.platform == "darwin" else str(archive.parent)
+    until(lambda: revealed in opened.read_text().splitlines())
     # A folder is opened as the machine opens folders, its contents listed where they are.
     assert ask(tmp_path) == {"ok": True, "revealed": False}
     until(lambda: str(tmp_path) in opened.read_text().splitlines())

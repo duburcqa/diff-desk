@@ -1526,7 +1526,8 @@
   .chat .viewer:not([hidden]) { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; background: var(--surface); }
   .chat .viewer .viewhead { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 4px 0 12px; border-bottom: 1px solid var(--rule); }
   .chat .viewer .viewhead span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; font-size: 13px; }
-  .chat .viewer .viewhead a, .chat .viewer .viewhead button { display: grid; place-items: center; width: 36px; height: 36px; color: var(--muted); background: transparent; border: 0; font-size: 18px; text-decoration: none; cursor: pointer; }
+  .chat .viewer .viewhead a, .chat .viewer .viewhead button { display: grid; place-items: center; width: 36px; height: 36px; color: var(--muted); background: transparent; border: 0; border-radius: 6px; font-size: 18px; text-decoration: none; cursor: pointer; }
+  .chat .viewer .viewhead a:hover, .chat .viewer .viewhead button:hover { color: var(--accent); background: var(--surface-sunk); }
   .chat .viewer iframe { flex: 1; width: 100%; border: 0; background: #fff; }
   /* The message the box answers, said over it. */
   .chat .say .answering:not([hidden]) { display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 8px; font-size: 12px; color: var(--muted); border-left: 2px solid var(--accent); background: var(--surface-sunk); border-radius: 0 6px 6px 0; }
@@ -3169,7 +3170,8 @@
           open.addEventListener("click", () => openReport(message));
         }
         shown(words, message.images);
-        const linksShown = previews(words, text, message.text);
+        // A message pinning a report is shown by the report's card alone, its links being the report's own files.
+        const linksShown = message.report ? [] : previews(words, text, message.text);
         linkDisk(text);
         // A link shown under the message reads as the label its preview carries, the whole of it said when pointed at.
         // One the message wrote as words of its own keeps them.
@@ -3406,7 +3408,8 @@
   function drawPins(messages) {
     const shown = messages.filter((message) => message.pinned && !message.deleted);
     const pins = shown.filter((message) => !message.report);
-    const reports = shown.filter((message) => message.report);
+    // The newest pin of each report, a thread holding several from before it kept one per report (see '/chat/pin').
+    const reports = [...new Map(shown.filter((message) => message.report).map((message) => [message.report.source, message])).values()];
     els.chatpins.hidden = !pins.length;
     // Each pin is taken off where it stands, the message it pins staying where it was said.
     const unpin = (message) => {
