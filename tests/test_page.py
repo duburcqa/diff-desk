@@ -3493,6 +3493,37 @@ def test_the_top_bar_keeps_every_control_in_the_window(page, width):
     page.set_viewport_size({"width": 1500, "height": 900})
 
 
+def test_the_page_reads_on_a_phone(browser, desk):
+    context = browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True)
+    page = context.new_page()
+    page.goto(f"{desk.url}/", wait_until="load")
+    page.wait_for_selector("section.file")
+    try:
+        # Nothing runs off a screen nothing scrolls sideways: every line of every file wraps within it.
+        laid = page.evaluate("""() => ({
+          page: document.documentElement.scrollWidth,
+          tables: [...document.querySelectorAll('section.file')].map((card) => {
+            const table = card.querySelector('table');
+            return table ? table.getBoundingClientRect().width - card.getBoundingClientRect().width : 0;
+          }),
+        })""")
+        assert laid["page"] <= 390
+        assert max(laid["tables"]) <= 0
+        # The bar scrolls away with the page, and a file head sticks to the top of the screen in its place.
+        page.evaluate("() => window.scrollTo(0, 1200)")
+        settle(page)
+        held = page.evaluate("""() => {
+          const bar = document.querySelector('header').getBoundingClientRect();
+          const head = [...document.querySelectorAll('.filehead')].map((node) => node.getBoundingClientRect())
+            .find((box) => box.bottom > 0);
+          return { bar: bar.bottom, head: head.top };
+        }""")
+        assert held["bar"] <= 0
+        assert abs(held["head"]) <= 1
+    finally:
+        context.close()
+
+
 @pytest.mark.parametrize("width", [1500, 1000, 760])
 def test_the_pinned_file_head_clears_the_page_header(page, width):
     page.set_viewport_size({"width": width, "height": 900})
