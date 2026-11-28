@@ -3738,6 +3738,22 @@ def test_a_phone_keeps_the_controls_of_the_comments_in_the_dock(phone):
     phone.tap("#logflip")
 
 
+def test_a_phone_closes_a_report_on_the_way_back(phone, desk, tmp_path):
+    report = tmp_path / "report.html"
+    report.write_text("<h1>Benchmark</h1>")
+    thread = desk.post("/chat", {"title": "Reported on a phone", "text": "read it"}, agent=AGENT)["thread"]
+    desk.post("/chat", {"thread": thread, "text": "Benchmark", "report": str(report)}, agent=AGENT)
+    phone.evaluate("() => loadNotes()")
+    phone.tap("#dockchat")
+    phone.tap(f".chat .topic[data-thread='{thread}']")
+    phone.tap("#chatreports .reportchip")
+    assert phone.locator("#chatviewer").is_visible()
+    # The phone's back closes the report, leaving the thread it stood over in front of the reader.
+    phone.go_back()
+    phone.wait_for_selector("#chatviewer", state="hidden")
+    assert phone.evaluate("() => chat.open") == thread
+
+
 def test_a_phone_steps_through_the_files_from_its_dock_and_by_swiping(phone):
     count = phone.locator("#filelist .fileitem").count()
     assert count >= 3
@@ -5786,6 +5802,39 @@ def test_a_message_of_the_chat_is_answered_folded_reworded_and_taken_back(page, 
     own.hover()
     own.locator(".acts .drop").click()
     page.wait_for_function("(id) => !document.querySelector(`.chat .msg[data-id='${id}']`)", arg=mine["id"])
+
+
+def test_the_chat_pins_messages_over_a_thread_and_opens_its_reports_in_place(page, desk, tmp_path):
+    report = tmp_path / "report.html"
+    report.write_text('<h1 id="said">Benchmark</h1><script>document.title = "ran"</script>')
+    opened = desk.post("/chat", {"title": "Read this first", "text": "the jitter is the warm start"}, agent=AGENT)
+    thread = opened["thread"]
+    desk.post("/chat", {"thread": thread, "text": "Benchmark", "report": str(report)}, agent=AGENT)
+    page.evaluate("() => loadNotes()")
+    page.locator("#chatopen").click()
+    page.locator(f".chat .topic[data-thread='{thread}']").click()
+    first = page.locator(f".chat .msg[data-id='{opened['id']}']")
+    first.wait_for()
+    # Pinned from beside it, a message stands over the thread, a press there going back to it.
+    assert not page.locator("#chatpins").is_visible()
+    first.hover()
+    first.locator(".acts .pinit").click()
+    page.wait_for_selector("#chatpins .pinned")
+    assert page.inner_text("#chatpins .pinned") == f"{AGENT}: the jitter is the warm start"
+    # A report stands under the thread, and opens in place of the chat, filling it, its page in a sandbox.
+    chip = page.locator("#chatreports .reportchip")
+    assert chip.inner_text() == "Benchmark"
+    chip.click()
+    frame = page.locator("#chatviewframe")
+    # Within the chat's border.
+    shown, held = page.locator("#chatviewer").bounding_box(), page.locator("#chat").bounding_box()
+    assert all(abs(shown[side] - held[side]) <= 1 for side in ("x", "y", "width", "height"))
+    assert "allow-same-origin" not in frame.get_attribute("sandbox")
+    assert page.frame_locator("#chatviewframe").locator("#said").inner_text() == "Benchmark"
+    # Closed from its top right corner, the chat it stood over is as it was.
+    page.locator("#chatviewclose").click()
+    assert not page.locator("#chatviewer").is_visible()
+    assert first.is_visible()
 
 
 def test_a_remark_or_a_reply_folds_to_its_first_words(page, desk):

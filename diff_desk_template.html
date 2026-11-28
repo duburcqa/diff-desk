@@ -1491,6 +1491,22 @@
   .thread .said[data-folded="true"] .gist { display: inline; }
   .thread .said[data-folded="true"] > :not(.who, .foldmsg, .gist, .more, .mark) { display: none; }
   .thread .said > .foldmsg { display: inline-grid; vertical-align: middle; margin: 0 2px 0 -2px; }
+  /* The messages pinned over a thread, each a line a tap takes to it. */
+  .chat .pins:not([hidden]) { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-bottom: 1px solid var(--rule); background: var(--surface-sunk); }
+  .chat .pins .pinned, .chat .reports .reportchip, .chat .reportcard { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 3px 4px; color: var(--ink); background: transparent; border: 0; border-radius: 4px; font: inherit; font-size: 12px; text-align: left; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chat .pins .pinned:hover, .chat .reports .reportchip:hover, .chat .reportcard:hover { color: var(--accent); }
+  .chat .pins svg, .chat .reports svg, .chat .reportcard svg { flex: none; width: 13px; height: 13px; color: var(--accent); }
+  /* The reports pinned under a thread, chips a tap opens in place of the chat. */
+  .chat .reports:not([hidden]) { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 10px; border-top: 1px solid var(--rule); }
+  .chat .reports .reportchip { border: 1px solid var(--rule-strong); border-radius: 999px; padding: 4px 10px; max-width: 100%; }
+  .chat .reportcard { margin-top: 6px; padding: 6px 10px; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface-sunk); }
+  .chat .msg .acts .pinit[aria-pressed="true"] { color: var(--accent); }
+  /* A report opened fills the chat, the way back at the top right. */
+  .chat .viewer:not([hidden]) { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; background: var(--surface); }
+  .chat .viewer .viewhead { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 4px 0 12px; border-bottom: 1px solid var(--rule); }
+  .chat .viewer .viewhead span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; font-size: 13px; }
+  .chat .viewer .viewhead a, .chat .viewer .viewhead button { display: grid; place-items: center; width: 36px; height: 36px; color: var(--muted); background: transparent; border: 0; font-size: 18px; text-decoration: none; cursor: pointer; }
+  .chat .viewer iframe { flex: 1; width: 100%; border: 0; background: #fff; }
   /* The message the box answers, said over it. */
   .chat .say .answering:not([hidden]) { display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 8px; font-size: 12px; color: var(--muted); border-left: 2px solid var(--accent); background: var(--surface-sunk); border-radius: 0 6px 6px 0; }
   .chat .say .answering span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2115,7 +2131,9 @@
       <button class="ghost" id="chatclose">Close</button>
       <div class="present" id="chatwho"></div>
     </div>
+    <div class="pins" id="chatpins" hidden></div>
     <div class="talk" id="chatrows"></div>
+    <div class="reports" id="chatreports" hidden></div>
     <form class="say" id="chatsay">
       <div class="answering" id="chatanswering" hidden><span id="chatanswerwhat"></span><button class="tiny" type="button" id="chatanswerdrop" aria-label="Answer the thread rather than this message">&#215;</button></div>
       <input id="chatname" type="text" placeholder="What the thread is about" aria-label="Title of the new thread" hidden />
@@ -2129,6 +2147,10 @@
       </div>
       <span class="status" id="chatresult"></span>
     </form>
+    <div class="viewer" id="chatviewer" hidden>
+      <div class="viewhead"><span id="chatviewtitle"></span><a id="chatviewout" target="_blank" rel="noreferrer" aria-label="Open in a tab of its own" data-tip="Open in a tab of its own">&#8599;</a><button type="button" id="chatviewclose" aria-label="Back to the chat" data-tip="Back to the chat">&#215;</button></div>
+      <iframe id="chatviewframe" title="Report"></iframe>
+    </div>
   </section>
 </div>
 
@@ -2178,7 +2200,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "goback", "foldreviewed", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "loading", "goto", "veil", "palette", "pq", "picks", "find", "fgrip", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "fthreads", "toast", "toastwhere", "toastsaid", "toastmark", "logdot", "chatopen", "chatdot", "chat", "chatgrip", "chatback", "chattitle", "chatcopy", "chatnew", "chatclose", "chatwho", "chatrows", "chatsay", "chatname", "chattext", "chatsend", "chatresult", "filesgrip", "railfold", "logmove", "logsize", "fchat", "chatbuttons", "dock", "dockfiles", "dockprev", "dockdone", "docknext", "docklog", "dockchat", "docklogdot", "dockchatdot", "selbar", "selwhat", "selcomment", "selclear", "turn", "dockmore", "sheet", "sheettitle", "sheetitems", "dockdiff", "filetabs", "chattabs", "logflip", "logmore", "docksettings", "tabbar", "trayhead", "chatanswering", "chatanswerwhat", "chatanswerdrop"]) {
+  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "goback", "foldreviewed", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "loading", "goto", "veil", "palette", "pq", "picks", "find", "fgrip", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "fthreads", "toast", "toastwhere", "toastsaid", "toastmark", "logdot", "chatopen", "chatdot", "chat", "chatgrip", "chatback", "chattitle", "chatcopy", "chatnew", "chatclose", "chatwho", "chatrows", "chatsay", "chatname", "chattext", "chatsend", "chatresult", "filesgrip", "railfold", "logmove", "logsize", "fchat", "chatbuttons", "dock", "dockfiles", "dockprev", "dockdone", "docknext", "docklog", "dockchat", "docklogdot", "dockchatdot", "selbar", "selwhat", "selcomment", "selclear", "turn", "dockmore", "sheet", "sheettitle", "sheetitems", "dockdiff", "filetabs", "chattabs", "logflip", "logmore", "docksettings", "tabbar", "trayhead", "chatanswering", "chatanswerwhat", "chatanswerdrop", "chatpins", "chatreports", "chatviewer", "chatviewtitle", "chatviewout", "chatviewclose", "chatviewframe"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -2954,16 +2976,19 @@
       })),
     );
     // Drawn again only for what moved, so a thread being read keeps its place between two rounds that heard nothing.
-    const changed = chat.messages.map((message) => `${message.id}:${(message.edits || []).length}:${Boolean(message.deleted)}`);
+    const changed = chat.messages.map((m) => `${m.id}:${(m.edits || []).length}:${Boolean(m.deleted)}:${Boolean(m.pinned)}`);
     const held = [[...chat.folded], chat.editing && chat.editing.id];
     const drawing = JSON.stringify([chat.open, changed, isThread ? null : chat.read, data.viewer, held]);
     if (drawing === chat.drawn) return;
     const atFoot = els.chatrows.scrollHeight - els.chatrows.scrollTop - els.chatrows.clientHeight < 40;
     chat.drawn = drawing;
     els.chatrows.replaceChildren();
+    // The pins and the reports are a thread's, and the list of threads has none.
+    els.chatpins.hidden = els.chatreports.hidden = true;
     if (isThread) {
-      // Each answer under what it answers, in the order said within each level, and nothing under a folded message.
       const messages = threads.get(chat.open);
+      drawPins(messages);
+      // Each answer under what it answers, in the order said within each level, and nothing under a folded message.
       const known = new Set(messages.map((message) => message.id));
       const under = new Map();
       for (const message of messages) {
@@ -3034,6 +3059,15 @@
             els.chattext.focus();
           }).className = "answer";
         }
+        if (!message.deleted) {
+          const pin = act(message.pinned ? "Take the pin off" : "Pin this message over the thread", `<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.5 1.8 12.2 5.5 9.6 6.6 7.4 8.8l.4 2.6-1.2 1.2-5-5 1.2-1.2 2.6.4L7.4 4.4z"/><path d="M4.3 9.7 1.8 12.2"/></svg>`, async () => {
+            const outcome = await post("chat/pin", { id: message.id, pinned: !message.pinned });
+            if (!outcome.ok) announce("pin", `#${message.id}`, outcome.error || "the desk refused it");
+            await loadNotes();
+          });
+          pin.className = "pinit";
+          pin.setAttribute("aria-pressed", String(Boolean(message.pinned)));
+        }
         if (!message.deleted && isReader(message.who)) {
           act("Reword this message", `<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2.5 11.5 4.5 5 11H3V9z"/></svg>`, () => {
             chat.editing = { id: message.id, draft: message.text };
@@ -3103,6 +3137,14 @@
           continue;
         }
         const text = written(words.appendChild(spoke()), message.text);
+        if (message.report) {
+          const open = words.appendChild(document.createElement("button"));
+          open.type = "button";
+          open.className = "reportcard";
+          open.innerHTML = `<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><path d="M3 1.5h5.5L11 4v8.5H3z"/><path d="M8.5 1.5V4H11M5 7h4M5 9.5h4"/></svg>`;
+          open.append(reportName(message.report));
+          open.addEventListener("click", () => openReport(message));
+        }
         shown(words, message.images);
         previews(words, text, message.text);
         linkDisk(text);
@@ -3304,6 +3346,61 @@
     keepChoices();
     chat.drawn = null;
     drawChat();
+  }
+
+  // A report's name as its chip reads: the file it is, or the site it is on.
+  const reportName = (report) => (report.key ? report.source.split("/").pop() : new URL(report.source).hostname);
+
+  // The messages pinned over a thread, each a way to it, and the reports pinned under it, each opened in place.
+  function drawPins(messages) {
+    const shown = messages.filter((message) => message.pinned && !message.deleted);
+    const pins = shown.filter((message) => !message.report);
+    const reports = shown.filter((message) => message.report);
+    els.chatpins.hidden = !pins.length;
+    els.chatpins.replaceChildren(
+      ...pins.map((message) => {
+        const item = Object.assign(document.createElement("button"), { type: "button", className: "pinned" });
+        item.innerHTML = `<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.5 1.8 12.2 5.5 9.6 6.6 7.4 8.8l.4 2.6-1.2 1.2-5-5 1.2-1.2 2.6.4L7.4 4.4z"/><path d="M4.3 9.7 1.8 12.2"/></svg>`;
+        item.append(`${spokenBy(message.who)}: ${outline(message.text)}`);
+        item.addEventListener("click", () => reachMessage(message.id));
+        return item;
+      }),
+    );
+    els.chatreports.hidden = !reports.length;
+    els.chatreports.replaceChildren(
+      ...reports.map((message) => {
+        const item = Object.assign(document.createElement("button"), { type: "button", className: "reportchip" });
+        item.innerHTML = `<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><path d="M3 1.5h5.5L11 4v8.5H3z"/><path d="M8.5 1.5V4H11M5 7h4M5 9.5h4"/></svg>`;
+        item.append(outline(message.text) || reportName(message.report));
+        item.dataset.tip = message.report.source;
+        item.addEventListener("click", () => openReport(message));
+        return item;
+      }),
+    );
+  }
+
+  // A report shown in place of the chat, filling it, with the way back above it. One on disk is read through the key
+  // it was pinned under, from an origin of its own (see '/report'), and runs in a sandbox, as one on the web does in
+  // its own.
+  function openReport(message) {
+    const { source, key } = message.report;
+    const isPage = !key || /\.(?:html?|svg)$/i.test(source);
+    const src = key ? `report/${key}/${encodeURIComponent(source.split("/").pop())}` : source;
+    if (isPage) els.chatviewframe.setAttribute("sandbox", `allow-scripts allow-popups allow-forms${key ? "" : " allow-same-origin"}`);
+    else els.chatviewframe.removeAttribute("sandbox");
+    els.chatviewframe.src = src;
+    els.chatviewout.href = src;
+    els.chatviewtitle.textContent = outline(message.text) || reportName(message.report);
+    els.chatviewer.hidden = false;
+    // A phone's back closes it, as it closes a screen.
+    if (isPhone()) history.pushState({ ...(history.state || {}), report: true }, "");
+  }
+
+  function closeReport(isBack) {
+    if (els.chatviewer.hidden) return;
+    els.chatviewer.hidden = true;
+    els.chatviewframe.src = "about:blank";
+    if (!isBack && history.state && history.state.report) history.back();
   }
 
   // The message the box answers, said over it with the way back to answering the thread itself.
@@ -8489,6 +8586,8 @@
   screenWatch.observe(els.tray, { attributes: true, attributeFilter: ["data-folded"] });
   screenWatch.observe(els.find, { attributes: true, attributeFilter: ["hidden"] });
   window.addEventListener("popstate", (event) => {
+    // A step back past an open report closes it, the chat it stood over staying as it was.
+    if (!(event.state && event.state.report)) closeReport(true);
     if (!isPhone()) return;
     const want = event.state && event.state.screen;
     screenHeld = want || null;
@@ -8722,6 +8821,7 @@
   );
   els.chatclose.addEventListener("click", () => showChat(false));
   els.chatnew.addEventListener("click", () => openChat("new"));
+  els.chatviewclose.addEventListener("click", () => closeReport(false));
   els.chatanswerdrop.addEventListener("click", () => {
     chat.answering = null;
     drawAnswering();
