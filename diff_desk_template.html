@@ -1441,6 +1441,10 @@
   .chat .card .text { color: var(--muted); font-size: 12px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
   .chat .card img { flex: none; width: 72px; height: 72px; object-fit: cover; border-radius: 4px; }
   .chat .msg .who .num { margin-left: 6px; color: var(--faint); font-family: var(--mono); font-weight: 400; }
+  /* Offered where the pointer is, and always on a touch screen, which has no pointer to show it by. */
+  .chat .msg .who .copy { margin-left: 8px; font-weight: 400; visibility: hidden; }
+  .chat .msg:hover .who .copy, .chat .msg .who .copy:focus-visible { visibility: visible; }
+  @media (pointer: coarse) { .chat .msg .who .copy { visibility: visible; } }
   .chat .msg.flash { background: color-mix(in srgb, var(--accent) 14%, transparent); }
   .chat .msg .said { color: var(--ink); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
   .chat .msg .said .text > p:first-child { margin-top: 2px; }
@@ -2532,6 +2536,21 @@
         number.className = "num";
         number.textContent = `#${message.id}`;
         number.dataset.tip = `Refer to this message as #${message.id}`;
+        // The message as it was written, to paste wherever it is wanted next.
+        const copy = who.appendChild(document.createElement("button"));
+        copy.className = "tiny copy";
+        copy.type = "button";
+        copy.textContent = "copy";
+        copy.dataset.tip = "Copy this message as plain text";
+        copy.addEventListener("click", async () => {
+          try {
+            await navigator.clipboard.writeText(message.text);
+            copy.textContent = "copied";
+          } catch (error) {
+            copy.textContent = "not copied";
+          }
+          window.setTimeout(() => (copy.textContent = "copy"), 1200);
+        });
         const words = line.appendChild(document.createElement("div"));
         words.className = "said";
         const text = written(words.appendChild(spoke()), message.text);
