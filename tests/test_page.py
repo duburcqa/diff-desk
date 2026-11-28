@@ -3593,30 +3593,30 @@ def test_the_page_reads_on_a_phone(phone):
 
 
 def test_a_phone_shows_one_screen_at_a_time_and_goes_back_from_it(phone, desk):
-    # The dock stands along the top of the screen, and each screen it opens takes all of the screen under it, the
-    # file tabs and the steps through the files giving way to what that screen does.
+    # The dock stands along the top of the screen, and each screen it opens takes all of the screen under it, down to
+    # the tabs along the foot where they stand.
     width, height = phone.evaluate("() => [document.documentElement.clientWidth, innerHeight]")
     assert phone.locator("#dock").bounding_box()["y"] == 0
 
     def fills(selector):
         under = round(phone.locator("#dock").bounding_box()["height"])
-        assert not phone.locator("#dockprev").is_visible()
-        assert not phone.locator("#filetabs").is_visible()
+        foot = round(phone.locator("#tabbar").bounding_box()["height"])
         return tuple(round(value) for value in phone.locator(selector).bounding_box().values()) == (
             0,
             under,
             width,
-            height - under,
+            height - under - foot,
         )
 
     def shown():
         return phone.evaluate(f"() => ({SHOWN})")
 
     assert shown() == {"files": False, "chat": False, "log": False}
-    assert phone.get_attribute("#dockdiff", "aria-pressed") == "true"
     phone.tap("#dockfiles")
     assert fills("aside")
-    assert phone.get_attribute("#dockdiff", "aria-pressed") == "false"
+    # The file list is a way through the diff, opened from the diff's own row: the diff stays the view up.
+    assert phone.get_attribute("#dockfiles", "aria-pressed") == "true"
+    assert phone.get_attribute("#dockdiff", "aria-pressed") == "true"
     # The phone's own back closes the screen rather than leaving the page.
     phone.go_back()
     phone.wait_for_selector("aside", state="hidden")
@@ -3633,6 +3633,7 @@ def test_a_phone_shows_one_screen_at_a_time_and_goes_back_from_it(phone, desk):
     # One screen at a time: the chat takes the place of the comments, and one step back is the diff again.
     phone.tap("#docklog")
     assert fills("#log")
+    assert phone.get_attribute("#dockdiff", "aria-pressed") == "false"
     phone.tap("#dockchat")
     assert fills("#chat")
     assert shown() == {"files": False, "chat": True, "log": False}
@@ -3640,6 +3641,11 @@ def test_a_phone_shows_one_screen_at_a_time_and_goes_back_from_it(phone, desk):
     phone.go_back()
     phone.wait_for_function("() => !document.body.classList.contains('chat-open')")
     assert shown() == {"files": False, "chat": False, "log": False}
+    # The settings open from the dock's first row, and close on the way back as the screens do.
+    phone.tap("#docksettings")
+    assert phone.locator("#settings .body").is_visible()
+    phone.go_back()
+    phone.wait_for_function("() => document.getElementById('settings').dataset.open === 'false'")
     # What the bar does, the dock's '...' does as well, and the find box opened from there, which a phone has no key
     # for, closes on the way back too.
     phone.tap("#dockmore")
@@ -3654,15 +3660,6 @@ def test_a_phone_shows_one_screen_at_a_time_and_goes_back_from_it(phone, desk):
         assert shown()[gone]
         swipe(phone, "#filelist" if gone == "files" else "#chatrows", swept)
         phone.wait_for_function(f"(gone) => !({SHOWN})[gone]", arg=gone)
-    # A line of the diff named in the chat is shown on the diff, the chat making way for it.
-    named = {"title": "Named on a phone", "text": f"see `sample.py:{FIRST_EDIT}`"}
-    thread = desk.post("/chat", named, agent=AGENT)["thread"]
-    phone.evaluate("() => loadNotes()")
-    phone.tap("#dockchat")
-    phone.tap(f".chat .topic[data-thread='{thread}']")
-    phone.tap(".chat .msg a.xref")
-    phone.wait_for_selector(f"section.file[data-path='sample.py'] tr.flash[data-line='{FIRST_EDIT}']")
-    assert shown() == {"files": False, "chat": False, "log": False}
 
 
 def test_a_phone_leaves_a_chat_thread_the_way_it_leaves_a_screen(phone, desk):
@@ -3708,6 +3705,15 @@ def test_a_phone_leaves_a_chat_thread_the_way_it_leaves_a_screen(phone, desk):
     swipe(phone, "#chatrows", 1)
     phone.wait_for_function("() => !document.body.classList.contains('chat-open')")
     phone.wait_for_function("() => history.state === null")
+    # A line of the diff named in the chat is shown on the diff, the chat making way for it.
+    named = {"title": "Named on a phone", "text": f"see `sample.py:{FIRST_EDIT}`"}
+    thread = desk.post("/chat", named, agent=AGENT)["thread"]
+    phone.evaluate("() => loadNotes()")
+    phone.tap("#dockchat")
+    phone.tap(f".chat .topic[data-thread='{thread}']")
+    phone.tap(".chat .msg a.xref")
+    phone.wait_for_selector(f"section.file[data-path='sample.py'] tr.flash[data-line='{FIRST_EDIT}']")
+    assert phone.evaluate(f"() => ({SHOWN})") == {"files": False, "chat": False, "log": False}
 
 
 def test_a_phone_keeps_the_controls_of_the_comments_in_the_dock(phone):
@@ -3903,7 +3909,7 @@ def test_a_reply_can_be_rewritten_and_a_comment_and_its_last_reply_deleted_from_
     desk.post("/reply", {"seq": made, "text": "first answer"}, agent=AGENT)
     desk.post("/reply", {"seq": made, "text": "second answer"}, agent=AGENT)
     page.reload(wait_until="load")
-    page.wait_for_selector("section.file")
+    page.wait_for_selector(f"#note-{made} .line.reply")
     thread = page.locator(f"#note-{made}")
 
     # Only the last reply carries a way out, and taking it leaves the comment and what was said before it.
