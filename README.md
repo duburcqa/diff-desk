@@ -119,7 +119,7 @@ Tailscale serves the running desk over HTTPS at this machine's name on your tail
 On a phone, a touch screen narrow one way or the other (upright or on its side), the page is laid out for a thumb:
 
 - The diff runs from edge to edge with one column of line numbers, and a long line wraps under its own indentation. The bar scrolls away with the page and the file heads stick to the top in its place.
-- A dock along the foot of the screen holds the file list, the previous and next file, Reviewed for the file on screen, the comments and the chat. Each of those screens takes the whole screen above the dock, one at a time, and the phone's back gesture closes it.
+- A dock along the foot of the screen holds the file list, the previous and next file, Reviewed for the file on screen, the comments and the chat. Each of those screens takes the whole screen above the dock, one at a time, and the phone's back gesture closes it. The find box, which a keyboard opens with `f`, has a button of its own in the bar.
 - A swipe across the code turns to the next file or back to the one before, naming it at the edge while the finger is down. A swipe across the file list, the comments or the chat closes it.
 - Tapping a line number picks the line, tapping another line of the same file stretches the pick to it, and the bar that shows up over the dock opens the comment box on the lines picked.
 

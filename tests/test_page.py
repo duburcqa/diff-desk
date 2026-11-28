@@ -3629,6 +3629,11 @@ def test_a_phone_shows_one_screen_at_a_time_and_goes_back_from_it(phone, desk):
     phone.go_back()
     phone.wait_for_function("() => !document.body.classList.contains('chat-open')")
     assert shown() == {"files": False, "chat": False, "log": False}
+    # The find box, which a phone has no key for, opens from the bar and closes on the way back as well.
+    phone.tap("#findopen")
+    assert phone.locator("#fq").is_visible()
+    phone.go_back()
+    phone.wait_for_selector("#find", state="hidden")
     # A swipe across a screen closes it the way it covers the diff: the file list back to the left, the chat to the
     # right.
     for button, gone, swept in [("#dockfiles", "files", -1), ("#dockchat", "chat", 1)]:
