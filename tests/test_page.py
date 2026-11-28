@@ -3593,14 +3593,21 @@ def test_the_page_reads_on_a_phone(phone):
 
 
 def test_a_phone_shows_one_screen_at_a_time_and_goes_back_from_it(phone, desk):
-    # The dock stands along the top of the screen, and each screen it opens takes all of the screen under it.
-    dock = phone.locator("#dock").bounding_box()
+    # The dock stands along the top of the screen, and each screen it opens takes all of the screen under it: under
+    # its row of icons alone, the file tabs and the steps through the files giving way to the screen's own head.
     width, height = phone.evaluate("() => [document.documentElement.clientWidth, innerHeight]")
-    assert dock["y"] == 0
-    view = (0, round(dock["height"]), width, height - round(dock["height"]))
+    assert phone.locator("#dock").bounding_box()["y"] == 0
 
-    def box(selector):
-        return tuple(round(value) for value in phone.locator(selector).bounding_box().values())
+    def fills(selector):
+        under = round(phone.locator("#dock").bounding_box()["height"])
+        assert under - round(phone.locator("#dock .icons").bounding_box()["height"]) <= 1
+        assert not phone.locator("#dockprev").is_visible()
+        return tuple(round(value) for value in phone.locator(selector).bounding_box().values()) == (
+            0,
+            under,
+            width,
+            height - under,
+        )
 
     def shown():
         return phone.evaluate(f"() => ({SHOWN})")
@@ -3608,7 +3615,7 @@ def test_a_phone_shows_one_screen_at_a_time_and_goes_back_from_it(phone, desk):
     assert shown() == {"files": False, "chat": False, "log": False}
     assert phone.get_attribute("#dockdiff", "aria-pressed") == "true"
     phone.tap("#dockfiles")
-    assert box("aside") == view
+    assert fills("aside")
     assert phone.get_attribute("#dockdiff", "aria-pressed") == "false"
     # The phone's own back closes the screen rather than leaving the page.
     phone.go_back()
@@ -3624,13 +3631,12 @@ def test_a_phone_shows_one_screen_at_a_time_and_goes_back_from_it(phone, desk):
     phone.wait_for_function("(at) => state.current === Number(at)", arg=picked)
     phone.wait_for_function("() => history.state === null")
     # One screen at a time: the chat takes the place of the comments, and one step back is the diff again. The file
-    # just picked has a tab now, which the screens leave in view: the dock is that much taller.
-    tall = round(phone.locator("#dock").bounding_box()["height"])
-    view = (0, tall, width, height - tall)
+    # just picked has a tab now, which gives way to the screen as well.
+    assert phone.locator("#filetabs").is_visible()
     phone.tap("#docklog")
-    assert box("#log") == view
+    assert fills("#log")
     phone.tap("#dockchat")
-    assert box("#chat") == view
+    assert fills("#chat")
     assert shown() == {"files": False, "chat": True, "log": False}
     assert phone.get_attribute("#dockchat", "aria-pressed") == "true"
     phone.go_back()
@@ -3659,6 +3665,38 @@ def test_a_phone_shows_one_screen_at_a_time_and_goes_back_from_it(phone, desk):
     phone.tap(".chat .msg a.xref")
     phone.wait_for_selector(f"section.file[data-path='sample.py'] tr.flash[data-line='{FIRST_EDIT}']")
     assert shown() == {"files": False, "chat": False, "log": False}
+
+
+def test_a_phone_leaves_a_chat_thread_the_way_it_leaves_a_screen(phone, desk):
+    thread = desk.post("/chat", {"title": "Stepped into", "text": "a word"}, agent=AGENT)["thread"]
+    phone.evaluate("() => loadNotes()")
+    phone.tap("#dockchat")
+    # The head of the chat stands in the dock's row, its title and a new thread there, no button back to the list.
+    topic = phone.locator(f".chat .topic[data-thread='{thread}']")
+    topic.tap()
+    phone.wait_for_selector(".chat .msg")
+    assert phone.inner_text("#chattitle") == "Stepped into"
+    assert phone.locator("#chattitle").bounding_box()["y"] < phone.locator("#dock").bounding_box()["height"]
+    assert not phone.locator("#chatback").is_visible()
+    # Out of a thread, back to the list, by the phone's back gesture, and one more step back is the diff.
+    phone.go_back()
+    topic.wait_for()
+    assert phone.evaluate("() => chat.open") is None
+    phone.go_back()
+    phone.wait_for_function("() => !document.body.classList.contains('chat-open')")
+    # By the chat's own tab, pressed again, and by a swipe to the right, which closes the chat once on its list.
+    phone.tap("#dockchat")
+    topic.tap()
+    phone.wait_for_selector(".chat .msg")
+    phone.tap("#dockchat")
+    topic.wait_for()
+    topic.tap()
+    phone.wait_for_selector(".chat .msg")
+    swipe(phone, "#chatrows", 1)
+    topic.wait_for()
+    swipe(phone, "#chatrows", 1)
+    phone.wait_for_function("() => !document.body.classList.contains('chat-open')")
+    phone.wait_for_function("() => history.state === null")
 
 
 def test_a_phone_steps_through_the_files_from_its_dock_and_by_swiping(phone):

@@ -1401,9 +1401,13 @@
   body.chat-open.semantic .chat { position: fixed; right: 0; bottom: 0; z-index: 44; width: min(var(--chat-width, 420px), 100vw); height: auto; box-shadow: var(--shadow); }
   .chat .grip { position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 1; }
   .chat .grip:hover, .chat .grip.held { background: color-mix(in srgb, var(--accent) 35%, transparent); }
-  .chat .head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--rule); }
+  .chat .head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px 0; border-bottom: 1px solid var(--rule); }
+  .chat .head > button { margin-bottom: 10px; }
+  .chat .head strong { margin-bottom: 10px; }
+  #chatnew svg { display: none; }
   .chat .head strong { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
-  .chat .present { padding: 6px 12px; color: var(--muted); font-size: 11.5px; border-bottom: 1px solid var(--rule); }
+  /* Who watches, on a line of its own under the buttons of the head. */
+  .chat .present { flex-basis: 100%; margin: 0 -12px; padding: 6px 12px; color: var(--muted); font-size: 11.5px; border-top: 1px solid var(--rule); }
   .chat .present .name { color: var(--voice, var(--accent)); font-weight: 600; }
   .chat .talk { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
   .chat .topic {
@@ -1722,6 +1726,43 @@
     aside .hint { display: none; }
     /* What the dock and the back gesture close, and what a long press copies, take no button of their own. */
     #chatclose, #logclose, #hidefiles, #chatcopy, .chat .msg .who .copy { display: none; }
+    /* The head of the chat is one row: the thread's title, who watches, and a new thread. A thread is left the way
+       anything is on a phone, by the back gesture, a swipe to the right or the chat's own tab (see openChat). */
+    #chatback { display: none !important; }
+    .chat .head { flex-wrap: nowrap; min-height: 40px; padding: 0 4px 0 12px; box-sizing: border-box; }
+    .chat .head > button, .chat .head strong { margin-bottom: 0; }
+    .chat .head strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+    .chat .present { flex: 0 1 auto; min-width: 0; margin: 0; padding: 0; border: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+    .chat .present[data-none="true"] { display: none; }
+    #chatnew { display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; background: transparent; color: var(--muted); }
+    #chatnew svg { display: block; width: 18px; height: 18px; }
+    #chatnew .word { display: none; }
+    /* A screen up (the file list, the comments, the chat) has the steps through the files and the file tabs no use: they
+       act on the diff. Its own head takes the right half of the dock in their place, so the screen starts right under
+       the dock's row of icons, and the room every head would take is the screen's. */
+    body:is(.chat-open, :not(.hide-files), :has(#log[data-open="true"])) :is(#dockprev, #dockdone, #docknext, #dockmore) {
+      visibility: hidden;
+    }
+    body:is(.chat-open, :not(.hide-files), :has(#log[data-open="true"])) #filetabs { display: none; }
+    aside, body.chat-open .chat, .log[data-open="true"] { z-index: 48; }
+    body.chat-open .chat .head, .log[data-open="true"] > .head, aside .asidehead {
+      position: fixed;
+      top: env(safe-area-inset-top);
+      left: 50%;
+      right: 0;
+      height: 40px;
+      min-height: 0;
+      margin: 0;
+      padding: 0 4px 0 8px;
+      background: var(--surface);
+      border: 0;
+      box-sizing: border-box;
+    }
+    .log > .head { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; }
+    .log > .head > strong, #logorder .word, .asidehead h2 { display: none; }
+    #logcount { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
+    #logorder { padding: 0; margin: 0; }
+    .asidehead { justify-content: flex-end; }
   }
 </style>
 
@@ -1887,7 +1928,7 @@
     <strong>Comments</strong>
     <span class="status" id="logcount"></span>
     <label class="seen" id="logorder" data-tip="Read the list by the submission each remark went out in, or by what moved last">
-      <span>Group by</span>
+      <span class="word">Group by</span>
       <select id="logsort">
         <option value="batch">batch</option>
         <option value="thread">thread</option>
@@ -1959,10 +2000,10 @@
       <button class="ghost" id="chatback" hidden>Threads</button>
       <strong id="chattitle">Chat</strong>
       <button class="ghost" id="chatcopy" hidden data-tip="Copy this thread as plain text">Copy</button>
-      <button class="ghost" id="chatnew">New thread</button>
+      <button class="ghost" id="chatnew" aria-label="New thread"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg><span class="word">New thread</span></button>
       <button class="ghost" id="chatclose">Close</button>
+      <div class="present" id="chatwho"></div>
     </div>
-    <div class="present" id="chatwho"></div>
     <div class="talk" id="chatrows"></div>
     <form class="say" id="chatsay">
       <input id="chatname" type="text" placeholder="What the thread is about" aria-label="Title of the new thread" hidden />
@@ -2753,6 +2794,8 @@
     els.chatdot.dataset.on = els.dockchatdot.dataset.on = String([...threads.values()].some((thread) => unreadIn(thread) > 0));
     // Each name in the colour its words are read in, so who is watching is told at a glance from who is talking.
     els.chatwho.replaceChildren();
+    // A phone shows nothing for nobody watching, where every line is one less of the chat (see '.present').
+    els.chatwho.dataset.none = String(notes.live && !notes.watching.length);
     if (!notes.live) els.chatwho.textContent = "The desk is not answering";
     else if (!notes.watching.length) els.chatwho.textContent = "No agent watching";
     else {
@@ -2940,6 +2983,15 @@
   }
 
   function openChat(where) {
+    // On a phone a thread is a step further in than the list, which the back gesture steps out of (see 'popstate').
+    if (isPhone() && document.body.classList.contains("chat-open")) {
+      const isInThread = Boolean(history.state && history.state.thread);
+      if (where === null && isInThread) {
+        history.back();
+        return;
+      }
+      if (where !== null && !isInThread) history.pushState({ screen: "chat", thread: true }, "");
+    }
     chat.open = where;
     els.chatresult.textContent = "";
     drawChat();
@@ -7985,8 +8037,11 @@
     // One entry of the history for whichever screen is up, replaced as another takes its place, so a single back
     // returns to the diff.
     const held = history.state && history.state.screen;
-    if (fresh && held !== fresh) history[held ? "replaceState" : "pushState"]({ screen: fresh }, "");
-    else if (!fresh && held) history.back();
+    if (fresh && held !== fresh) {
+      history[held ? "replaceState" : "pushState"]({ screen: fresh }, "");
+      // The chat opens on the thread it was left on, a step in from its list (see openChat).
+      if (fresh === "chat" && chat.open !== null) history.pushState({ screen: "chat", thread: true }, "");
+    } else if (!fresh && held) history.go(history.state.thread ? -2 : -1);
   }
   const screenWatch = new MutationObserver(screensMoved);
   screenWatch.observe(document.body, { attributes: true, attributeFilter: ["class"] });
@@ -7998,6 +8053,11 @@
     for (const name of Object.keys(screens)) if (name !== want && screens[name][0]()) screens[name][1]();
     // Forward onto a screen closed since: the entry stands for nothing any more.
     if (want && !screens[want][0]()) history.replaceState(null, "");
+    // Back out of a thread of the chat, to its list.
+    else if (want === "chat" && !event.state.thread && chat.open !== null) {
+      chat.open = null;
+      drawChat();
+    }
   });
 
   // A list of what can be done, rising from the foot of a phone's screen, each item an action and whether it can be
@@ -8039,7 +8099,11 @@
     if (file) markReviewed(file, seenState(file) !== "done");
   });
   els.docklog.addEventListener("click", () => els.logopen.click());
-  els.dockchat.addEventListener("click", () => els.chatopen.click());
+  // The chat's tab, pressed in a thread, goes back to the list of threads, as a tab pressed again does on a phone.
+  els.dockchat.addEventListener("click", () => {
+    if (screenOn === "chat" && chat.open !== null) openChat(null);
+    else els.chatopen.click();
+  });
   els.dockdiff.addEventListener("click", toDiff);
   els.dockmore.addEventListener("click", () => {
     if (!els.sheet.hidden) {
@@ -8121,6 +8185,7 @@
       const selection = window.getSelection();
       if (selection && !selection.isCollapsed) return;
       if (screenOn === "files" && dx < 0) showFiles(false);
+      else if (screenOn === "chat" && dx > 0 && chat.open !== null) openChat(null);
       else if ((screenOn === "chat" || screenOn === "log") && dx > 0) screens[screenOn][1]();
       else if (screenOn === null && els.main.contains(from.target)) stepFile(dx < 0);
     },
