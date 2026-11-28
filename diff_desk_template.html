@@ -1405,6 +1405,7 @@
   .chat .head > button { margin-bottom: 10px; }
   .chat .head strong { margin-bottom: 10px; }
   #chatnew svg { display: none; }
+  .chat .topic.newtopic { display: none; }
   #logflip, #logmore { display: none; }
   /* A button standing as its word on a wide screen and as its icon on a phone. */
   .iconword svg { display: none; }
@@ -1768,6 +1769,10 @@
     /* The row of the view: what the diff does (its file list among it, which is a way through the diff), the head of the
        chat, the head of the comments. */
     body:is(.chat-open, :has(#log[data-open="true"])) :is(.dock .tools, #filetabs), body:not(.chat-open) #chattabs, #chattitle { display: none; }
+    /* The chat has nothing for that row: a new thread is the first entry of its list, and who watches, when anybody
+       does, a thin line over the messages. */
+    body.chat-open .dock .viewbar, body.chat-open .chat .head > :not(.present) { display: none; }
+    .chat .topic.newtopic { display: block; padding-top: 9px; padding-bottom: 9px; color: var(--accent); font-weight: 600; text-align: left; }
     aside .asidehead { display: none; }
     /* The tabs of the view up, the files of the diff or the threads of the chat, in a row of their own along the foot of
        the screen, where the top has its two rows already. */
@@ -1788,7 +1793,7 @@
     .ftab.threadtab .name svg { flex: none; width: 13px; height: 13px; color: var(--accent); }
     aside, body.chat-open .chat, .log[data-open="true"] { z-index: 48; }
     /* The head of the chat and of the comments stand in that row. */
-    body.chat-open .chat .head, .log[data-open="true"] > .head {
+    .log[data-open="true"] > .head {
       position: fixed;
       top: calc(env(safe-area-inset-top) + 41px);
       left: 0;
@@ -1802,7 +1807,9 @@
       box-sizing: border-box;
     }
 
-    .chat .head .present { flex: 1 1 auto; }
+    body.chat-open .chat .head { min-height: 0; padding: 0; border: 0; }
+    body.chat-open .chat .head:has(.present[data-none="true"]) { display: none; }
+    .chat .head .present { flex: 1 1 auto; padding: 4px 12px; border-bottom: 1px solid var(--rule); }
     .log > .head { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; }
     .log > .head > strong, #logorder .word, .asidehead h2 { display: none; }
     #logcount { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
@@ -2971,6 +2978,12 @@
     chat.drawnThread = null;
     if (isNew) return;
     const listed = [...threads.values()].sort((first, second) => second.at(-1).id - first.at(-1).id);
+    // The first entry of the list opens a new thread, where a phone looks for it: it has no head to hold a button.
+    const opening = els.chatrows.appendChild(document.createElement("button"));
+    opening.type = "button";
+    opening.className = "topic newtopic";
+    opening.textContent = "+ New thread";
+    opening.addEventListener("click", () => openChat("new"));
     if (!listed.length) {
       const empty = els.chatrows.appendChild(document.createElement("div"));
       empty.className = "empty";

@@ -3669,12 +3669,15 @@ def test_a_phone_leaves_a_chat_thread_the_way_it_leaves_a_screen(phone, desk):
     )
     phone.evaluate("() => loadNotes()")
     phone.tap("#dockchat")
-    # The head of the chat stands in the dock's row, a new thread there, and neither a title nor a button back to the
-    # list: a thread is named by a tab once there are two of them to go between, a bubble telling it from a file.
+    # The chat takes no row of the dock: a new thread is the first entry of its list, and a thread has neither a title
+    # nor a button back to the list, named by a tab once there are two of them to go between, a bubble telling it from
+    # a file.
+    assert not phone.locator("#dock .viewbar").is_visible()
+    assert phone.locator(".chat #chatrows > *").first.inner_text() == "+ New thread"
     topic = phone.locator(f".chat .topic[data-thread='{thread}']")
     topic.tap()
     phone.wait_for_selector(".chat .msg")
-    assert phone.locator("#chatnew").bounding_box()["y"] < phone.locator("#dock").bounding_box()["height"]
+    assert not phone.locator("#chatnew").is_visible()
     assert not phone.locator("#chattitle").is_visible()
     assert not phone.locator("#chatback").is_visible()
     assert not phone.locator("#chattabs").is_visible()
