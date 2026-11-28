@@ -2131,19 +2131,57 @@ def test_a_link_of_the_chat_is_shown_by_what_it_says_of_itself(desk, site, shot,
         "merged by octocat",
     )
 
-    # A file on disk named by its path, of a kind a page shows: an image, to the page alone.
+    # A file on disk named by its path, to the page alone: shown where a browser shows its kind, saved under its own
+    # name otherwise, which is how a device reading the desk from elsewhere opens it.
     plot = tmp_path / "plot.png"
     plot.write_bytes(shot)
     assert ask(f"/file?path={urllib.parse.quote(str(plot))}") == ("image/png", shot)
-    notes = tmp_path / "notes.txt"
-    notes.write_text("not shown")
-    for refused, as_reader, code in ((plot, False, 403), (notes, True, 404), (pathlib.Path("plot.png"), True, 404)):
+    probes = tmp_path / "direct weak.npz"
+    probes.write_bytes(b"positions, heights, walls")
+    named = {"Cookie": desk.as_reader()}
+    request = urllib.request.Request(f"{desk.url}/file?path={urllib.parse.quote(str(probes))}", headers=named)
+    with urllib.request.urlopen(request, timeout=30) as answer:
+        assert answer.headers.get_content_type() == "application/octet-stream"
+        assert answer.headers["Content-Disposition"] == "attachment; filename*=UTF-8''direct%20weak.npz"
+        assert answer.read() == b"positions, heights, walls"
+    missing = tmp_path / "gone.npz"
+    for refused, as_reader, code in ((plot, False, 403), (missing, True, 404), (pathlib.Path("plot.png"), True, 404)):
         with pytest.raises(urllib.error.HTTPError) as answer:
             ask(f"/file?path={urllib.parse.quote(str(refused))}", as_reader)
         assert answer.value.code == code
     with pytest.raises(urllib.error.HTTPError) as answer:
         ask(f"/unfurl?url={urllib.parse.quote(page)}", as_reader=False)
     assert answer.value.code == 403
+
+
+def test_a_file_named_on_disk_opens_on_this_machine_alone(desk, tmp_path):
+    probes = tmp_path / "probes.npz"
+    probes.write_bytes(b"positions, heights, walls")
+    script = tmp_path / "rerun.sh"
+    script.write_text("echo measured\n")
+    opened = desk.home / "opened.log"
+
+    def ask(path, host=None, as_reader=True):
+        named = {"Cookie": desk.as_reader()} if as_reader else {"X-Desk-Agent": AGENT}
+        headers = {"Content-Type": "application/json", **named, **({"Host": host} if host else {})}
+        said = json.dumps({"path": str(path)}).encode()
+        request = urllib.request.Request(f"{desk.url}/open", data=said, headers=headers, method="POST")
+        with urllib.request.urlopen(request, timeout=30) as answer:
+            return json.loads(answer.read())
+
+    # Opened with the application this machine opens its kind with.
+    assert ask(probes) == {"ok": True, "revealed": False}
+    until(lambda: opened.exists() and str(probes) in opened.read_text().splitlines())
+    # A file that would run is shown in its folder instead, so a message cannot run anything with a click.
+    assert ask(script) == {"ok": True, "revealed": True}
+    shown = f"-R {script}" if sys.platform == "darwin" else str(script.parent)
+    until(lambda: shown in opened.read_text().splitlines())
+    # Read from another device, or asked by anyone but the page, nothing is opened on this machine.
+    for host, as_reader in (("desk.tail0.ts.net", True), (None, False)):
+        with pytest.raises(urllib.error.HTTPError) as answer:
+            ask(probes, host, as_reader)
+        assert answer.value.code == 403
+    assert ask(tmp_path / "gone.npz")["ok"] is False
 
 
 def test_the_desk_is_reached_from_the_tailnet_through_tailscale(desk, tmp_path, monkeypatch):
@@ -2626,13 +2664,6 @@ def test_a_file_offered_to_a_box_is_kept_beside_the_log_and_read_back_from_it(de
     # What GitHub renders nothing of, and a file with nothing in it, are refused as they are offered.
     assert desk.attach("notes.txt", shot)["ok"] is False
     assert desk.attach("empty.png", b"")["ok"] is False
-    # A message of the chat goes nowhere, so it carries any file, which is served to be saved rather than shown.
-    notes = desk.attach("notes.txt", b"what was measured", is_chat=True)["image"]
-    assert (notes["kind"], notes["size"]) == ("text/plain", 17)
-    with urllib.request.urlopen(f"{desk.url}/media/{notes['file']}", timeout=30) as answer:
-        assert answer.headers.get_content_type() == "application/octet-stream"
-        assert answer.headers["Content-Disposition"] == "attachment"
-        assert answer.read() == b"what was measured"
 
 
 def test_a_comment_carries_a_file_to_the_pull_request_and_keeps_a_local_one_here(desk, shot):

@@ -5691,19 +5691,25 @@ def test_a_message_of_the_chat_carries_files_and_shows_its_links(page, desk, sit
     page.wait_for_function(f"() => ({shown})(document.querySelector('.chat .previews img.carries'))")
     assert page.locator(".chat .previews img.carries").evaluate(shown) == 64
 
-    # Files are put in the box as in any box, any file at all, and go with the message: an image shown as the image,
-    # anything else as its name, saved under that name.
+    # A path on disk in its words is a link, a sentence ending on one keeping its full stop.
+    assert page.locator(".chat .msg a.ondisk").first.inner_text() == str(plot)
+
+    # An image or a video is put in the box as in any box, and goes with the message, shown where it stands. Any other
+    # file is named by its path, a link opening it with this machine's application for its kind.
     notes = tmp_path / "measured.csv"
     notes.write_text("case,mm\nlattice,0.8\n")
-    page.locator("#chatbuttons input[type=file]").set_input_files([str(plot), str(notes)])
-    page.wait_for_function("() => document.querySelectorAll('.chat .say .carrying > span').length === 2")
-    page.locator("#chattext").fill("and the plot itself")
+    page.locator("#chatbuttons input[type=file]").set_input_files([str(plot)])
+    page.wait_for_function("() => document.querySelectorAll('.chat .say .carrying > span').length === 1")
+    page.locator("#chattext").fill(f"and the plot itself, the numbers in `{notes}`")
     page.locator("#chatsend").click()
     page.wait_for_function("() => document.querySelectorAll('.chat .msg').length === 3")
     sent = [message for message in desk.get("/chat")["messages"] if message["thread"] == thread][-1]
-    assert (sent["who"], len(sent["images"])) == ("you", 2)
+    assert (sent["who"], len(sent["images"])) == ("you", 1)
     last = page.locator(".chat .msg").last.locator("img.carries")
     page.wait_for_function(f"(seen) => ({shown})(seen)", arg=last.element_handle())
-    saved = page.locator(".chat .msg").last.locator("a.carried")
-    assert saved.get_attribute("download") == "measured.csv"
+    named = page.locator(".chat .msg").last.locator("a.ondisk")
+    assert named.inner_text() == str(notes)
+    named.click()
+    opened = desk.home / "opened.log"
+    until(lambda: opened.exists() and str(notes) in opened.read_text().splitlines())
     assert page.locator(".chat .say .carrying img").count() == 0

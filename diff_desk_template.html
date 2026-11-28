@@ -1449,6 +1449,7 @@
   /* Offered where the pointer is. */
   .chat .msg .who .copy { display: inline-grid; place-items: center; margin-left: 6px; padding: 2px 4px; vertical-align: middle; color: var(--faint); background: transparent; border: 0; border-radius: 4px; cursor: pointer; visibility: hidden; }
   .chat .msg .who .copy svg { width: 13px; height: 13px; }
+  .chat a.ondisk { font-family: var(--mono); font-size: 0.92em; overflow-wrap: anywhere; }
   .chat .msg .who .copy:hover { color: var(--accent); }
   .chat .msg .who .copy[data-copied="true"] { color: var(--add-ink); }
   .chat .msg .who .copy[data-copied="false"] { color: var(--del-ink); }
@@ -1646,8 +1647,8 @@
     .filehead .path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; }
     .filehead .badge { flex: none; font-size: 9px; padding: 1px 4px; }
     .filehead > .icon, .filehead .counts, .seen .word, .folderseen .word { display: none; }
-    .filehead > .more { display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; background: transparent; color: var(--faint); }
-    .filehead .more svg { width: 16px; height: 16px; }
+    .filehead > .more { display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; background: transparent; color: var(--muted); }
+    .filehead .more svg { width: 20px; height: 20px; }
     .filehead .seen { padding: 8px; margin: 0; }
     .seen input { margin: 0; }
     .body { border-radius: 0; }
@@ -1720,12 +1721,6 @@
     /* A thread hangs inside the table of code, whose letters it would otherwise take. */
     .noterow td { font-family: var(--sans); }
     .notebox .row { flex-wrap: wrap; }
-    /* A phone zooms the page onto any field written in smaller letters the moment it takes the keyboard, and leaves
-       it zoomed. Every field is set apart by its own rule, so only an override reaches them all. */
-    input, textarea, select { font-size: 16px !important; }
-    /* What a field says before anything is written in it reads at the size of the words around it: the zoom answers
-       the size of what is typed alone. */
-    input::placeholder, textarea::placeholder { font-size: 13px; }
     /* Rows and buttons a finger can hit: the size of a fingertip, rather than of a pointer. */
     .fileitem, .foldername { min-height: 44px; }
     /* One size for every path on a phone, the file list, its folders, the file heads and the tabs alike, one for the
@@ -2485,12 +2480,12 @@
   // request could not show.
   const ATTACHABLE = ".png,.jpg,.jpeg,.gif,.webp,.svg,.mp4,.mov,.webm";
 
-  async function kept(file, isChat) {
+  async function kept(file) {
     // Kept by the desk as it arrives rather than as the comment is sent: the reader sees at once that the screenshot
     // is on the desk, and what the comment holds is its name. A message of the chat takes any file (see `attached`).
     if (leaving) return { ok: false, error: "the page is going" };
     try {
-      const named = `media?name=${encodeURIComponent(file.name || "pasted.png")}${isChat ? "&for=chat" : ""}`;
+      const named = `media?name=${encodeURIComponent(file.name || "pasted.png")}`;
       const answer = await ask(named, {
         method: "POST",
         headers: { "Content-Type": "application/octet-stream" },
@@ -2632,7 +2627,7 @@
   const sameFiles = (held, given) =>
     held.map((image) => image.file).join(" ") === (given || []).map((image) => image.file).join(" ");
 
-  function attaching(field, box, controls, held, isChat = false) {
+  function attaching(field, box, controls, held) {
     // Every box a reviewer writes in takes a file the three ways one arrives: pasted from the clipboard, dropped onto
     // the box, or picked with the button this adds to its buttons. Answers with the way to read what the box carries,
     // and to replace it, which is what a box that outlives one comment - the overall note - is cleared through.
@@ -2659,7 +2654,7 @@
     };
     const take = async (files) => {
       for (const file of files) {
-        const answer = await kept(file, isChat);
+        const answer = await kept(file);
         if (answer.ok) carrying.push(answer.image);
         else window.alert(`${file.name || "that file"} was not kept: ${answer.error || "the desk refused it"}`);
       }
@@ -2668,8 +2663,9 @@
     const pick = document.createElement("input");
     pick.type = "file";
     pick.multiple = true;
-    // What a comment can carry to the pull request, or any file for the chat, which goes nowhere.
-    if (!isChat) pick.accept = ATTACHABLE;
+    // What a comment can carry to the pull request, and a message of the chat as well: a file of any other kind is
+    // named by its path, which the page opens where it is read (see linkDisk).
+    pick.accept = ATTACHABLE;
     pick.hidden = true;
     pick.addEventListener("change", () => {
       take([...pick.files]);
@@ -2679,7 +2675,7 @@
     const offer = document.createElement("button");
     offer.className = "ghost";
     offer.textContent = "Attach";
-    offer.dataset.tip = isChat ? "Attach a file" : "Attach an image or a video";
+    offer.dataset.tip = "Attach an image or a video";
     offer.addEventListener("click", () => pick.click());
     controls.append(offer, pick);
     field.addEventListener("paste", (event) => {
@@ -2935,6 +2931,7 @@
         const text = written(words.appendChild(spoke()), message.text);
         shown(words, message.images);
         previews(words, text, message.text);
+        linkDisk(text);
         // A message named by its number goes to that message, in whichever thread it was said.
         rewriteText(text, /(?<![\w&#])(#\d+)(?!\w)/, (piece) => {
           const named = chat.messages.find((held) => held.id === Number(piece.slice(1)));
@@ -2995,6 +2992,47 @@
     ["pdf", /\.pdf(?:[?#].*)?$/i],
   ];
   const ON_DISK = /(?:^|[\s(`])((?:~|\/)[^\s`()]*\.(?:png|jpe?g|gif|webp|svg|mp4|mov|webm|pdf))(?=$|[\s).,;:`])/gim;
+  // A path on disk named in a message, in its words or alone in a code span, is a link that opens the file where the
+  // page is read: with the application that machine opens its kind with on the desk's own machine (see '/open'), and
+  // from another device (a phone on the tailnet) shown or saved there through the desk (see '/file'). Two parts at
+  // least, so a slash between two words is no path.
+  const ON_DISK_PATH = /(?<![\w:/.~-])((?:~\/|\/)[\w.@+%~-]+(?:\/[\w.@+%~-]+)+)/;
+  const isOnThisMachine = ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname);
+
+  function linkDisk(text) {
+    const link = (path) => {
+      const anchor = Object.assign(document.createElement("a"), {
+        className: "ondisk",
+        href: `file?path=${encodeURIComponent(path)}`,
+        target: "_blank",
+        rel: "noreferrer",
+        textContent: path,
+      });
+      anchor.dataset.tip = isOnThisMachine ? "Open with this machine's application for it" : "Open on this device";
+      anchor.addEventListener("click", async (event) => {
+        if (!isOnThisMachine) return;
+        event.preventDefault();
+        const outcome = await post("open", { path });
+        if (!outcome.ok) announce("open", path, outcome.error || "the desk refused it");
+      });
+      return anchor;
+    };
+    for (const code of text.querySelectorAll(":not(pre) > code")) {
+      const path = code.textContent.trim();
+      if (!new RegExp(`^${ON_DISK_PATH.source}$`).test(path)) continue;
+      const anchor = link(path);
+      anchor.replaceChildren(code.cloneNode(true));
+      code.replaceWith(anchor);
+    }
+    // A sentence ending on a path ends with its full stop, which belongs to the sentence.
+    rewriteText(text, ON_DISK_PATH, (piece) => {
+      const path = piece.replace(/\.+$/, "");
+      const held = document.createDocumentFragment();
+      held.append(link(path), piece.slice(path.length));
+      return held;
+    });
+  }
+
   // What each page has been shown as, asked once however often the chat is drawn.
   const cards = new Map();
 
@@ -3432,6 +3470,13 @@
 
   // A phone: a touch screen narrow one way or the other, where the file list, the diff and the chat each take the whole
   // screen in turn (see the '@media' of the phone).
+  // iOS zooms the page onto a field written smaller than 16px the moment it takes the keyboard, and leaves it zoomed. A
+  // page whose scale is held at 1 is spared that, and iOS still lets the reader pinch to zoom it. Elsewhere the scale
+  // stays free: Android zooms onto no field, and holding the scale there would take the pinch away.
+  if (/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)) {
+    const viewport = document.querySelector('meta[name="viewport"]');
+    viewport.content = `${viewport.content}, maximum-scale=1`;
+  }
   const isPhone = () => matchMedia("(pointer: coarse) and (max-width: 600px), (pointer: coarse) and (max-height: 600px)").matches;
 
   // Where the screen stops being covered by the bar: its lower edge while it is held at the top, or the top of the
@@ -6823,7 +6868,7 @@
     const more = document.createElement("button");
     more.className = "more";
     more.setAttribute("aria-label", `More on ${file.path}`);
-    more.innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3.5" cy="8" r="1.3"/><circle cx="8" cy="8" r="1.3"/><circle cx="12.5" cy="8" r="1.3"/></svg>';
+    more.innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="13" cy="8" r="1.5"/></svg>';
     more.addEventListener("click", () =>
       openSheet(`${file.path}  +${file.added} \u2212${file.removed}`, [
         ["Copy the path", () => copy.click()],
@@ -8376,7 +8421,7 @@
   els.chatback.addEventListener("click", () => openChat(null));
   // The box of the chat takes a file the way every box a reviewer writes in does, pasted, dropped or picked, and any
   // file at all, since the chat goes nowhere.
-  const chatFiles = attaching(els.chattext, els.chatsay, els.chatbuttons, [], true);
+  const chatFiles = attaching(els.chattext, els.chatsay, els.chatbuttons, []);
   els.chatsay.addEventListener("submit", sayInChat);
   els.chattext.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) sayInChat(event);

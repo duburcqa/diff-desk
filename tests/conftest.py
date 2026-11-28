@@ -176,11 +176,10 @@ class Desk:
         with urllib.request.urlopen(f"{self.url}/", timeout=60) as answer:
             return answer.read().decode()
 
-    def attach(self, name, raw, is_chat=False):
-        """Offer one file to the desk as the page does: the bytes as the body, under the name it arrived with, for a
-        comment or for a message of the chat."""
+    def attach(self, name, raw):
+        """Offer one file to the desk as the page does: the bytes as the body, under the name it arrived with."""
         request = urllib.request.Request(
-            f"{self.url}/media?name={urllib.parse.quote(name)}{'&for=chat' if is_chat else ''}",
+            f"{self.url}/media?name={urllib.parse.quote(name)}",
             data=raw,
             headers={"Content-Type": "application/octet-stream"},
             method="POST",
@@ -220,6 +219,8 @@ def desk(repo, tmp_path_factory):
             "DIFF_DESK_GH": f"{sys.executable} {ROOT / 'tests' / 'fake_gh.py'}",
             "FAKE_GH_SCRIPT": str(home / "fake_gh.json"),
             "FAKE_GH_LOG": str(home / "fake_gh.log"),
+            # And opening a file on this machine by a stand-in that records it, so a test opens nothing for real.
+            "DIFF_DESK_OPENER": f"{sys.executable} {ROOT / 'tests' / 'fake_opener.py'} {home}",
         },
         stdout=told,
         stderr=subprocess.STDOUT,
