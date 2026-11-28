@@ -2155,7 +2155,7 @@ def test_the_chat_pins_messages_over_a_thread_and_reports_under_it(desk, tmp_pat
     # nothing outside that folder.
     folder = tmp_path / "report"
     folder.mkdir()
-    (folder / "index.html").write_text('<img src="plot.svg">')
+    (folder / "index.html").write_text('<title>Contact jitter</title><img src="plot.svg">')
     (folder / "plot.svg").write_text("<svg/>")
     (tmp_path / "secret.txt").write_text("not the report's")
     told = desk.cli("say", str(thread), "Benchmark", "--report", str(folder / "index.html")).communicate(timeout=60)[0]
@@ -2164,7 +2164,7 @@ def test_the_chat_pins_messages_over_a_thread_and_reports_under_it(desk, tmp_pat
     assert (report["pinned"], report["report"]["source"]) == (True, str(folder / "index.html"))
     key = report["report"]["key"]
     with urllib.request.urlopen(f"{desk.url}/report/{key}/index.html", timeout=30) as answer:
-        assert answer.read() == b'<img src="plot.svg">'
+        assert answer.read() == b'<title>Contact jitter</title><img src="plot.svg">'
         # Run in a sandbox wherever it is opened, so its scripts never act as the reader on this desk.
         assert answer.headers["Content-Security-Policy"].startswith("sandbox")
     with urllib.request.urlopen(f"{desk.url}/report/{key}/plot.svg", timeout=30) as answer:
@@ -2173,11 +2173,17 @@ def test_the_chat_pins_messages_over_a_thread_and_reports_under_it(desk, tmp_pat
         with pytest.raises(urllib.error.HTTPError) as answer:
             urllib.request.urlopen(f"{desk.url}/report/{wrong}", timeout=30)
         assert answer.value.code == 404
-    # It says when its file was last written, as it stands when asked, so that writing it again is seen.
+    # It says its title and when its file was last written, as they stand when asked, so that writing it again is seen.
+    assert report["report"]["title"] == "Contact jitter"
     assert report["report"]["at"] == (folder / "index.html").stat().st_mtime_ns // 1_000_000
     os.utime(folder / "index.html", ns=(0, (folder / "index.html").stat().st_mtime_ns + 5_000_000_000))
     rewritten = {message["id"]: message for message in desk.get("/chat")["messages"]}[made]["report"]["at"]
     assert rewritten == report["report"]["at"] + 5000
+    # Pinned again, which is how an agent says it is updated, it keeps one pin, on the newer message.
+    told = desk.cli("say", str(thread), "Updated", "--report", str(folder / "index.html")).communicate(timeout=60)[0]
+    again = int(told.split("[")[1].split("]")[0])
+    said = {message["id"]: message for message in desk.get("/chat")["messages"]}
+    assert (said[made]["pinned"], said[again]["pinned"]) == (False, True)
     # A report on the web is kept as its address, and one named by anything else is refused.
     web = desk.post(
         "/chat", {"thread": thread, "text": "Dashboard", "report": "https://example.com/run/7"}, agent=AGENT
@@ -2238,6 +2244,21 @@ def test_a_link_of_the_chat_is_shown_by_what_it_says_of_itself(desk, site, shot,
     with pytest.raises(urllib.error.HTTPError) as answer:
         ask(f"/unfurl?url={urllib.parse.quote(page)}", as_reader=False)
     assert answer.value.code == 403
+    # A markdown file on disk by its first heading and its first paragraph, read as it stands when asked, and a page on
+    # disk by its title.
+    notes = tmp_path / "derivation.md"
+    notes.write_text("# The gap transport\n\nThe exact gap increment\nvanishes at the fixed point.\n\n## Notation\n")
+    card = json.loads(ask(f"/unfurl?url={urllib.parse.quote(str(notes))}")[1])
+    assert (card["site"], card["title"], card["text"]) == (
+        tmp_path.name,
+        "The gap transport",
+        "The exact gap increment vanishes at the fixed point.",
+    )
+    notes.write_text("# Rewritten\n")
+    assert json.loads(ask(f"/unfurl?url={urllib.parse.quote(str(notes))}")[1])["title"] == "Rewritten"
+    report = tmp_path / "report.html"
+    report.write_text("<html><head><title>Projection\n  audit</title></head></html>")
+    assert json.loads(ask(f"/unfurl?url={urllib.parse.quote(str(report))}")[1])["title"] == "Projection audit"
 
 
 def test_a_file_named_on_disk_opens_on_this_machine_alone(desk, tmp_path):
@@ -2262,6 +2283,9 @@ def test_a_file_named_on_disk_opens_on_this_machine_alone(desk, tmp_path):
     assert ask(script) == {"ok": True, "revealed": True}
     shown = f"-R {script}" if sys.platform == "darwin" else str(script.parent)
     until(lambda: shown in opened.read_text().splitlines())
+    # A folder is opened as the machine opens folders, its contents listed where they are.
+    assert ask(tmp_path) == {"ok": True, "revealed": False}
+    until(lambda: str(tmp_path) in opened.read_text().splitlines())
     # Read from another device, or asked by anyone but the page, nothing is opened on this machine.
     for host, as_reader in (("desk.tail0.ts.net", True), (None, False)):
         with pytest.raises(urllib.error.HTTPError) as answer:

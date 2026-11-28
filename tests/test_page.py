@@ -5851,11 +5851,12 @@ def test_a_message_of_the_chat_is_answered_folded_reworded_and_taken_back(page, 
 def test_the_chat_pins_messages_over_a_thread_and_opens_its_reports_in_place(page, desk, tmp_path):
     report = tmp_path / "report.html"
     ran = '<p id="ran"></p><script>document.getElementById("ran").textContent = "ran"</script>'
-    report.write_text(f'<h1 id="said">Benchmark</h1>{ran}')
+    named = "Contact jitter over every tolerance, with the spectra, the stored checks and the restart"
+    report.write_text(f'<title>{named}</title><h1 id="said">Benchmark</h1>{ran}')
     opened = desk.post("/chat", {"title": "Read this first", "text": "the jitter is the warm start"}, agent=AGENT)
     thread = opened["thread"]
-    named = "Benchmark of the contact jitter over every tolerance, with the spectra and the stored checks"
-    desk.post("/chat", {"thread": thread, "text": named, "report": str(report)}, agent=AGENT)
+    pinning = {"thread": thread, "text": "Pinned the benchmark, with every run", "report": str(report)}
+    desk.post("/chat", pinning, agent=AGENT)
     page.evaluate("() => loadNotes()")
     page.locator("#chatopen").click()
     page.locator(f".chat .topic[data-thread='{thread}']").click()
@@ -5870,8 +5871,8 @@ def test_the_chat_pins_messages_over_a_thread_and_opens_its_reports_in_place(pag
     # A report stands under the thread, and opens in place of the chat, filling it, its page in a sandbox.
     chip = page.locator("#chatreports .reportchip")
     assert chip.locator("span").inner_text() == named
-    # Named by the message pinning it, cut short to leave the thread its room.
-    assert chip.bounding_box()["width"] <= 260
+    # Named by its own title, cut short to leave the thread its room.
+    assert page.locator("#chatreports .reportpin").bounding_box()["width"] <= 280
     # Never opened, it carries a dot, which opening it takes away.
     lit = "(dot) => getComputedStyle(dot).opacity"
     assert chip.locator(".dot").evaluate(lit) == "1"
@@ -5893,6 +5894,13 @@ def test_the_chat_pins_messages_over_a_thread_and_opens_its_reports_in_place(pag
     os.utime(report, ns=(0, report.stat().st_mtime_ns + 5_000_000_000))
     page.evaluate("() => loadNotes()")
     page.wait_for_function(f"() => ({lit})(document.querySelector('#chatreports .reportchip .dot')) === '1'")
+    # Every pin is taken off by its cross, the report under the thread and the message over it alike.
+    page.locator("#chatreports .reportpin .unpin").click()
+    page.wait_for_selector("#chatreports", state="hidden")
+    page.locator("#chatpins .pinrow").hover()
+    page.locator("#chatpins .pinrow .unpin").click()
+    page.wait_for_selector("#chatpins", state="hidden")
+    assert not any(message.get("pinned") for message in desk.get("/chat")["messages"] if message["thread"] == thread)
 
 
 def test_a_thread_of_the_comments_folds_its_replies_away(page, desk):
@@ -5929,7 +5937,10 @@ def test_a_message_of_the_chat_carries_files_and_shows_its_links(page, desk, sit
     plot.write_bytes(shot)
     title = f"Carried, number {len(desk.get('/chat')['messages']) + 1}"
     thread = desk.post("/chat", {"title": title, "text": "the run is done"}, agent=AGENT)["thread"]
-    said = f"@{AGENT} @you the benchmark is at {site}/page.html and the plot at {plot}."
+    derivation = tmp_path / "derivation.md"
+    derivation.write_text("# The gap transport\n\nThe exact gap increment vanishes at the fixed point.\n")
+    said = f"@{AGENT} @you the benchmark is at {site}/page.html, the plot at {plot} and the derivation in {derivation}."
+    said += f" Everything is in `{tmp_path}/`."
     desk.post("/chat", {"thread": thread, "text": said}, agent="astra")
     page.evaluate("() => loadNotes()")
     page.locator("#chatopen").click()
@@ -5942,14 +5953,19 @@ def test_a_message_of_the_chat_carries_files_and_shows_its_links(page, desk, sit
     assert mention.evaluate(ink) == page.locator(".chat .msg .who").first.evaluate(ink)
     # The reader is read in their own colour too, whoever's message names them.
     assert page.locator(".chat .msg .mention", has_text="@you").evaluate(ink) == colour(page, "--add-ink")
-    # Its links are shown under it: a page by what it says of itself, an image on disk as the image.
-    assert page.locator(".chat .card .title").inner_text() == "Standing-wave benchmark"
+    # Its links are shown under it: a page by what it says of itself, an image on disk as the image, and a markdown file
+    # on disk by its first heading and its first words.
+    page.wait_for_function("() => document.querySelectorAll('.chat .card .title').length === 2")
+    assert page.locator(".chat .card .title").all_inner_texts() == ["Standing-wave benchmark", "The gap transport"]
+    assert page.locator(".chat .card .text").last.inner_text() == "The exact gap increment vanishes at the fixed point."
     shown = "(img) => img.complete && img.naturalWidth"
     page.wait_for_function(f"() => ({shown})(document.querySelector('.chat .previews img.carries'))")
     assert page.locator(".chat .previews img.carries").evaluate(shown) == 64
 
-    # A path on disk in its words is a link, a sentence ending on one keeping its full stop.
+    # A path on disk in its words is a link, a sentence ending on one keeping its full stop, and so is a folder closing
+    # on its slash.
     assert page.locator(".chat .msg a.ondisk").first.inner_text() == str(plot)
+    assert f"{tmp_path}/" in page.locator(".chat .msg a.ondisk").all_inner_texts()
 
     # An image or a video is put in the box as in any box, and goes with the message, shown where it stands. Any other
     # file is named by its path, a link opening it with this machine's application for its kind.

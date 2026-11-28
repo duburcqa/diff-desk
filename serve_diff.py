@@ -115,6 +115,7 @@ keep their reason. The log on disk is written before GitHub is contacted, so a p
 import contextlib
 import hashlib
 import hmac
+import html
 import http.cookies
 import json
 import mimetypes
@@ -227,6 +228,11 @@ ATTACHABLE = {
 }
 # What a browser shows inline of a file on disk a message names: anything else is saved.
 SHOWABLE = {**ATTACHABLE, ".pdf": "application/pdf"}
+# Files on disk whose own words make the card a message shows for them (see `disk_card`), how much of each is read for
+# it, and how many of its words the card holds.
+WORDED = {".md", ".markdown", ".txt", ".html", ".htm"}
+WORDS_READ = 65536
+WORDS_SHOWN = 300
 # What opens a file on this machine with the application it opens that kind with, `DIFF_DESK_OPENER` naming another.
 OPENER = shlex.split(os.environ.get("DIFF_DESK_OPENER", "open" if sys.platform == "darwin" else "xdg-open"))
 # Kinds a machine runs rather than shows when it opens them: one of these named in a message is shown in its folder
@@ -1364,8 +1370,9 @@ def read_chat():
 
 
 def timed_reports(messages):
-    """The messages of the chat, each report on disk carrying when its file was last written, in milliseconds, as it
-    stands when asked: an agent writes a report again where it pinned it, and the page marks what changed since."""
+    """The messages of the chat, each report on disk carrying when its file was last written, in milliseconds, and its
+    title, as they stand when asked: an agent writes a report again where it pinned it, and the page marks what changed
+    since and names it by its title."""
     for message in messages:
         report = message.get("report") or {}
         if not report.get("key"):
@@ -1375,6 +1382,7 @@ def timed_reports(messages):
         except OSError:
             # Gone since it was pinned: nothing to mark, and opening it answers with nothing.
             continue
+        report["title"] = disk_card(report["source"])["title"]
     return messages
 
 
@@ -1434,6 +1442,39 @@ UNFURLED = {}
 UNFURLING = threading.Lock()
 
 
+def disk_card(path):
+    """What a file on disk named in the chat is shown as: a card with the folder it is in, a title and its first words.
+
+    The title is the first heading of a markdown file or the title of a page, and the file's name otherwise. Read as it
+    stands when asked, since the agent naming it may write it again.
+    """
+    given = pathlib.Path(path)
+    card = {"url": path, "site": given.parent.name or "/", "title": given.name, "text": ""}
+    kind = given.suffix.lower()
+    if kind not in WORDED:
+        return card
+    with given.open("rb") as held:
+        head = held.read(WORDS_READ).decode("utf-8", errors="replace")
+    if kind in (".html", ".htm"):
+        named = re.search(r"<title[^>]*>(.*?)</title>", head, re.IGNORECASE | re.DOTALL)
+        if named and named.group(1).strip():
+            card["title"] = html.unescape(" ".join(named.group(1).split()))
+        return card
+    lines = head.splitlines()
+    heading = next((line.lstrip("#").strip() for line in lines if line.startswith("# ")), "")
+    if heading:
+        card["title"] = heading
+    # The first paragraph that is not a heading, as plain words.
+    words = []
+    for line in lines:
+        if line.strip() and not line.startswith("#"):
+            words.append(line.strip())
+        elif words:
+            break
+    card["text"] = " ".join(words)[:WORDS_SHOWN]
+    return card
+
+
 def unfurl(url):
     """What a link of the chat is shown as: a card with the site it is on, a title, some words and an image."""
     with UNFURLING:
@@ -1487,17 +1528,24 @@ def page_card(url):
     return card
 
 
-def pinned_report(source):
-    """What a report pinned in the chat is kept as, and why it is refused where it is.
+def pin_report(said, source, thread):
+    """Pin a report under the message `said` of the messages `thread`, and answer with why it is refused where it is.
 
     On disk, its folder is served under a key nobody can guess, which is what its own pictures and scripts are asked for
-    by (see '_report'). On the web, the page opens the address itself.
+    by (see '_report'). On the web, the page opens the address itself. A thread keeps one pin per report: pinned again,
+    which is how an agent says it is updated, it takes the place of the pin it had rather than standing beside it.
     """
     if source.startswith(("http://", "https://")):
-        return {"source": source}, ""
-    if not pathlib.Path(source).is_absolute() or not pathlib.Path(source).is_file():
-        return None, f"no report at {source}: name a file by its absolute path, or a web address"
-    return {"source": source, "key": secrets.token_urlsafe(16)}, ""
+        report = {"source": source}
+    elif pathlib.Path(source).is_absolute() and pathlib.Path(source).is_file():
+        report = {"source": source, "key": secrets.token_urlsafe(16)}
+    else:
+        return f"no report at {source}: name a file by its absolute path, or a web address"
+    for older in thread:
+        if (older.get("report") or {}).get("source") == source:
+            older["pinned"] = False
+    said["report"], said["pinned"] = report, True
+    return ""
 
 
 def chat_export(thread):
@@ -1874,9 +1922,20 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"rows": fresh, "chat": said, "desk": SERVING})
 
     def _unfurl(self, query):
-        """What a link of the chat is shown as, to the page alone, which is the one that shows it."""
+        """What a link of the chat is shown as, a page of the web or a file on disk named by its absolute path, to the
+        page alone, which is the one that shows it."""
         url = query.get("url", [""])[0]
-        if self._author()[0] != READER or not url.startswith(("http://", "https://")):
+        if self._author()[0] != READER:
+            self._send(403)
+            return
+        given = pathlib.Path(os.path.expanduser(url))
+        if given.is_absolute():
+            if not given.is_file():
+                self._send(404)
+                return
+            self._json(disk_card(str(given)))
+            return
+        if not url.startswith(("http://", "https://")):
             self._send(403)
             return
         self._json(unfurl(url))
@@ -1909,8 +1968,8 @@ class Handler(BaseHTTPRequestHandler):
             shutil.copyfileobj(held, self.wfile)
 
     def _open(self):
-        """Open a file on disk with the application this machine opens its kind with, or show it in its folder where
-        opening it would run it, for the page alone and for a page on this machine alone.
+        """Open a file or a folder on disk with the application this machine opens its kind with, or show it in its
+        folder where opening it would run it, for the page alone and for a page on this machine alone.
 
         A page read from another device (through the tailnet) is answered no: opening there means saving it, which
         '/file' does. Which machine the page stands on is told by the address it reached the desk at.
@@ -1920,10 +1979,11 @@ class Handler(BaseHTTPRequestHandler):
         if self._author()[0] != READER or host not in ("127.0.0.1", "localhost", "[::1]"):
             self._send(403)
             return
-        if not given.is_absolute() or not given.is_file():
-            self._json({"ok": False, "error": f"no file at {given}"})
+        if not given.is_absolute() or not given.exists():
+            self._json({"ok": False, "error": f"nothing at {given}"})
             return
-        is_runnable = given.suffix.lower() in RUNNABLE or os.access(given, os.X_OK)
+        # A folder may be entered, which is what its execute bit says, and is opened all the same.
+        is_runnable = given.suffix.lower() in RUNNABLE or (given.is_file() and os.access(given, os.X_OK))
         shown = [*OPENER, "-R", str(given)] if sys.platform == "darwin" else [*OPENER, str(given.parent)]
         try:
             subprocess.Popen(shown if is_runnable else [*OPENER, str(given)], start_new_session=True)
@@ -1984,12 +2044,11 @@ class Handler(BaseHTTPRequestHandler):
                 said["title"] = title
             if order.get("on") is not None:
                 said["on"] = order["on"]
-            if order.get("report"):
-                said["report"], refused = pinned_report(str(order["report"]))
-                if refused:
-                    self._json({"ok": False, "error": refused})
-                    return
-                said["pinned"] = True
+            pinned = threads.get(said["thread"], ())
+            refused = pin_report(said, str(order["report"]), pinned) if order.get("report") else ""
+            if refused:
+                self._json({"ok": False, "error": refused})
+                return
             if order.get("images"):
                 said["images"] = carried(order)
             messages.append(said)
