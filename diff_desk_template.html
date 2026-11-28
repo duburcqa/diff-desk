@@ -1451,6 +1451,8 @@
   .chat .card .text { color: var(--muted); font-size: 12px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
   .chat .card img { flex: none; width: 72px; height: 72px; object-fit: cover; border-radius: 4px; }
   .chat .msg .who .num { margin-left: 6px; color: var(--faint); font-family: var(--mono); font-weight: 400; }
+  /* Offered where the pointer is, and always on a touch screen, which has no pointer to show it by. */
+  @media (pointer: coarse) { .chat .msg .who .acts { visibility: visible; } }
   /* Offered where the pointer is. */
   .chat .msg .who .copy { display: inline-grid; place-items: center; margin-left: 6px; padding: 2px 4px; vertical-align: middle; color: var(--faint); background: transparent; border: 0; border-radius: 4px; cursor: pointer; visibility: hidden; }
   .chat .msg .who .copy svg { width: 13px; height: 13px; }
@@ -1463,6 +1465,35 @@
   @media (pointer: coarse) { .keys { display: none; } }
   .chat .msg.flash { background: color-mix(in srgb, var(--accent) 14%, transparent); }
   .chat .msg .said { color: var(--ink); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+  /* An answer stands under what it answers, a step in for each step down, four at most. */
+  .chat .msg { margin-left: calc(var(--depth, 0) * 16px); }
+  .chat .msg .who { display: flex; align-items: center; min-width: 0; }
+  .foldmsg { display: inline-grid; place-items: center; flex: none; margin: 0 2px 0 -4px; padding: 2px; color: var(--faint); background: transparent; border: 0; border-radius: 4px; cursor: pointer; }
+  .foldmsg svg { width: 11px; height: 11px; transition: transform 0.1s; }
+  .foldmsg:hover { color: var(--accent); }
+  [data-folded="true"] > .who .foldmsg svg, .said[data-folded="true"] > .foldmsg svg { transform: rotate(-90deg); }
+  /* Folded, a message is the line of its author with its first words, and how many answers it holds. */
+  .chat .msg .gist { display: none; flex: 1 1 auto; min-width: 0; margin-left: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-weight: 400; }
+  .chat .msg[data-folded="true"] .gist { display: block; }
+  .chat .msg[data-folded="true"] > .said, .chat .msg[data-folded="true"] .acts { display: none; }
+  .chat .msg .acts { display: inline-flex; flex: none; gap: 1px; margin-left: 6px; visibility: hidden; }
+  .chat .msg:hover .acts, .chat .msg .acts:focus-within { visibility: visible; }
+  .chat .msg .acts button { display: inline-grid; place-items: center; padding: 2px 4px; color: var(--faint); background: transparent; border: 0; border-radius: 4px; cursor: pointer; }
+  .chat .msg .acts button:hover { color: var(--accent); }
+  .chat .msg .acts .drop:hover { color: var(--del-ink); }
+  .chat .msg .acts svg { width: 13px; height: 13px; }
+  .chat .msg .said.gone { color: var(--faint); font-style: italic; }
+  .chat .msg .said textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 6px 8px; color: var(--ink); background: var(--surface); border: 1px solid var(--rule-strong); border-radius: 6px; }
+  .chat .msg .said .row { display: flex; gap: 8px; margin-top: 6px; }
+  /* A remark or a reply folded is the line of its author and its first words. */
+  .thread .said .gist { display: none; margin-left: 4px; color: var(--muted); }
+  .thread .said[data-folded="true"] { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .thread .said[data-folded="true"] .gist { display: inline; }
+  .thread .said[data-folded="true"] > :not(.who, .foldmsg, .gist, .more, .mark) { display: none; }
+  .thread .said > .foldmsg { display: inline-grid; vertical-align: middle; margin: 0 2px 0 -2px; }
+  /* The message the box answers, said over it. */
+  .chat .say .answering:not([hidden]) { display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 8px; font-size: 12px; color: var(--muted); border-left: 2px solid var(--accent); background: var(--surface-sunk); border-radius: 0 6px 6px 0; }
+  .chat .say .answering span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .chat .msg .said .text > p:first-child { margin-top: 2px; }
   /* A form keeps a margin under it in the quirks mode this page renders in, which would leave a strip of nothing below
      the box. */
@@ -2086,6 +2117,7 @@
     </div>
     <div class="talk" id="chatrows"></div>
     <form class="say" id="chatsay">
+      <div class="answering" id="chatanswering" hidden><span id="chatanswerwhat"></span><button class="tiny" type="button" id="chatanswerdrop" aria-label="Answer the thread rather than this message">&#215;</button></div>
       <input id="chatname" type="text" placeholder="What the thread is about" aria-label="Title of the new thread" hidden />
       <div class="actions">
         <div class="write">
@@ -2110,7 +2142,9 @@
   const notes = { sent: [], drafts: [], live: false, watching: [] };
   // The chat: every message the desk holds, the thread on screen (null for the list of threads, "new" while one is
   // being opened), and per thread the last message the reader has had on screen, kept in this browser.
-  const chat = { messages: [], open: null, read: {}, drawn: null, drawnThread: null };
+  // `folded` holds the messages the reader folded, `answering` the message the box answers, `editing` the message being
+  // reworded and its draft: each outlives the redraws a thread goes through while it is read.
+  const chat = { messages: [], open: null, read: {}, drawn: null, drawnThread: null, folded: new Set(), answering: null, editing: null };
   // A selection is a span of rendered rows, held as the row order within the file rather than as line numbers on one
   // side, which is what lets one range cover removed and added lines together.
   const sel = { path: null, from: null, to: null };
@@ -2144,7 +2178,7 @@
   let heard = {};
 
   const els = {};
-  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "goback", "foldreviewed", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "loading", "goto", "veil", "palette", "pq", "picks", "find", "fgrip", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "fthreads", "toast", "toastwhere", "toastsaid", "toastmark", "logdot", "chatopen", "chatdot", "chat", "chatgrip", "chatback", "chattitle", "chatcopy", "chatnew", "chatclose", "chatwho", "chatrows", "chatsay", "chatname", "chattext", "chatsend", "chatresult", "filesgrip", "railfold", "logmove", "logsize", "fchat", "chatbuttons", "dock", "dockfiles", "dockprev", "dockdone", "docknext", "docklog", "dockchat", "docklogdot", "dockchatdot", "selbar", "selwhat", "selcomment", "selclear", "turn", "dockmore", "sheet", "sheettitle", "sheetitems", "dockdiff", "filetabs", "chattabs", "logflip", "logmore", "docksettings", "tabbar", "trayhead"]) {
+  for (const id of ["tabs", "scope", "q", "ctx", "settingsopen", "settings", "settingtip", "semantic", "hidedeleted", "hidedone", "hidefiles", "hideclosed", "filelist", "main", "tplus", "tminus", "pfill", "ptext", "pback", "pnext", "cback", "cnext", "authors", "authorsrow", "sentfilter", "onlyunread", "reactnow", "tray", "unsent", "unsentcount", "unsentlist", "traycount", "traylist", "traynote", "traysend", "traydrop", "tograb", "togh", "ghlabel", "trayresult", "logopen", "goback", "foldreviewed", "log", "logcount", "logrows", "logsort", "logretry", "logbind", "logsend", "logsync", "logclose", "logresult", "showfiles", "source", "sourceopen", "srcdir", "srcbase", "srcfilter", "srcrefs", "srcpulls", "srcscan", "srcstatus", "moved", "loading", "goto", "veil", "palette", "pq", "picks", "find", "fgrip", "fq", "fcount", "fprev", "fnext", "fclose", "fcase", "fword", "fregex", "fthreads", "toast", "toastwhere", "toastsaid", "toastmark", "logdot", "chatopen", "chatdot", "chat", "chatgrip", "chatback", "chattitle", "chatcopy", "chatnew", "chatclose", "chatwho", "chatrows", "chatsay", "chatname", "chattext", "chatsend", "chatresult", "filesgrip", "railfold", "logmove", "logsize", "fchat", "chatbuttons", "dock", "dockfiles", "dockprev", "dockdone", "docknext", "docklog", "dockchat", "docklogdot", "dockchatdot", "selbar", "selwhat", "selcomment", "selclear", "turn", "dockmore", "sheet", "sheettitle", "sheetitems", "dockdiff", "filetabs", "chattabs", "logflip", "logmore", "docksettings", "tabbar", "trayhead", "chatanswering", "chatanswerwhat", "chatanswerdrop"]) {
     els[id] = document.getElementById(id);
   }
 
@@ -2260,6 +2294,8 @@
     els.chatopen.setAttribute("aria-pressed", String(Boolean(choices.chat)));
     try {
       chat.read = JSON.parse(localStorage.getItem("diffdesk.chatRead") || "{}");
+      chat.folded = new Set(JSON.parse(localStorage.getItem("diffdesk.chatFolded") || "[]"));
+      for (const key of JSON.parse(localStorage.getItem("diffdesk.saidFolded") || "[]")) saidFolded.add(key);
       for (const [variable, key] of [["--chat-width", "diffdesk.chatWidth"], ["--files-width", "diffdesk.filesWidth"]]) {
         const width = Number(localStorage.getItem(key));
         if (width) document.documentElement.style.setProperty(variable, `${width}px`);
@@ -2918,20 +2954,56 @@
       })),
     );
     // Drawn again only for what moved, so a thread being read keeps its place between two rounds that heard nothing.
-    const drawing = JSON.stringify([chat.open, chat.messages.length, isThread ? null : chat.read, data.viewer]);
+    const changed = chat.messages.map((message) => `${message.id}:${(message.edits || []).length}:${Boolean(message.deleted)}`);
+    const held = [[...chat.folded], chat.editing && chat.editing.id];
+    const drawing = JSON.stringify([chat.open, changed, isThread ? null : chat.read, data.viewer, held]);
     if (drawing === chat.drawn) return;
     const atFoot = els.chatrows.scrollHeight - els.chatrows.scrollTop - els.chatrows.clientHeight < 40;
     chat.drawn = drawing;
     els.chatrows.replaceChildren();
     if (isThread) {
-      for (const message of threads.get(chat.open)) {
+      // Each answer under what it answers, in the order said within each level, and nothing under a folded message.
+      const messages = threads.get(chat.open);
+      const known = new Set(messages.map((message) => message.id));
+      const under = new Map();
+      for (const message of messages) {
+        const parent = message.on && known.has(message.on) ? message.on : 0;
+        if (!under.has(parent)) under.set(parent, []);
+        under.get(parent).push(message);
+      }
+      const placed = [];
+      const pending = [...(under.get(0) || [])].reverse().map((message) => [message, 0]);
+      while (pending.length) {
+        const [message, depth] = pending.pop();
+        let below = 0;
+        for (const reaching = [...(under.get(message.id) || [])]; reaching.length; below += 1) {
+          reaching.push(...(under.get(reaching.pop().id) || []));
+        }
+        placed.push({ message, depth, below });
+        if (chat.folded.has(message.id)) continue;
+        for (const answer of [...(under.get(message.id) || [])].reverse()) pending.push([answer, depth + 1]);
+      }
+      for (const { message, depth, below } of placed) {
         const line = document.createElement("div");
         line.className = "msg";
         line.dataset.id = String(message.id);
+        line.style.setProperty("--depth", String(Math.min(depth, 4)));
+        line.dataset.folded = String(chat.folded.has(message.id));
         voiced(line, message.who);
         const who = line.appendChild(document.createElement("div"));
         who.className = "who";
-        who.textContent = spokenBy(message.who);
+        // Folded, a message is its first words on the line of its author, with how many answers it holds.
+        const fold = who.appendChild(document.createElement("button"));
+        fold.className = "foldmsg";
+        fold.type = "button";
+        fold.innerHTML = `<svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 3.8 5 6.3l2.5-2.5"/></svg>`;
+        fold.setAttribute("aria-label", chat.folded.has(message.id) ? "Unfold this message" : "Fold this message");
+        fold.addEventListener("click", () => {
+          if (!chat.folded.delete(message.id)) chat.folded.add(message.id);
+          keepChatFolded();
+          drawChat();
+        });
+        who.append(spokenBy(message.who));
         const at = who.appendChild(document.createElement("span"));
         at.className = "at";
         at.textContent = said(message.at);
@@ -2940,6 +3012,41 @@
         number.className = "num";
         number.textContent = `#${message.id}`;
         number.dataset.tip = `Refer to this message as #${message.id}`;
+        const gist = who.appendChild(document.createElement("span"));
+        gist.className = "gist";
+        gist.textContent = `${message.deleted ? "taken back" : outline(message.text)}${below ? ` \u00b7 ${plural(below, "answer")}` : ""}`;
+        // What a message can be asked to do: answered by the reader, and reworded or taken back by whoever said it.
+        const acts = who.appendChild(document.createElement("span"));
+        acts.className = "acts";
+        const act = (label, icon, deed) => {
+          const button = acts.appendChild(document.createElement("button"));
+          button.type = "button";
+          button.innerHTML = icon;
+          button.dataset.tip = label;
+          button.setAttribute("aria-label", label);
+          button.addEventListener("click", deed);
+          return button;
+        };
+        if (!message.deleted) {
+          act("Answer this message", `<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 3 2 6.5 5.5 10"/><path d="M2 6.5h6.5a3.5 3.5 0 0 1 3.5 3.5v1"/></svg>`, () => {
+            chat.answering = message.id;
+            drawAnswering();
+            els.chattext.focus();
+          }).className = "answer";
+        }
+        if (!message.deleted && isReader(message.who)) {
+          act("Reword this message", `<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2.5 11.5 4.5 5 11H3V9z"/></svg>`, () => {
+            chat.editing = { id: message.id, draft: message.text };
+            chat.drawn = null;
+            drawChat();
+          }).className = "edit";
+          act("Take this message back", `<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7"/></svg>`, async () => {
+            if (!window.confirm("Take this message back? Its words go for good.")) return;
+            const outcome = await post("chat/drop", { id: message.id });
+            if (!outcome.ok) announce("take back", `#${message.id}`, outcome.error || "the desk refused it");
+            await loadNotes();
+          }).className = "drop";
+        }
         // The message as it was written, to paste wherever it is wanted next.
         const copy = who.appendChild(document.createElement("button"));
         copy.className = "copy";
@@ -2962,6 +3069,39 @@
         });
         const words = line.appendChild(document.createElement("div"));
         words.className = "said";
+        if (message.deleted) {
+          words.classList.add("gone");
+          words.textContent = "This message was taken back.";
+          els.chatrows.append(line);
+          continue;
+        }
+        // Reworded in place, the draft held across redraws.
+        if (chat.editing && chat.editing.id === message.id) {
+          const box = words.appendChild(document.createElement("textarea"));
+          box.value = chat.editing.draft;
+          box.addEventListener("input", () => (chat.editing.draft = box.value));
+          grows(box);
+          const row = words.appendChild(document.createElement("div"));
+          row.className = "row";
+          const keep = row.appendChild(Object.assign(document.createElement("button"), { className: "solid", type: "button", textContent: "Save" }));
+          const leave = row.appendChild(Object.assign(document.createElement("button"), { className: "ghost", type: "button", textContent: "Cancel" }));
+          keep.addEventListener("click", async () => {
+            const outcome = await post("chat/edit", { id: message.id, text: box.value.trim() });
+            if (!outcome.ok) {
+              announce("reword", `#${message.id}`, outcome.error || "the desk refused it");
+              return;
+            }
+            chat.editing = null;
+            await loadNotes();
+          });
+          leave.addEventListener("click", () => {
+            chat.editing = null;
+            drawChat();
+          });
+          els.chatrows.append(line);
+          requestAnimationFrame(() => box.focus());
+          continue;
+        }
         const text = written(words.appendChild(spoke()), message.text);
         shown(words, message.images);
         previews(words, text, message.text);
@@ -3145,6 +3285,10 @@
       if (where !== null && !isInThread) history.pushState({ screen: "chat", thread: true }, "");
     }
     chat.open = where;
+    // What the box answered and what was being reworded belong to the thread left.
+    chat.answering = null;
+    chat.editing = null;
+    drawAnswering();
     if (typeof where === "number" && !chatTabs.includes(where)) chatTabs.push(where);
     els.chatresult.textContent = "";
     drawChat();
@@ -3162,6 +3306,22 @@
     drawChat();
   }
 
+  // The message the box answers, said over it with the way back to answering the thread itself.
+  function drawAnswering() {
+    const answered = chat.messages.find((message) => message.id === chat.answering && message.thread === chat.open);
+    if (!answered) chat.answering = null;
+    els.chatanswering.hidden = !answered;
+    if (answered) els.chatanswerwhat.textContent = `Answering ${spokenBy(answered.who)} #${answered.id}: ${outline(answered.text)}`;
+  }
+
+  function keepChatFolded() {
+    try {
+      localStorage.setItem("diffdesk.chatFolded", JSON.stringify([...chat.folded]));
+    } catch (error) {
+      // What is folded is the reader's for this page alone.
+    }
+  }
+
   async function sayInChat(event) {
     event.preventDefault();
     const text = els.chattext.value.trim();
@@ -3175,7 +3335,8 @@
     }
     els.chatsend.disabled = true;
     const images = chatFiles();
-    const outcome = await post("chat", isNew ? { title, text, images } : { thread: chat.open, text, images });
+    const answering = !isNew && chat.answering !== null ? { on: chat.answering } : {};
+    const outcome = await post("chat", isNew ? { title, text, images } : { thread: chat.open, text, images, ...answering });
     els.chatsend.disabled = false;
     if (!outcome.ok) {
       els.chatresult.textContent = outcome.error || "not sent";
@@ -3186,6 +3347,8 @@
     chatFiles([]);
     els.chatresult.textContent = "";
     chat.open = outcome.thread;
+    chat.answering = null;
+    drawAnswering();
     await loadNotes();
   }
 
@@ -3282,6 +3445,32 @@
       line.dataset.tools = isOut ? "open" : "";
     });
     return more;
+  }
+
+  // The remarks and replies the reader folded to their first words, by thread and place in it, kept in this browser.
+  const saidFolded = new Set();
+
+  // The fold of a remark or a reply, and the first words it shows folded, for the words held by `holder`.
+  function foldFor(holder, key, words) {
+    holder.dataset.folded = String(saidFolded.has(key));
+    const fold = document.createElement("button");
+    fold.className = "foldmsg";
+    fold.type = "button";
+    fold.innerHTML = `<svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 3.8 5 6.3l2.5-2.5"/></svg>`;
+    fold.setAttribute("aria-label", "Fold or unfold these words");
+    fold.addEventListener("click", () => {
+      if (!saidFolded.delete(key)) saidFolded.add(key);
+      holder.dataset.folded = String(saidFolded.has(key));
+      try {
+        localStorage.setItem("diffdesk.saidFolded", JSON.stringify([...saidFolded]));
+      } catch (error) {
+        // What is folded is the reader's for this page alone.
+      }
+    });
+    const gist = document.createElement("span");
+    gist.className = "gist";
+    gist.textContent = outline(words);
+    return [fold, gist];
   }
 
   // The threads whose box whispers: everything said from it stays on this desk, kept across redraws.
@@ -4577,6 +4766,8 @@
       .replace(/!\[([^\]\n]*)\]\([^)\s]+\)/g, (whole, alt) => alt.replace(/\s*badge$/i, ""))
       .replace(/\[([^\]\n]*)\]\([^)\s]+\)/g, "$1")
       .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+      // A table's rows say nothing read in a line: the words around the table do.
+      .replace(/^\s*\|.*\|\s*$/gm, "")
       .replace(/\*\*|~~/g, "")
       .replace(/`/g, "")
       .replace(/\s+/g, " ")
@@ -4922,7 +5113,8 @@
     }
     const text = document.createElement("span");
     text.className = "said";
-    text.append(toolsFor(head, `${note.seq}:0`), who);
+    const [fold, gist] = foldFor(text, `${note.seq}:0`, note.text);
+    text.append(toolsFor(head, `${note.seq}:0`), fold, who, gist);
     const remark = text.appendChild(spoke());
     // Numbered as the find numbers what a thread says: the remark, then each reply in the order it was written.
     remark.dataset.part = "0";
@@ -5134,7 +5326,8 @@
         body.append(kind);
       }
       body.prepend(toolsFor(said, `${note.seq}:${index + 1}`));
-      body.append(from);
+      const [fold, gist] = foldFor(body, `${note.seq}:${index + 1}`, answer.text);
+      body.append(fold, from, gist);
       const words = body.appendChild(spoke());
       words.dataset.part = String(index + 1);
       written(words, answer.text);
@@ -8529,6 +8722,10 @@
   );
   els.chatclose.addEventListener("click", () => showChat(false));
   els.chatnew.addEventListener("click", () => openChat("new"));
+  els.chatanswerdrop.addEventListener("click", () => {
+    chat.answering = null;
+    drawAnswering();
+  });
   els.chatback.addEventListener("click", () => openChat(null));
   // The box of the chat takes a file the way every box a reviewer writes in does, pasted, dropped or picked, and any
   // file at all, since the chat goes nowhere.
