@@ -1601,7 +1601,8 @@ def test_a_desk_is_put_down_by_whoever_opened_it(repo, tmp_path_factory):
     home = tmp_path_factory.mktemp("standalone")
     port = free_port()
     told = (home / "serve.log").open("w")
-    env = {**os.environ, "DIFF_DESK_HOME": str(home), "DIFF_DESK_PORT": str(port)}
+    tailscale = f"{sys.executable} {ROOT / 'tests' / 'fake_tailscale.py'} {home}"
+    env = {**os.environ, "DIFF_DESK_HOME": str(home), "DIFF_DESK_PORT": str(port), "DIFF_DESK_TAILSCALE": tailscale}
     running = subprocess.Popen(
         [
             *(sys.executable, str(ROOT / "desk.py"), "serve"),
@@ -1644,6 +1645,8 @@ def test_a_desk_is_put_down_by_whoever_opened_it(repo, tmp_path_factory):
         assert "stopped" in cli("stop", "--owner", "the shell that opened it").stdout
         until(lambda: not answering())
         assert "nothing is serving" in cli("stop").stdout
+        # Tailscale is the reader's to opt into: a desk never put on the tailnet never runs it, not even to ask.
+        assert not (home / "asked.log").exists()
     finally:
         running.terminate()
         told.close()
