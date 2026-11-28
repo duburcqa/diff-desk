@@ -1579,7 +1579,7 @@
     .ftab { display: flex; flex: none; align-items: stretch; max-width: 46vw; border-right: 1px solid var(--rule); color: var(--muted); }
     .ftab[data-current="true"] { color: var(--ink); background: var(--surface-sunk); box-shadow: inset 0 -2px 0 var(--accent); }
     .ftab button { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; -webkit-tap-highlight-color: transparent; }
-    .ftab .name { min-width: 0; padding: 0 2px 0 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12px; }
+    .ftab .name { min-width: 0; padding: 0 2px 0 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .ftab.passing .name { font-style: italic; }
     .ftab .shut { width: 26px; font-size: 15px; color: var(--faint); }
     /* What a tap on the line numbers has picked, with what can be done with it, along the foot of the screen. */
@@ -1647,7 +1647,7 @@
     .filehead > .more { display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; background: transparent; color: var(--faint); }
     .filehead .more svg { width: 16px; height: 16px; }
     .filehead .seen { padding: 8px; margin: 0; }
-    .seen input { width: 20px; height: 20px; margin: 0; }
+    .seen input { margin: 0; }
     .body { border-radius: 0; }
     /* One column of numbers: an added or kept line shows its new number, a removed one its old number (see the row
        builder), the marker beside it saying which. The comment pins give way to the bar a tap opens. */
@@ -1726,13 +1726,16 @@
     input::placeholder, textarea::placeholder { font-size: 13px; }
     /* Rows and buttons a finger can hit: the size of a fingertip, rather than of a pointer. */
     .fileitem, .foldername { min-height: 44px; }
-    .fileitem .name { font-size: 13px; }
+    /* One size for every path on a phone, the file list, its folders, the file heads and the tabs alike, one for the
+       words around them, and one for every tick. */
+    .fileitem .name, .foldername, .filehead .path, .ftab .name { font-family: var(--mono); font-size: 13px; }
+    .foldername { font-weight: 600; }
+    .seen input, .folderseen input { width: 18px; height: 18px; }
     #hidefiles, #foldreviewed { width: 44px; height: 40px; }
     #hidefiles svg, #foldreviewed svg { width: 16px; height: 16px; }
     /* What a pointer shows by hovering, a finger has in view from the start: the tick of a whole folder in place of
        its count. */
-    .folderseen { display: inline-flex; font-size: 13px; }
-    .folderseen input { width: 20px; height: 20px; }
+    .folderseen { display: inline-flex; }
     .foldername .num { visibility: hidden; }
     button.expand { padding: 6px 12px; font-size: 12px; }
     /* Keys a touch screen has none of. */
@@ -1754,7 +1757,7 @@
        the chat for the chat, the head of the comments for them, and none for the file list, which takes its room. */
     body:is(.chat-open, :has(#log[data-open="true"])) :is(.dock .tools, #filetabs), body:not(.chat-open) #chattabs, #chattitle { display: none; }
     body:not(.hide-files) .dock .viewbar, aside .asidehead { display: none; }
-    .ftab.threadtab .name { display: flex; align-items: center; gap: 5px; font-family: var(--sans); font-size: 12.5px; }
+    .ftab.threadtab .name { display: flex; align-items: center; gap: 5px; font-family: var(--sans); }
     .ftab.threadtab .name svg { flex: none; width: 13px; height: 13px; color: var(--accent); }
     aside, body.chat-open .chat, .log[data-open="true"] { z-index: 48; }
     /* The head of the chat and of the comments stand in that row: over the end of it, past the thread tabs, for the
@@ -1848,8 +1851,8 @@
 
 <nav class="dock" id="dock" aria-label="Review">
   <div class="icons">
-  <button id="dockdiff" type="button" aria-pressed="true" aria-label="Diff" data-tip="Diff"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 6 3 10l4 4M13 6l4 4-4 4"/></svg></button>
-  <button id="dockfiles" type="button" aria-pressed="false" aria-label="Files" data-tip="Files"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h9"/></svg></button>
+  <button id="dockdiff" type="button" aria-pressed="true" aria-label="Diff" data-tip="Diff"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6 2.5 10l4 4M13.5 6l4 4-4 4M11.5 4.5l-3 11"/></svg></button>
+  <button id="dockfiles" type="button" aria-pressed="false" aria-label="Files" data-tip="Files"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M7.5 2.5h6l3 3v9h-9z"/><path d="M13.5 2.5v3h3"/><path d="M5 5.5H3.5v12h9V16"/></svg></button>
   <button id="docklog" type="button" aria-pressed="false" aria-label="Comments" data-tip="Comments"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h14v9H9l-4 3v-3H3z"/></svg><i class="dot" id="docklogdot" aria-hidden="true"></i></button>
   <button id="dockchat" type="button" aria-pressed="false" aria-label="Chat" data-tip="Chat"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h11v7H7l-3 2.5V10H2z"/><path d="M15.5 6.5H18v7h-2v2.5l-3-2.5H8.5V12"/></svg><i class="dot" id="dockchatdot" aria-hidden="true"></i></button>
   </div>
@@ -1962,7 +1965,7 @@
         <option value="thread">thread</option>
       </select>
     </label>
-    <button class="ghost" id="logflip" type="button" aria-label="Group by thread" data-tip="Group by thread"><svg class="by-batch" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M2.5 3.5h11M2.5 6.5h11M2.5 10.5h11M2.5 13.5h11"/></svg><svg class="by-thread" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 2.5h11v6h-6l-3 2.5v-2.5h-2z"/><path d="M5 13.5h8.5"/></svg></button>
+    <button class="ghost" id="logflip" type="button" aria-label="Group by thread" data-tip="Group by thread"><svg class="by-batch" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M8 2 14 5 8 8 2 5z"/><path d="M2 8l6 3 6-3"/><path d="M2 11l6 3 6-3"/></svg><svg class="by-thread" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 3h11"/><path d="M4.5 3v8.5h2M4.5 7.5h2"/><path d="M8.5 7.5h5M8.5 11.5h5"/></svg></button>
     <button class="ghost" id="logmore" type="button" aria-label="More" data-tip="More"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3.5" cy="8" r="1.3"/><circle cx="8" cy="8" r="1.3"/><circle cx="12.5" cy="8" r="1.3"/></svg></button>
     <button class="ghost" id="logclose">Close</button>
   </div>
