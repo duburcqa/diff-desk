@@ -1437,9 +1437,14 @@
   .chat .msg .who .at { margin-left: 6px; color: var(--faint); font-weight: 400; }
   .mention { font-weight: 600; color: var(--voice, var(--add-ink)); }
   .chat .previews { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-top: 6px; }
-  /* Each preview under the label its link reads as in the message. */
-  .chat .previews .preview { display: flex; flex-direction: column; align-items: flex-start; align-self: stretch; gap: 2px; min-width: 0; }
-  .chat .previews .preview .linklabel { color: var(--faint); font-family: var(--mono); font-size: 11px; }
+  /* Each preview carries the label its link reads as in the message: in the first line of a card, and in the corner of
+     an image, a video or a page, over a ground of its own so it reads on any picture. */
+  .chat .previews .preview { position: relative; display: flex; flex-direction: column; align-items: flex-start; align-self: stretch; min-width: 0; }
+  .chat .previews .linklabel { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  /* On a picture, a tab tucked into its top left corner, following the rounding of the corner it sits in: dark glass
+     reads on any picture, light or dark. */
+  .chat .previews .preview > .linklabel { position: absolute; top: 1px; left: 1px; padding: 2px 8px 3px 7px; border-radius: 5px 0 6px 0; background: rgb(13 17 23 / 62%); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); color: #f2f5fa; font-family: var(--sans); font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em; line-height: 14px; pointer-events: none; }
+  .chat .previews .carries { margin-top: 0; }
   .chat a.ondisk.short { font-family: inherit; font-size: inherit; }
   .chat .said .pdf, .chat .previews .pdf { width: 100%; max-width: 520px; height: 240px; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); }
   .chat .card { display: flex; gap: 10px; max-width: 520px; padding: 7px 10px; background: var(--surface-sunk); border-left: 3px solid var(--rule-strong); border-radius: 0 6px 6px 0; }
@@ -3310,19 +3315,20 @@
     for (const [index, link] of links.entries()) {
       const item = shelf.appendChild(document.createElement("div"));
       item.className = "preview";
-      const label = item.appendChild(Object.assign(document.createElement("span"), { className: "linklabel", textContent: `link#${index + 1}` }));
+      // Labelled on the preview itself: in the first line of a card, in the corner of an image, a video or a page.
+      const label = Object.assign(document.createElement("span"), { className: "linklabel", textContent: `link#${index + 1}` });
       label.dataset.tip = link;
       const src = /^https?:/.test(link) ? link : `file?path=${encodeURIComponent(link)}`;
       const kind = (KINDS.find(([, pattern]) => pattern.test(link)) || ["page"])[0];
       if (kind === "image") {
         const opened = Object.assign(document.createElement("a"), { href: src, target: "_blank", rel: "noreferrer" });
         opened.append(Object.assign(document.createElement("img"), { className: "carries", src, alt: link }));
-        item.append(opened);
+        item.append(opened, label);
       } else if (kind === "video") {
-        item.append(Object.assign(document.createElement("video"), { className: "carries", src, controls: true, preload: "metadata" }));
+        item.append(Object.assign(document.createElement("video"), { className: "carries", src, controls: true, preload: "metadata" }), label);
       } else if (kind === "pdf") {
         // Its first page across the width, without the viewer's toolbar, which a preview this small has no room for.
-        item.append(Object.assign(document.createElement("iframe"), { className: "pdf", src: `${src}#toolbar=0&view=FitH`, title: link }));
+        item.append(Object.assign(document.createElement("iframe"), { className: "pdf", src: `${src}#toolbar=0&view=FitH`, title: link }), label);
       } else {
         const card = item.appendChild(document.createElement("div"));
         card.className = "card";
@@ -3334,7 +3340,8 @@
           const told = said || { url: link, site: isWeb ? new URL(link).hostname : "on disk", title: link };
           const words = card.appendChild(document.createElement("div"));
           words.className = "words";
-          words.append(Object.assign(document.createElement("span"), { className: "site", textContent: told.site }));
+          const site = words.appendChild(Object.assign(document.createElement("span"), { className: "site" }));
+          site.append(label, ` \u00b7 ${told.site}`);
           // A file on disk opens as its link in the words does (see 'diskLink').
           const title = isWeb ? Object.assign(document.createElement("a"), { href: link, target: "_blank", rel: "noreferrer" }) : diskLink(link);
           Object.assign(title, { className: "title", textContent: told.title });
