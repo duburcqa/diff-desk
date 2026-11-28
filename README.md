@@ -116,7 +116,12 @@ A watch hears the chat too. A message wakes an agent when it opens a thread, whe
 
 Tailscale serves the running desk over HTTPS at this machine's name on your tailnet, on the desk's own port, to the devices of the tailnet alone: the desk keeps answering on `127.0.0.1`, and the tailnet reaches it through Tailscale (`tailscale serve`, never `funnel`). A page opened there is the reader's, as one opened on the machine is. `desk.py stop` takes it off the tailnet as well. It needs Tailscale installed and logged in on both ends.
 
-On a phone, a narrow touch screen, the page fits the screen: the bar scrolls away with the page and the file heads stick to the top in its place, a file's path takes a line of its own, and lines of code wrap rather than running off the side.
+On a phone, a touch screen narrow one way or the other (upright or on its side), the page is laid out for a thumb:
+
+- The diff runs from edge to edge with one column of line numbers, and a long line wraps under its own indentation. The bar scrolls away with the page and the file heads stick to the top in its place.
+- A dock along the foot of the screen holds the file list, the previous and next file, Reviewed for the file on screen, the comments and the chat. Each of those screens takes the whole screen above the dock, one at a time, and the phone's back gesture closes it.
+- A swipe across the code turns to the next file or back to the one before, naming it at the edge while the finger is down. A swipe across the file list, the comments or the chat closes it.
+- Tapping a line number picks the line, tapping another line of the same file stretches the pick to it, and the bar that shows up over the dock opens the comment box on the lines picked.
 
 ## Where things live
 

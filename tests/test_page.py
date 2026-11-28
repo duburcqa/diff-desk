@@ -68,6 +68,60 @@ def page(browser, desk):
     desk.post("/reviewed", {"drop": list(desk.get("/reviewed")["marks"])})
 
 
+@pytest.fixture
+def phone(browser, desk):
+    """The page on a phone: a screen the width of one, read by touch."""
+    context = browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True)
+    opened = context.new_page()
+    problems = []
+    opened.on("pageerror", lambda error: problems.append(str(error)))
+    opened.goto(f"{desk.url}/", wait_until="load")
+    opened.wait_for_selector("section.file")
+    opened.wait_for_function("() => document.querySelectorAll('tr[data-line]').length > 0")
+    yield opened
+    assert problems == []
+    context.close()
+    desk.post("/reviewed", {"drop": list(desk.get("/reviewed")["marks"])})
+
+
+# Which of the screens of a phone are up, as the page says it.
+SHOWN = """{
+  files: !document.body.classList.contains('hide-files'),
+  chat: document.body.classList.contains('chat-open'),
+  log: document.getElementById('log').dataset.open === 'true',
+}"""
+
+
+def swipe(page, selector, direction, release=True):
+    """Draw a finger across the first element matching, to the right for a direction of 1 and to the left for -1.
+
+    Without `release`, the finger stays down at the end of its way across.
+    """
+    page.evaluate(
+        """([selector, direction, release]) => {
+          const node = [...document.querySelectorAll(selector)].find((each) => {
+            const box = each.getBoundingClientRect();
+            return box.height && box.bottom > 100 && box.top < innerHeight / 2;
+          });
+          const box = node.getBoundingClientRect();
+          const y = Math.max(box.top, 100) + 10;
+          // Built by hand rather than as a TouchEvent, which not every engine lets a page construct: the page reads the
+          // fingers of an event and where they stand, which is all this carries.
+          const touch = (kind, touches, changed) => {
+            const event = new Event(kind, { bubbles: true });
+            Object.defineProperty(event, 'touches', { value: touches });
+            Object.defineProperty(event, 'changedTouches', { value: changed });
+            node.dispatchEvent(event);
+          };
+          const [from, to] = direction > 0 ? [100, 300] : [300, 100];
+          touch('touchstart', [{ clientX: from, clientY: y }], [{ clientX: from, clientY: y }]);
+          touch('touchmove', [{ clientX: to, clientY: y }], [{ clientX: to, clientY: y }]);
+          if (release) touch('touchend', [], [{ clientX: to, clientY: y }]);
+        }""",
+        [selector, direction, release],
+    )
+
+
 def settle(page):
     """Give the page the two frames a scroll or a resize takes to be laid out, since the next read is of that layout."""
     page.evaluate("() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))")
@@ -3493,62 +3547,165 @@ def test_the_top_bar_keeps_every_control_in_the_window(page, width):
     page.set_viewport_size({"width": 1500, "height": 900})
 
 
-def test_the_page_reads_on_a_phone(browser, desk):
-    context = browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True)
-    page = context.new_page()
-    page.goto(f"{desk.url}/", wait_until="load")
-    page.wait_for_selector("section.file")
-    try:
-        # Nothing runs off a screen nothing scrolls sideways: every line of every file wraps within it.
-        laid = page.evaluate("""() => ({
-          page: document.documentElement.scrollWidth,
-          tables: [...document.querySelectorAll('section.file')].map((card) => {
-            const table = card.querySelector('table');
-            return table ? table.getBoundingClientRect().width - card.getBoundingClientRect().width : 0;
-          }),
-        })""")
-        assert laid["page"] <= 390
-        assert max(laid["tables"]) <= 0
-        # The bar scrolls away with the page, and a file head sticks to the top of the screen in its place.
-        page.evaluate("""() => {
-          const cards = [...document.querySelectorAll('section.file')];
-          const tall = cards.reduce((one, other) => (other.offsetHeight > one.offsetHeight ? other : one));
-          window.scrollTo(0, window.scrollY + tall.getBoundingClientRect().top + tall.offsetHeight / 2);
-        }""")
-        settle(page)
-        held = page.evaluate("""() => {
-          const bar = document.querySelector('header').getBoundingClientRect();
-          const head = [...document.querySelectorAll('.filehead')].map((node) => node.getBoundingClientRect())
-            .find((box) => box.bottom > 0);
-          return { bar: bar.bottom, head: head.top };
-        }""")
-        assert held["bar"] <= 0
-        assert abs(held["head"]) <= 1
+def test_the_page_reads_on_a_phone(phone):
+    # Nothing runs off a screen nothing scrolls sideways: every line of every file wraps within it.
+    laid = phone.evaluate("""() => ({
+      page: document.documentElement.scrollWidth,
+      tables: [...document.querySelectorAll('section.file')].map((card) => {
+        const table = card.querySelector('table');
+        return table ? table.getBoundingClientRect().width - card.getBoundingClientRect().width : 0;
+      }),
+    })""")
+    assert laid["page"] <= 390
+    assert max(laid["tables"]) <= 0
+    # One column of numbers, a removed line showing its old number in it.
+    numbers = phone.evaluate("""() => [...document.querySelectorAll('tr[data-line]')].map((row) => {
+      const shown = [...row.querySelectorAll('td.ln')].filter((cell) => cell.getClientRects().length);
+      const cell = shown[0];
+      const before = getComputedStyle(cell, '::before').content.replace(/^none$/, '').replaceAll('"', '');
+      return [shown.length, row.dataset.line, before + cell.textContent];
+    })""")
+    assert {count for count, _, _ in numbers} == {1}
+    assert all(line == shown for _, line, shown in numbers)
+    # The bar scrolls away with the page, and a file head sticks to the top of the screen in its place.
+    phone.evaluate("""() => {
+      const cards = [...document.querySelectorAll('section.file')];
+      const tall = cards.reduce((one, other) => (other.offsetHeight > one.offsetHeight ? other : one));
+      window.scrollTo(0, window.scrollY + tall.getBoundingClientRect().top + 20);
+    }""")
+    settle(phone)
+    held = phone.evaluate("""() => {
+      const bar = document.querySelector('header').getBoundingClientRect();
+      const head = [...document.querySelectorAll('.filehead')].map((node) => node.getBoundingClientRect())
+        .find((box) => box.bottom > 0);
+      return { bar: bar.bottom, head: head.top };
+    }""")
+    assert held["bar"] <= 0
+    assert abs(held["head"]) <= 1
+    # Turned on its side, a phone is still one: the dock stands at its foot and nothing runs off the side.
+    phone.set_viewport_size({"width": 844, "height": 390})
+    settle(phone)
+    dock = phone.locator("#dock").bounding_box()
+    assert round(dock["y"] + dock["height"]) == 390
+    assert phone.evaluate("() => document.documentElement.scrollWidth") <= 844
 
-        # One thing at a time: the list of files opens on its own over the whole screen, and goes once a file is
-        # picked from it, which is then the one in front of the reader.
-        # The screen, less a scrollbar where the engine draws one beside the page rather than over it.
-        view = (0, 0, *page.evaluate("() => [document.documentElement.clientWidth, innerHeight]"))
 
-        def box(selector):
-            return tuple(round(value) for value in page.locator(selector).bounding_box().values())
+def test_a_phone_shows_one_screen_at_a_time_and_goes_back_from_it(phone, desk):
+    # The dock stands along the foot of the screen, and each screen it opens takes all of the screen above it.
+    dock = phone.locator("#dock").bounding_box()
+    width, height = phone.evaluate("() => [document.documentElement.clientWidth, innerHeight]")
+    assert round(dock["y"] + dock["height"]) == height
+    view = (0, 0, width, round(dock["y"]))
 
-        assert not page.locator("aside").is_visible()
-        page.locator("#showfiles").click()
-        assert box("aside") == view
-        last = page.locator("#filelist .fileitem").last
-        picked = last.get_attribute("data-index")
-        last.click()
-        page.wait_for_selector("aside", state="hidden")
-        page.wait_for_function("(at) => state.current === Number(at)", arg=picked)
-        # And so does the chat, which the list never stands over.
-        page.locator("#showfiles").click()
-        page.locator("#chatopen").scroll_into_view_if_needed()
-        page.evaluate("() => showChat(true)")
-        assert box("#chat") == view
-        assert not page.locator("aside").is_visible()
-    finally:
-        context.close()
+    def box(selector):
+        return tuple(round(value) for value in phone.locator(selector).bounding_box().values())
+
+    def shown():
+        return phone.evaluate(f"() => ({SHOWN})")
+
+    assert shown() == {"files": False, "chat": False, "log": False}
+    phone.tap("#dockfiles")
+    assert box("aside") == view
+    # The phone's own back closes the screen rather than leaving the page.
+    phone.go_back()
+    phone.wait_for_selector("aside", state="hidden")
+    assert phone.locator("section.file").count()
+    # A file picked from the list is the one then in front of the reader, the list gone with a single step back
+    # being left to take.
+    phone.tap("#dockfiles")
+    last = phone.locator("#filelist .fileitem").last
+    picked = last.get_attribute("data-index")
+    last.tap()
+    phone.wait_for_selector("aside", state="hidden")
+    phone.wait_for_function("(at) => state.current === Number(at)", arg=picked)
+    phone.wait_for_function("() => history.state === null")
+    # One screen at a time: the chat takes the place of the comments, and one step back is the diff again.
+    phone.tap("#docklog")
+    assert box("#log") == view
+    phone.tap("#dockchat")
+    assert box("#chat") == view
+    assert shown() == {"files": False, "chat": True, "log": False}
+    assert phone.get_attribute("#dockchat", "aria-pressed") == "true"
+    phone.go_back()
+    phone.wait_for_function("() => !document.body.classList.contains('chat-open')")
+    assert shown() == {"files": False, "chat": False, "log": False}
+    # A swipe across a screen closes it the way it covers the diff: the file list back to the left, the chat to the
+    # right.
+    for button, gone, swept in [("#dockfiles", "files", -1), ("#dockchat", "chat", 1)]:
+        phone.tap(button)
+        assert shown()[gone]
+        swipe(phone, "#filelist" if gone == "files" else "#chatrows", swept)
+        phone.wait_for_function(f"(gone) => !({SHOWN})[gone]", arg=gone)
+    # A line of the diff named in the chat is shown on the diff, the chat making way for it.
+    named = {"title": "Named on a phone", "text": f"see `sample.py:{FIRST_EDIT}`"}
+    thread = desk.post("/chat", named, agent=AGENT)["thread"]
+    phone.evaluate("() => loadNotes()")
+    phone.tap("#dockchat")
+    phone.tap(f".chat .topic[data-thread='{thread}']")
+    phone.tap(".chat .msg a.xref")
+    phone.wait_for_selector(f"section.file[data-path='sample.py'] tr.flash[data-line='{FIRST_EDIT}']")
+    assert shown() == {"files": False, "chat": False, "log": False}
+
+
+def test_a_phone_steps_through_the_files_from_its_dock_and_by_swiping(phone):
+    count = phone.locator("#filelist .fileitem").count()
+    assert count >= 3
+    assert phone.locator("#dockprev").is_disabled()
+    phone.tap("#docknext")
+    phone.wait_for_function("() => state.current === 1")
+    assert not phone.locator("#dockprev").is_disabled()
+    # Reviewed from the dock: the file the reader is on, and said so by the dock.
+    phone.tap("#dockdone")
+    phone.wait_for_function("() => document.getElementById('dockdone').getAttribute('aria-pressed') === 'true'")
+    path = phone.evaluate("() => inTreeOrder(view().files)[1].path")
+    assert phone.get_attribute(f'section.file[data-path="{path}"]', "data-done") == "true"
+    phone.tap("#dockprev")
+    phone.wait_for_function("() => state.current === 0")
+    assert phone.get_attribute("#dockdone", "aria-pressed") == "false"
+    # A swipe across the code to the left turns to the next file, to the right back to the one before, the file it
+    # turns to named at the edge it comes in from while the finger is down.
+    swipe(phone, "section.file td.code", -1, release=False)
+    assert phone.inner_text("#turn") == f"{path.split('/')[-1]} \u203a"
+    swipe(phone, "section.file td.code", -1)
+    phone.wait_for_function("() => state.current === 1")
+    swipe(phone, "section.file td.code", 1)
+    phone.wait_for_function("() => state.current === 0")
+
+
+def test_a_phone_picks_lines_by_tapping_their_numbers_and_comments_on_them(phone):
+    card = sample(phone)
+    lines = card.locator("tr[data-line][data-side='new']")
+    first, last = lines.nth(1), lines.nth(3)
+    numbers = [int(row.get_attribute("data-line")) for row in (first, last)]
+    name = card.get_attribute("data-path").split("/")[-1]
+    # A tap picks a line, and a tap on another line of the same file stretches the pick to it.
+    first.locator("td.ln").nth(1).tap()
+    assert phone.locator("#selbar").is_visible()
+    assert phone.inner_text("#selwhat") == f"Line {numbers[0]} of {name}"
+    last.locator("td.ln").nth(1).tap()
+    assert phone.inner_text("#selwhat") == f"Lines {numbers[0]}-{numbers[1]} of {name}"
+    # Every row between them, the removed lines among them included.
+    seqs = [int(row.get_attribute("data-seq")) for row in (first, last)]
+    assert card.locator("tr.sel").count() == seqs[1] - seqs[0] + 1
+    # The bar stands over the dock, clear of it.
+    bar = phone.locator("#selbar").bounding_box()
+    assert bar["y"] + bar["height"] <= phone.locator("#dock").bounding_box()["y"]
+    # Its button opens the box on the lines picked, and gives way to it.
+    phone.tap("#selcomment")
+    box = card.locator("tr[data-composer] textarea")
+    assert box.get_attribute("placeholder") == f"Comment on {name}, lines {numbers[0]}\u2013{numbers[1]}"
+    assert not phone.locator("#selbar").is_visible()
+    assert box.bounding_box()["width"] <= 390
+    card.locator("tr[data-composer] button", has_text="Cancel").tap()
+    # A tap on the one line picked lets it go, and so does the bar's own button.
+    first.locator("td.ln").nth(1).tap()
+    first.locator("td.ln").nth(1).tap()
+    assert card.locator("tr.sel").count() == 0
+    assert not phone.locator("#selbar").is_visible()
+    last.locator("td.ln").nth(1).tap()
+    phone.tap("#selclear")
+    assert card.locator("tr.sel").count() == 0
+    assert not phone.locator("#selbar").is_visible()
 
 
 @pytest.mark.parametrize("width", [1500, 1000, 760])
