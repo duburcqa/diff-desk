@@ -235,6 +235,8 @@ WORDS_READ = 65536
 WORDS_SHOWN = 300
 # What opens a file on this machine with the application it opens that kind with, `DIFF_DESK_OPENER` naming another.
 OPENER = shlex.split(os.environ.get("DIFF_DESK_OPENER", "open" if sys.platform == "darwin" else "xdg-open"))
+# How long the opener is given to say it found no application for a file, in seconds.
+OPEN_WAIT = 5
 # Kinds a machine runs rather than shows when it opens them: one of these named in a message is shown in its folder
 # instead, so a message cannot run anything with a click.
 RUNNABLE = {
@@ -1986,11 +1988,22 @@ class Handler(BaseHTTPRequestHandler):
         is_runnable = given.suffix.lower() in RUNNABLE or (given.is_file() and os.access(given, os.X_OK))
         shown = [*OPENER, "-R", str(given)] if sys.platform == "darwin" else [*OPENER, str(given.parent)]
         try:
-            subprocess.Popen(shown if is_runnable else [*OPENER, str(given)], start_new_session=True)
+            # A kind no application of this machine opens is shown in its folder as well, where it can be dealt with,
+            # rather than nothing happening. The opener says so by failing, which it does at once; one still running
+            # after a moment has opened it.
+            failed = False
+            if not is_runnable:
+                opening = subprocess.Popen([*OPENER, str(given)], start_new_session=True, stderr=subprocess.DEVNULL)
+                try:
+                    failed = opening.wait(timeout=OPEN_WAIT) != 0
+                except subprocess.TimeoutExpired:
+                    failed = False
+            if is_runnable or failed:
+                subprocess.Popen(shown, start_new_session=True)
         except OSError as error:
             self._json({"ok": False, "error": f"nothing opens files here: {error}"})
             return
-        self._json({"ok": True, "revealed": is_runnable})
+        self._json({"ok": True, "revealed": is_runnable or failed})
 
     def _export(self, query):
         """One thread of the chat as plain text, which is what an agent keeps of a conversation or reads back later."""
@@ -2100,6 +2113,13 @@ class Handler(BaseHTTPRequestHandler):
             if found is None or found.get("deleted"):
                 self._json({"ok": False, "error": f"no message #{order.get('id')} to pin"})
                 return
+            source = (found.get("report") or {}).get("source")
+            # A report keeps one pin in its thread, whichever message carries it: taking it off takes off every pin it
+            # was given, ones made before a thread kept one per report included, and putting it back moves it there.
+            for other in messages:
+                is_same = other["thread"] == found["thread"] and (other.get("report") or {}).get("source") == source
+                if source and is_same:
+                    other["pinned"] = False
             found["pinned"] = bool(order.get("pinned"))
             gen_diff_data.write_whole(CHAT, "".join(json.dumps(message) + "\n" for message in messages))
         told()

@@ -5855,8 +5855,8 @@ def test_the_chat_pins_messages_over_a_thread_and_opens_its_reports_in_place(pag
     report.write_text(f'<title>{named}</title><h1 id="said">Benchmark</h1>{ran}')
     opened = desk.post("/chat", {"title": "Read this first", "text": "the jitter is the warm start"}, agent=AGENT)
     thread = opened["thread"]
-    pinning = {"thread": thread, "text": "Pinned the benchmark, with every run", "report": str(report)}
-    desk.post("/chat", pinning, agent=AGENT)
+    pinning = {"thread": thread, "text": f"Pinned {report}, with every run", "report": str(report)}
+    pinned = desk.post("/chat", pinning, agent=AGENT)["id"]
     page.evaluate("() => loadNotes()")
     page.locator("#chatopen").click()
     page.locator(f".chat .topic[data-thread='{thread}']").click()
@@ -5871,6 +5871,9 @@ def test_the_chat_pins_messages_over_a_thread_and_opens_its_reports_in_place(pag
     # A report stands under the thread, and opens in place of the chat, filling it, its page in a sandbox.
     chip = page.locator("#chatreports .reportchip")
     assert chip.locator("span").inner_text() == named
+    # The message pinning it is shown by the report's card alone, the report it names shown nowhere else.
+    assert page.locator(f".chat .msg[data-id='{pinned}'] .reportcard").count() == 1
+    assert page.locator(f".chat .msg[data-id='{pinned}'] .previews").count() == 0
     # Named by its own title, cut short to leave the thread its room.
     assert page.locator("#chatreports .reportpin").bounding_box()["width"] <= 280
     # Never opened, it carries a dot, which opening it takes away.
