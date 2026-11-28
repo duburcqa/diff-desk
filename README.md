@@ -116,12 +116,14 @@ A watch hears the chat too. A message wakes an agent when it opens a thread, whe
 
 Tailscale serves the running desk over HTTPS at this machine's name on your tailnet, on the desk's own port, to the devices of the tailnet alone: the desk keeps answering on `127.0.0.1`, and the tailnet reaches it through Tailscale (`tailscale serve`, never `funnel`). A page opened there is the reader's, as one opened on the machine is. `desk.py stop` takes it off the tailnet as well. It is opt-in: the desk never runs Tailscale, not even to look, until `desk.py tailnet` is asked for. It needs Tailscale installed and logged in on both ends.
 
-On a phone, a touch screen narrow one way or the other (upright or on its side), the page is laid out for a thumb:
+On a phone, a touch screen narrow one way or the other (upright or on its side), the page is laid out for a thumb and keeps every pixel it can for the code:
 
-- The diff runs from edge to edge with one column of line numbers, and a long line wraps under its own indentation. The bar scrolls away with the page and the file heads stick to the top in its place.
-- A dock along the foot of the screen holds the file list, the previous and next file, Reviewed for the file on screen, the comments and the chat. Each of those screens takes the whole screen above the dock, one at a time, and the phone's back gesture closes it. The find box, which a keyboard opens with `f`, has a button of its own in the bar.
+- A strip of icons is held along the top of the screen: the diff, the file list, the comments and the chat, then the previous file, Reviewed for the file on screen, the next file, and `...` for everything else (go to file, find, the comment steps, folding reviewed files, refreshing, branches, settings). The share of files reviewed is drawn along its edge.
+- Each of the file list, the comments and the chat takes the screen under the strip, one at a time, and the phone's back gesture closes it.
+- Every file gone to (picked, stepped to, reached from a comment or a link) gets a tab under the strip, which stays in view over the chat and the comments: a tap is back to that file.
+- The diff runs from edge to edge with one column of line numbers, and a long line wraps under its own indentation. A file head is one row, its path and its tick, with the rest behind its `...`. A remark or a reply shows its words alone, its buttons behind its own `...`.
 - A swipe across the code turns to the next file or back to the one before, naming it at the edge while the finger is down. A swipe across the file list, the comments or the chat closes it.
-- Tapping a line number picks the line, tapping another line of the same file stretches the pick to it, and the bar that shows up over the dock opens the comment box on the lines picked.
+- Tapping a line number picks the line, tapping another line of the same file stretches the pick to it, and the bar that shows up along the foot of the screen opens the comment box on the lines picked.
 
 ## Where things live
 
